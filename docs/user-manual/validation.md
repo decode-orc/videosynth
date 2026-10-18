@@ -29,6 +29,7 @@ Unknown keys are rejected outright, at every level, naming the offending key and
 
 - One video standard, one sample encoding, one signal state per project.
 - 4fsc generation requires a 4fsc encoding and a locked signal state.
+- `chroma_encoding: SECAM` requires `video_standard_preset: PAL` and cannot be combined with `pal_laserdisc_pilot_burst`; with VITS it warns that VITS chroma stays PAL-modulated.
 - `pal_laserdisc_pilot_burst` is PAL only; `ntsc_laserdisc_vbi_burst` is NTSC only and, being unimplemented, is an error if enabled at all.
 - `ntsc_black_setup_ire` is NTSC/PAL-M only and must be exactly `7.5` or `0.0`.
 - `output.video_path` is required; with `signal_type: yc` it must end in `.cvbsy`.

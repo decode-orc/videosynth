@@ -1,0 +1,31 @@
+project:
+  name: SECAMProgressiveExrFixture
+  version: "1.0"
+  description: SECAM chroma on the 625-line PAL preset, progressive EXR fixture
+
+cvbs_presets:
+  video_standard_preset: PAL
+  sample_encoding_preset: CVBS_TPG21_4FSC
+  signal_state_preset: STANDARD_STABLE_LOCKED
+  chroma_encoding: SECAM
+
+output:
+  video_path: "{output}/videosynth_secam_progressive_exr.cvbs"
+
+sections:
+  - name: SecamExr100Bars
+    type: progressive
+    source: "{bundled}/exr/720x576/100_BARS.exr"
+    duration_frames: 4
+  - name: SecamExr75Bars
+    type: progressive
+    source: "{bundled}/exr/720x576/75_BARS.exr"
+    duration_frames: 4
+  - name: SecamExrChromaRamp
+    type: progressive
+    source: "{bundled}/exr/720x576/CHROMA_RAMP.exr"
+    duration_frames: 4
+  - name: SecamExrTestcardF
+    type: progressive
+    source: "{bundled}/exr/720x576/TESTCARD-F.exr"
+    duration_frames: 4

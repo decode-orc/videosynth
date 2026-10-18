@@ -24,6 +24,22 @@ Once any section declares a `section_type`, the sequence must be `[lead_in] prog
 
 The pilot burst is defined by IEC 60856 for PAL Laservision. For NTSC there is no equivalent option that is currently implemented.
 
+### `chroma_encoding SECAM requires video_standard_preset PAL (625-line, 50 Hz)`
+
+SECAM is a 625-line, 50 Hz system and is carried on the PAL preset's line structure and sample lattice. Set `video_standard_preset: PAL`.
+
+### `pal_laserdisc_pilot_burst cannot be combined with chroma_encoding SECAM`
+
+The pilot burst belongs to PAL Laservision. Remove one of the two keys.
+
+### `cvbs_presets.chroma_encoding must be STANDARD or SECAM`
+
+Only these two values exist; MESECAM and other variants are not supported.
+
+### `chroma_encoding SECAM warning: VITS test signals are rendered with their PAL definitions`
+
+A warning, not an error. VITS lines keep their PAL waveforms, including PAL-modulated chroma packets. Remove the VITS set if a pure SECAM signal matters.
+
 ### `ntsc_laserdisc_vbi_burst is parsed but not implemented in the current runtime`
 
 The option exists in the schema but has no signal behaviour, so enabling it is an error rather than a silent no-op. Remove it or set it to `false`.

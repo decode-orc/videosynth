@@ -110,6 +110,35 @@ inline std::vector<int> LaserdiscVitsLines(Standard standard) {
   }
 }
 
+// Colour encoding applied on top of the video standard preset.
+//
+//   kStandard — the preset's own colour system (PAL, NTSC or PAL-M quadrature
+//               modulation with colour burst).
+//   kSecam    — 625-line SECAM frequency-modulated chroma (ITU-R BT.1700
+//               Annex 1 Part C). The CVBS file format has no SECAM video
+//               standard preset; SECAM shares the 625-line, 50 Hz line
+//               structure, levels and the 4fsc PAL sample lattice, so it is
+//               carried on the PAL preset and only the chrominance differs.
+enum class ChromaEncoding { kStandard, kSecam };
+
+inline ChromaEncoding ChromaEncodingFromString(const std::string& value,
+                                               bool* ok) {
+  if (value == "STANDARD") {
+    *ok = true;
+    return ChromaEncoding::kStandard;
+  }
+  if (value == "SECAM") {
+    *ok = true;
+    return ChromaEncoding::kSecam;
+  }
+  *ok = false;
+  return ChromaEncoding::kStandard;
+}
+
+inline std::string ChromaEncodingToString(ChromaEncoding encoding) {
+  return encoding == ChromaEncoding::kSecam ? "SECAM" : "STANDARD";
+}
+
 // Placeholder for project-level biphase configuration.
 // All disc-specific biphase parameters are specified per section and
 // per injection; this struct is reserved for any future global settings.
@@ -123,6 +152,11 @@ struct CvbsPresets {
   bool ntsc_laserdisc_vbi_burst = false;
   double ntsc_black_setup_ire = 7.5;
   bool ntsc_black_setup_ire_specified = false;
+  ChromaEncoding chroma_encoding = ChromaEncoding::kStandard;
+  // SECAM only: emit the field identification signals on lines 7-15 and
+  // 320-328 (ITU-R BT.1700 Annex 1 Part C Table 4 item 13). Line
+  // identification on the back porch is always present.
+  bool secam_field_identification = true;
   BiphasePresets biphase_presets;
 };
 
@@ -547,6 +581,8 @@ inline bool operator==(const CvbsPresets& a, const CvbsPresets& b) {
          a.ntsc_laserdisc_vbi_burst == b.ntsc_laserdisc_vbi_burst &&
          a.ntsc_black_setup_ire == b.ntsc_black_setup_ire &&
          a.ntsc_black_setup_ire_specified == b.ntsc_black_setup_ire_specified &&
+         a.chroma_encoding == b.chroma_encoding &&
+         a.secam_field_identification == b.secam_field_identification &&
          a.biphase_presets == b.biphase_presets;
 }
 

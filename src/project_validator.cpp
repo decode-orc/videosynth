@@ -436,6 +436,46 @@ void ValidateDeferredLaserdiscPresetFlags(
   }
 }
 
+// ITU-R BT.1700 Annex 1 Part C: SECAM is a 625-line, 50 Hz system, so its
+// chroma can only ride on the PAL preset's line structure and sample lattice.
+void ValidateChromaEncoding(const videosynth::Project& project,
+                            videosynth::ValidationResult* result) {
+  if (result == nullptr) {
+    return;
+  }
+
+  const videosynth::CvbsPresets& presets = project.cvbs_presets;
+  if (presets.chroma_encoding != videosynth::ChromaEncoding::kSecam) {
+    if (!presets.secam_field_identification) {
+      result->warnings.push_back(
+          "secam_field_identification has no effect unless chroma_encoding is "
+          "SECAM.");
+    }
+    return;
+  }
+
+  if (presets.video_standard_preset != videosynth::Standard::kPal) {
+    result->is_valid = false;
+    result->errors.push_back(
+        "Project configuration error: chroma_encoding SECAM requires "
+        "video_standard_preset PAL (625-line, 50 Hz).");
+    return;
+  }
+
+  if (presets.pal_laserdisc_pilot_burst) {
+    result->is_valid = false;
+    result->errors.push_back(
+        "Project configuration error: pal_laserdisc_pilot_burst cannot be "
+        "combined with chroma_encoding SECAM.");
+  }
+
+  if (!project.line_injections.vits.empty()) {
+    result->warnings.push_back(
+        "chroma_encoding SECAM warning: VITS test signals are rendered with "
+        "their PAL definitions, including any PAL-modulated chroma packets.");
+  }
+}
+
 void ValidateDeferredLineInjectionSupport(
     const videosynth::Section& section, videosynth::ValidationResult* result) {
   if (result == nullptr) {
@@ -1616,6 +1656,7 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
   }
 
   ValidateDeferredLaserdiscPresetFlags(project, &result);
+  ValidateChromaEncoding(project, &result);
 
   if (project.cvbs_presets.video_standard_preset != Standard::kNtsc &&
       project.cvbs_presets.video_standard_preset != Standard::kPalM &&

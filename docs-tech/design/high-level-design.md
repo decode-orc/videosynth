@@ -106,7 +106,7 @@ To avoid ambiguity, this specification uses **PAL** and **NTSC** with the follow
 
 The following are **out of scope** for this specification unless explicitly added in a future revision:
 
-- PAL-N, PAL-60, NTSC 4.43, SECAM, and other non-625/50-PAL or non-NTSC-M variants (PAL-M — 525/59.94 with the System M line structure and 3.575611 MHz subcarrier — **is** supported).
+- PAL-N, PAL-60, NTSC 4.43, MESECAM, and other non-625/50-PAL or non-NTSC-M variants (PAL-M — 525/59.94 with the System M line structure and 3.575611 MHz subcarrier — **is** supported, and 625-line SECAM chroma is supported on the PAL preset; see [SECAM Chroma Encoding Model](#secam-chroma-encoding-model)).
 - RF transmission/channel-plan differences (for example PAL-I RF sound spacing), because this document defines **baseband CVBS generation** rather than broadcast RF modulation.
 
 Practical interpretation:
@@ -325,6 +325,16 @@ $$
 - Line-to-line NTSC burst phase alternates at 4fsc because 910 samples/line corresponds to a $\pi$ radian subcarrier phase advance per line (SMPTE 244M §4.1.1 interpretation in this model).
 - The NTSC colour sequence is modeled as a 2-frame SC-H progression using a frame phase offset of $0$ then $\pi$, repeating (SMPTE 170M field/frame color-sequence behavior).
 - In baseline mode, burst is present on horizontal lines and suppressed on equalizing/broad-sync lines; when NTSC laserdisc VBI burst mode is enabled, burst is additionally inserted on equalizing and broad-sync pulses per [IEC 60857](../analogue-video-specifications/docs/laserdisc/IEC-60857-1986-Laservision-NTSC/IEC-60857-1986-Laservision-NTSC.md) §9.1.2.
+
+### **SECAM Chroma Encoding Model**
+
+SECAM is selected with `cvbs_presets.chroma_encoding: SECAM` on a `PAL` project and follows [ITU-R BT.1700](../analogue-video-specifications/docs/video_formats/BT-1700-E/BT-1700-E.md) Annex 1 Part C Table 4 together with [ITU-R BT.470-6](../analogue-video-specifications/docs/video_formats/BT-470-6-1998/BT-470-6-1998.md) Table 2 items 2.17/2.18. The CVBS file format defines no SECAM video standard preset, so SECAM reuses the PAL preset's 625-line timing, levels, active raster and 4fsc sample lattice, and the metadata declares `PAL`; only the C channel differs. This matches the vhs-decode convention of carrying SECAM on PAL sampling.
+
+- `SecamChromaEncoder` (`src/secam_chroma_encoder.cpp`) replaces both the quadrature encoder and the colour burst. It renders each line from 0H: colour difference (item 9: $D_R' = -1.902(E_R'-E_Y')$, $D_B' = 1.505(E_B'-E_Y')$) → 33-tap 1.7 MHz low-pass (item 10c) → video precorrection $(1 + jf/f_1)/(1 + jf/3f_1)$, $f_1$ = 85 kHz, bilinear (item 10f) → FM of $f_{OR}$ = 4.40625 MHz (280 kHz per unit) or $f_{OB}$ = 4.25 MHz (230 kHz per unit), clipped to the item 10e maximum deviations → bell filter $(1+j16F)/(1+j1.26F)$, $f_0$ = 4.286 MHz, discretised by matched-z and normalised to unity at $f_0$ (item 10d) → amplitude $M_0$ = 0.115 × 700 mV → subcarrier gate open from 5.6 µs after 0H to the start of the front porch (BT.470-6 item 2.17a).
+- Outside the active window the colour difference is zero, so the back porch carries the undeviated subcarrier as the line identification reference (item 13); no burst is generated.
+- The D'R/D'B line sequence follows Figure 16 (line 7 of the first frame is D'R) and runs continuously through the odd-length frame, so it has a 2-frame period. The subcarrier phase at 0H follows the Note 1 pattern 0°, 0°, 180° by frame line, inverted every frame. Both periods divide the 4-frame colour sequence period used by the frame template cache.
+- Field-blanking lines carry no subcarrier, except the field identification lines 7–15 and 320–328 (enabled by default, `secam_field_identification`), which carry the Figure 17 trapezoids (D'R* to +1.25 over 15 µs, D'B* to −1.52 over 18 µs, starting at the end of line blanking) without low-pass or precorrection.
+- Known gaps: VITS are rendered from their PAL definitions (validator warning), OSD overlays zero the chroma under the text, and the optional SECAM luminance intermodulation correction (BT.470-6 Table 2 note 6) is not modelled.
 
 **Progressive sources** are converted during ingestion by `progressive_source`, but only when they match one of the supported source profiles defined in [Section 8.1](#81-frame-based-sections). Inputs that do not match a supported profile are invalid.
 
@@ -783,6 +793,7 @@ The current parser, validator, and runtime implement only a subset of the YAML s
 - The `line_injections` schema is split across two levels of the data model. A **project-level** `line_injections:` block (a sibling of `output:` and `sections:`) is parsed into a `ProjectLineInjections` value on `Project` holding the project-wide `disc_type` (`CAV`/`CLV`), the optional `placement` policy (`standard` default / `laserdisc` / `custom`, governing how VITS `target_lines` are constrained — see [VITS](#vits-vertical-interval-test-signals)), and the `vits` set (each entry a `vits_type` plus `target_lines`) applied to every frame of every section. Each **section-level** `line_injections:` list holds only `Section::LineInjection` entries (`type` plus, per type, `target_lines`/`codes`) — the per-section biphase `codes` (picture_number, chapter_number, lead_in/out, etc.) that legitimately differ between lead-in, programme, and lead-out. Both levels receive validator-level schema/compatibility checks for injection type, `target_lines`, and standard-dependent VITS constraints.
 - VITS line injections have a generation-stage orchestration path and are applied only on their targeted frame lines within the owning section span.
 - Built-in VITS catalog entries now carry full waveform-definition primitive/composite trees for every supported `vits_type`, so the default runtime path can render all supported PAL and NTSC VITS patterns.
+- `chroma_encoding` (`STANDARD` default, `SECAM`) and `secam_field_identification` (default `true`) are parsed, emitted, validated, and implemented; `SECAM` requires the `PAL` preset and excludes `pal_laserdisc_pilot_burst`. See [SECAM Chroma Encoding Model](#secam-chroma-encoding-model).
 - `pal_laserdisc_pilot_burst` is parsed, validated, and fully implemented: a 3.75 MHz (240 × f_H) sinusoidal burst at ±300 mV is superimposed on every sync pulse in the Y channel when enabled.
 - `ntsc_laserdisc_vbi_burst` is parsed and validated for standard compatibility, but its runtime signal behavior remains deferred. Because a silent no-op would produce a file that looks compliant and is not, enabling it is a **validation error** ("ntsc_laserdisc_vbi_burst is parsed but not implemented in the current runtime") rather than being ignored.
 
@@ -805,6 +816,8 @@ cvbs_presets:
   pal_laserdisc_pilot_burst: false  # PAL only; inject 3.75 MHz pilot burst on all sync pulses (IEC 60856 §9.1.2); default: false
   ntsc_laserdisc_vbi_burst: false   # NTSC only; insert colour burst on equalizing and broad sync pulses (IEC 60857 §9.1.2); default: false
   ntsc_black_setup_ire: 7.5     # NTSC only; allowed values: 7.5 (standard setup) or 0.0 (black = blanking); default: 7.5
+  chroma_encoding: STANDARD     # STANDARD (default) or SECAM; SECAM requires video_standard_preset PAL (ITU-R BT.1700 Annex 1 Part C)
+  secam_field_identification: true  # SECAM only; field identification signals on lines 7-15 / 320-328; default: true
   # No other key is accepted. Field order/dominance follow the standard,
   # sample data is little-endian, and the locked/unlocked distinction is
   # carried by signal_state_preset itself — there is no separate mode key.

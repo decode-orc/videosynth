@@ -24,7 +24,8 @@ The project ships two front ends built from the same pipeline:
 ## Features
 
 - **Standards-based signal generation** for PAL, PAL-M and NTSC, generated in
-  the time domain from the standards' timing and level definitions.
+  the time domain from the standards' timing and level definitions, plus
+  625-line SECAM FM chroma on the PAL preset (`chroma_encoding: SECAM`).
 - **Sample encodings**: 4fsc (`CVBS_U10_4FSC`, `CVBS_U16_4FSC`,
   `CVBS_TPG21_4FSC`, `CVBS_S16_4FSC`) and raw high-rate (`RAW_S16_28M`,
   `RAW_S16_40M`). The signed and raw presets carry sub-sync excursions such as

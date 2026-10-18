@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -277,6 +278,48 @@ TEST(ProjectValidatorTest, RejectsNtscLaserdiscVbiBurstOnPalProject) {
   EXPECT_EQ(result.errors[0],
             "Project configuration error: ntsc_laserdisc_vbi_burst can only be "
             "enabled for NTSC projects.");
+}
+
+TEST(ProjectValidatorTest, AcceptsSecamChromaEncodingOnPalProject) {
+  Project project = MakeValidProject();
+  project.cvbs_presets.chroma_encoding = ChromaEncoding::kSecam;
+
+  ProjectValidator validator;
+  const ValidationResult result = validator.Validate(project);
+
+  EXPECT_TRUE(result.is_valid);
+  EXPECT_TRUE(result.errors.empty());
+}
+
+TEST(ProjectValidatorTest, RejectsSecamChromaEncodingOnNtscProject) {
+  Project project = MakeValidProject();
+  project.cvbs_presets.video_standard_preset = Standard::kNtsc;
+  project.cvbs_presets.chroma_encoding = ChromaEncoding::kSecam;
+
+  ProjectValidator validator;
+  const ValidationResult result = validator.Validate(project);
+
+  EXPECT_FALSE(result.is_valid);
+  EXPECT_NE(std::find(result.errors.begin(), result.errors.end(),
+                      "Project configuration error: chroma_encoding SECAM "
+                      "requires video_standard_preset PAL (625-line, 50 Hz)."),
+            result.errors.end());
+}
+
+TEST(ProjectValidatorTest, RejectsSecamWithPalLaserdiscPilotBurst) {
+  Project project = MakeValidProject();
+  project.cvbs_presets.chroma_encoding = ChromaEncoding::kSecam;
+  project.cvbs_presets.pal_laserdisc_pilot_burst = true;
+
+  ProjectValidator validator;
+  const ValidationResult result = validator.Validate(project);
+
+  EXPECT_FALSE(result.is_valid);
+  EXPECT_NE(std::find(result.errors.begin(), result.errors.end(),
+                      "Project configuration error: "
+                      "pal_laserdisc_pilot_burst cannot be combined with "
+                      "chroma_encoding SECAM."),
+            result.errors.end());
 }
 
 TEST(ProjectValidatorTest, AcceptsPalLaserdiscPilotBurstOnPalProject) {

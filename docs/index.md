@@ -17,7 +17,7 @@ Both read and write the same YAML project file, and both produce byte-identical 
 
 # What it can generate
 
-- **Standards-based signals** for PAL, PAL-M and NTSC, in composite or Y/C form, at 4fsc or raw high sample rates.
+- **Standards-based signals** for PAL, PAL-M and NTSC (and SECAM chroma on the 625-line PAL preset), in composite or Y/C form, at 4fsc or raw high sample rates.
 - **Picture content** from validated progressive sources — OpenEXR stills and FFV1/Matroska video clips.
 - **Vertical interval test signals** (VITS) — the EBU, ITU, NTC-7, FCC and VIRS families.
 - **Laserdisc VBI metadata** — IEC 60856/60857 24-bit biphase codes and NTSC 40-bit FM codes: picture numbers, programme time codes, chapters, picture stops, programme status, lead-in and lead-out.

@@ -415,7 +415,8 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
     const std::set<std::string> preset_keys = {
         "video_standard_preset",    "sample_encoding_preset",
         "signal_state_preset",      "pal_laserdisc_pilot_burst",
-        "ntsc_laserdisc_vbi_burst", "ntsc_black_setup_ire"};
+        "ntsc_laserdisc_vbi_burst", "ntsc_black_setup_ire",
+        "chroma_encoding",          "secam_field_identification"};
     ValidateAllowedKeys(presets, preset_keys, "cvbs_presets", &result.errors);
     if (!result.errors.empty()) {
       return result;
@@ -441,6 +442,21 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
           presets["ntsc_black_setup_ire"].as<double>();
       result.project.cvbs_presets.ntsc_black_setup_ire_specified = true;
     }
+    if (presets["chroma_encoding"]) {
+      const std::string encoding = presets["chroma_encoding"].as<std::string>();
+      bool encoding_ok = false;
+      result.project.cvbs_presets.chroma_encoding =
+          ChromaEncodingFromString(encoding, &encoding_ok);
+      if (!encoding_ok) {
+        result.errors.push_back(
+            "cvbs_presets.chroma_encoding must be STANDARD or SECAM; got '" +
+            encoding + "'.");
+        return result;
+      }
+    }
+    result.project.cvbs_presets.secam_field_identification =
+        presets["secam_field_identification"].as<bool>(
+            result.project.cvbs_presets.secam_field_identification);
 
     const YAML::Node output = root["output"];
     const std::set<std::string> output_keys = {"video_path", "signal_type",

@@ -20,6 +20,8 @@ cvbs_presets:
 | `pal_laserdisc_pilot_burst` | bool | No | `true`, `false` | `false` |
 | `ntsc_laserdisc_vbi_burst` | bool | No | `true`, `false` | `false` |
 | `ntsc_black_setup_ire` | float | No | `7.5`, `0.0` | `7.5` |
+| `chroma_encoding` | string | No | `STANDARD`, `SECAM` | `STANDARD` |
+| `secam_field_identification` | bool | No | `true`, `false` | `true` |
 
 No other key is accepted. In particular there are no `mode`, `field_order`, `field_dominance` or `endianness` keys — field order and dominance follow the standard, and sample data is little-endian.
 
@@ -91,3 +93,18 @@ Inserts colour burst on the equalising and broad sync pulses — IEC 60857 §9.1
 Project configuration error: ntsc_black_setup_ire can only be specified for
 NTSC or PAL-M projects.
 ```
+
+## `chroma_encoding`
+
+| Value | Effect |
+|-------|--------|
+| `STANDARD` | The preset's own colour system: PAL, NTSC or PAL-M quadrature modulation with colour burst |
+| `SECAM` | 625-line SECAM frequency-modulated chroma — ITU-R BT.1700 Annex 1 Part C |
+
+**`SECAM` requires `video_standard_preset: PAL`.** The CVBS file format has no SECAM video standard preset; SECAM shares the 625-line, 50 Hz line structure, signal levels and the 4fsc PAL sample lattice, so the file is written as a `PAL` preset and only the chrominance differs. Combining it with another preset, or with `pal_laserdisc_pilot_burst`, is a validation error.
+
+With `SECAM` the PAL colour burst is replaced by the undeviated SECAM subcarrier on the back porch (line identification), and the picture chroma is the line-sequential D'R/D'B FM signal described in the [video signal](../user-manual/video-signal.md#secam-chroma) page.
+
+## `secam_field_identification`
+
+Emits the SECAM field identification signals ("bottles") on lines 7–15 and 320–328 — ITU-R BT.1700 Annex 1 Part C Table 4 item 13. Only meaningful with `chroma_encoding: SECAM`; set it to `false` to generate line identification only. Setting it to `false` without SECAM is accepted but produces a warning.

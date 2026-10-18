@@ -81,36 +81,6 @@ int ClampCode(int code, int lo, int hi) {
   return std::max(lo, std::min(code, hi));
 }
 
-std::vector<double> DesignLowPassKernel(double cutoff_hz, double sample_rate_hz,
-                                        int taps) {
-  if (sample_rate_hz <= 0.0 || cutoff_hz <= 0.0 ||
-      cutoff_hz >= (sample_rate_hz / 2.0) || taps < 3 || (taps % 2) == 0) {
-    throw std::invalid_argument("Invalid low-pass filter design parameters");
-  }
-
-  const double normalized_cutoff = cutoff_hz / sample_rate_hz;
-  const int half_width = taps / 2;
-  std::vector<double> kernel(static_cast<std::size_t>(taps), 0.0);
-  double gain_sum = 0.0;
-  for (int tap = 0; tap < taps; ++tap) {
-    const int offset = tap - half_width;
-    const double sinc =
-        (offset == 0)
-            ? (2.0 * normalized_cutoff)
-            : std::sin(2.0 * kPi * normalized_cutoff * offset) / (kPi * offset);
-    const double window =
-        0.54 - (0.46 * std::cos((2.0 * kPi * static_cast<double>(tap)) /
-                                static_cast<double>(taps - 1)));
-    kernel[static_cast<std::size_t>(tap)] = sinc * window;
-    gain_sum += kernel[static_cast<std::size_t>(tap)];
-  }
-
-  for (double& tap : kernel) {
-    tap /= gain_sum;
-  }
-  return kernel;
-}
-
 std::vector<std::int32_t> QuantizeKernelToFixed(
     const std::vector<double>& kernel) {
   std::vector<std::int32_t> fixed(kernel.size(), 0);
@@ -266,6 +236,36 @@ void ModulateQuadratureFromPhaseStart(const std::vector<std::int32_t>& axis_sin,
 
 }  // namespace
 
+std::vector<double> DesignChromaLowPassKernel(double cutoff_hz,
+                                              double sample_rate_hz, int taps) {
+  if (sample_rate_hz <= 0.0 || cutoff_hz <= 0.0 ||
+      cutoff_hz >= (sample_rate_hz / 2.0) || taps < 3 || (taps % 2) == 0) {
+    throw std::invalid_argument("Invalid low-pass filter design parameters");
+  }
+
+  const double normalized_cutoff = cutoff_hz / sample_rate_hz;
+  const int half_width = taps / 2;
+  std::vector<double> kernel(static_cast<std::size_t>(taps), 0.0);
+  double gain_sum = 0.0;
+  for (int tap = 0; tap < taps; ++tap) {
+    const int offset = tap - half_width;
+    const double sinc =
+        (offset == 0)
+            ? (2.0 * normalized_cutoff)
+            : std::sin(2.0 * kPi * normalized_cutoff * offset) / (kPi * offset);
+    const double window =
+        0.54 - (0.46 * std::cos((2.0 * kPi * static_cast<double>(tap)) /
+                                static_cast<double>(taps - 1)));
+    kernel[static_cast<std::size_t>(tap)] = sinc * window;
+    gain_sum += kernel[static_cast<std::size_t>(tap)];
+  }
+
+  for (double& tap : kernel) {
+    tap /= gain_sum;
+  }
+  return kernel;
+}
+
 QuadratureChromaEncoder::QuadratureChromaEncoder(double sample_rate_hz,
                                                  double cutoff_hz, int taps,
                                                  double sin_scale_mv,
@@ -273,7 +273,7 @@ QuadratureChromaEncoder::QuadratureChromaEncoder(double sample_rate_hz,
     // Both colour-difference axes are filtered by an identically designed
     // low-pass kernel, so it is designed and quantised once and shared.
     : filter_taps_fixed_(QuantizeKernelToFixed(
-          DesignLowPassKernel(cutoff_hz, sample_rate_hz, taps))),
+          DesignChromaLowPassKernel(cutoff_hz, sample_rate_hz, taps))),
       sin_scale_mv_(sin_scale_mv),
       cos_scale_mv_(cos_scale_mv) {}
 

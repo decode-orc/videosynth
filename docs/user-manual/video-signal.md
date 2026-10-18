@@ -12,7 +12,7 @@ This page covers the signal format decisions — everything under [`cvbs_presets
 
 `PAL` means the 625/50 PAL family (PAL-B/G/H/I in baseband terms) and `NTSC` means NTSC-M as defined by SMPTE 170M. `PAL_M` is the Brazilian System M line structure with PAL colour encoding — a 525-line raster and 60 Hz field rate, but PAL's alternating-phase chroma.
 
-PAL-N, PAL-60, NTSC 4.43 and SECAM are out of scope. Only baseband composite is generated; RF-layer differences between broadcast variants (PAL-I sound spacing, for example) are not modelled.
+SECAM is available as a [chroma encoding](#secam-chroma) on top of the `PAL` preset. PAL-N, PAL-60, NTSC 4.43 and MESECAM are out of scope. Only baseband composite is generated; RF-layer differences between broadcast variants (PAL-I sound spacing, for example) are not modelled.
 
 The output resolution is fixed by the standard and cannot be set in the project. Sources must already match it — videosynth does not scale.
 
@@ -86,6 +86,33 @@ cvbs_presets:
 Superimposes a 3.75 MHz (240 × f_H) sinusoidal burst at ±300 mV on **every** sync pulse in the luma channel, per IEC 60856 §9.1.2. Laserdisc players use it as a tracking reference.
 
 PAL only — enabling it on an NTSC project is a validation error. Pair it with a signed or raw sample encoding so the −600 mV trough survives quantisation.
+
+### SECAM chroma
+
+```yaml
+cvbs_presets:
+  video_standard_preset: PAL
+  chroma_encoding: SECAM
+```
+
+Replaces the PAL colour encoding with 625-line SECAM chroma per ITU-R BT.1700 Annex 1 Part C. Line timing, levels, the active raster and the 4fsc sample lattice stay those of the `PAL` preset — the CVBS file format has no SECAM preset, so the metadata declares `PAL` — and only the chrominance changes:
+
+| Stage | Behaviour | Reference |
+|-------|-----------|-----------|
+| Colour difference | D'R = −1.902 (R'−Y'), D'B = 1.505 (B'−Y'), sent alternately line by line | BT.1700 Part C Table 4 item 9 |
+| Low-pass | ≤ 3 dB at 1.3 MHz, ≥ 30 dB at 3.5 MHz | item 10c |
+| Video precorrection | (1 + j f/85 kHz) / (1 + j f/255 kHz) | item 10f |
+| Frequency modulation | f_OR = 4.40625 MHz ± 280 kHz·D'R*, f_OB = 4.25 MHz ± 230 kHz·D'B*, limited to +350/−506 kHz (D'R) and +506/−350 kHz (D'B) | items 5, 10e |
+| Bell filter | (1 + j16F) / (1 + j1.26F), F = f/f0 − f0/f, f0 = 4.286 MHz; 2·M0 = 23 % of 700 mV | item 10d |
+| Subcarrier phase | 0°, 0°, 180° line pattern, inverted every frame | Table 4 Note 1 |
+| Subcarrier blanking | From the start of the front porch to 5.6 µs after 0H, and in field blanking | BT.470-6 Table 2 item 2.17 |
+| Line identification | Undeviated subcarrier on the back porch instead of a colour burst | item 13 |
+| Field identification | Trapezoids on lines 7–15 and 320–328 reaching +350 kHz (D'R) and −350 kHz (D'B); disable with `secam_field_identification: false` | item 13, Figures 16 and 17 |
+
+The D'R/D'B line sequence follows BT.1700 Figure 16 — line 7 of the first frame is a D'R line — and, because a frame has an odd number of lines, every line swaps component from one frame to the next.
+
+!!! note "Limitations"
+    VITS test signals are still rendered from their PAL definitions, so any chroma packet in them is PAL-modulated; a SECAM project with VITS produces a validation warning. OSD overlays blank the chroma under the text, which removes the subcarrier there instead of leaving it undeviated. The luminance intermodulation correction that BT.470 allows for SECAM is not applied.
 
 ### NTSC laserdisc VBI burst
 

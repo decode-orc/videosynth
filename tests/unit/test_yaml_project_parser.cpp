@@ -194,6 +194,56 @@ TEST(YamlProjectParserTest, RejectsInvalidDurationFramesScalar) {
   EXPECT_FALSE(result.errors.empty());
 }
 
+std::string SecamPresetYaml(const std::string& extra_presets) {
+  return "project:\n"
+         "  name: SecamParse\n"
+         "  version: \"1.0\"\n"
+         "cvbs_presets:\n"
+         "  video_standard_preset: PAL\n"
+         "  sample_encoding_preset: CVBS_U10_4FSC\n"
+         "  signal_state_preset: STANDARD_STABLE_LOCKED\n" +
+         extra_presets +
+         "output:\n"
+         "  video_path: out.cvbs\n"
+         "sections:\n"
+         "  - name: Still\n"
+         "    type: progressive\n"
+         "    source: fixture.exr\n"
+         "    duration_frames: 2\n";
+}
+
+TEST(YamlProjectParserTest, ParsesSecamChromaEncoding) {
+  YamlProjectParser parser;
+  const ParseResult result = parser.ParseString(
+      SecamPresetYaml("  chroma_encoding: SECAM\n"
+                      "  secam_field_identification: false\n"));
+
+  ASSERT_TRUE(result.ok);
+  EXPECT_EQ(result.project.cvbs_presets.chroma_encoding,
+            ChromaEncoding::kSecam);
+  EXPECT_FALSE(result.project.cvbs_presets.secam_field_identification);
+}
+
+TEST(YamlProjectParserTest, ChromaEncodingDefaultsToStandard) {
+  YamlProjectParser parser;
+  const ParseResult result = parser.ParseString(SecamPresetYaml(""));
+
+  ASSERT_TRUE(result.ok);
+  EXPECT_EQ(result.project.cvbs_presets.chroma_encoding,
+            ChromaEncoding::kStandard);
+  EXPECT_TRUE(result.project.cvbs_presets.secam_field_identification);
+}
+
+TEST(YamlProjectParserTest, RejectsUnknownChromaEncoding) {
+  YamlProjectParser parser;
+  const ParseResult result =
+      parser.ParseString(SecamPresetYaml("  chroma_encoding: MESECAM\n"));
+
+  EXPECT_FALSE(result.ok);
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("chroma_encoding"), std::string::npos);
+}
+
 TEST(YamlProjectParserTest, ParsesLineInjectionsAndLaserdiscPresetFlags) {
   const std::string yaml =
       "project:\n"

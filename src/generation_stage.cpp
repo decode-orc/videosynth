@@ -33,6 +33,7 @@
 #include "videosynth/osd_renderer.h"
 #include "videosynth/osd_token_resolver.h"
 #include "videosynth/progressive_frame_source.h"
+#include "videosynth/secam_chroma_encoder.h"
 #include "videosynth/signal_shaping.h"
 #include "videosynth/signal_timing_model.h"
 #include "videosynth/timing_constants.h"
@@ -959,6 +960,10 @@ struct GenerationStage::SynthesisResources {
   std::vector<generation_detail::PilotBurstLine> pilot_burst_lines;
 
   std::unique_ptr<IChromaEncoder> chroma_encoder;
+  // Set only when the project selects SECAM chroma encoding; replaces the
+  // quadrature encoder and the colour burst for every line.
+  std::unique_ptr<SecamChromaEncoder> secam_encoder;
+  bool secam_field_identification = false;
   RenderedVitsLineMap vits_lines;
   std::unique_ptr<VbiWaveformRenderer> vbi_renderer;
 
@@ -968,6 +973,7 @@ struct GenerationStage::SynthesisResources {
   std::vector<YCbCr444Pixel> line_source_samples;
   std::vector<int> active_sample_indices;
   std::vector<SampleFixed> encoded_line_chroma;
+  std::vector<SampleFixed> secam_line_chroma;
 };
 
 // Per-worker cache of the frame-invariant synthesis resources.
@@ -1154,6 +1160,24 @@ bool GenerationStage::SynthesisResourceCache::Build(
   out->encoded_line_chroma.assign(
       static_cast<std::size_t>(out->active_window_samples),
       MillivoltsToSampleFixed(0.0));
+
+  // ITU-R BT.1700 Annex 1 Part C: SECAM chroma on the 625-line PAL lattice.
+  out->secam_encoder.reset();
+  out->secam_field_identification = false;
+  out->secam_line_chroma.clear();
+  if (project.cvbs_presets.chroma_encoding == ChromaEncoding::kSecam) {
+    if (standard != Standard::kPal) {
+      errors->push_back(
+          "SECAM chroma encoding requires the PAL video standard preset.");
+      return false;
+    }
+    out->secam_encoder =
+        std::make_unique<SecamChromaEncoder>(out->timing.sample_rate_4fsc_hz);
+    out->secam_field_identification =
+        project.cvbs_presets.secam_field_identification;
+    out->secam_line_chroma.reserve(
+        static_cast<std::size_t>(out->synth.max_line_samples));
+  }
 
   out->presets = project.cvbs_presets;
   out->vits = project.line_injections.vits;
@@ -1525,6 +1549,12 @@ void GenerationStage::SynthesiseTemplate(SynthesisResources& resources,
   const Standard video_standard = synth.standard;
   const double burst_amplitude_mv = resources.burst_amplitude_mv;
   const IChromaEncoder* chroma_encoder = resources.chroma_encoder.get();
+  const SecamChromaEncoder* secam_encoder = resources.secam_encoder.get();
+  std::vector<SampleFixed>& secam_line_chroma = resources.secam_line_chroma;
+  // ITU-R BT.1700 Annex 1 Part C Figure 16 / Table 4 Note 1: the SECAM D'R/D'B
+  // line sequence and the subcarrier phase inversion both repeat every two
+  // frames, which divides the 4-frame colour sequence period.
+  const int secam_frame_parity = static_cast<int>(sequence_phase % 2U);
   const int active_window_start = resources.active_window_start;
   const int active_window_samples = resources.active_window_samples;
   const bool pal_pilot_burst = resources.pal_pilot_burst;
@@ -1645,6 +1675,12 @@ void GenerationStage::SynthesiseTemplate(SynthesisResources& resources,
       burst_enabled = PalMBurstEnabledForLine(sequence_phase, line);
       burst_phase_rad = PalBurstPhaseRadForLine(sequence_phase, line);
     }
+    if (secam_encoder != nullptr) {
+      // ITU-R BT.1700 Annex 1 Part C Table 4 item 13: SECAM has no colour
+      // burst; the undeviated subcarrier on the back porch identifies the
+      // line instead and is produced by the SECAM encoder below.
+      burst_enabled = false;
+    }
 
     if (burst_enabled) {
       const int burst_sample_start =
@@ -1701,7 +1737,8 @@ void GenerationStage::SynthesiseTemplate(SynthesisResources& resources,
                                                 line.line_number_1based);
       if (active_y >= 0) {
         const bool invert_pal_v_axis =
-            (is_pal || is_pal_m) && PalInvertVAxisForLine(sequence_phase, line);
+            secam_encoder == nullptr && (is_pal || is_pal_m) &&
+            PalInvertVAxisForLine(sequence_phase, line);
         const std::size_t active_window_line_start_absolute =
             absolute_line_base + static_cast<std::size_t>(active_window_start);
         // SMPTE 170M-2004 Section 10: defines active chroma with burst+180
@@ -1782,13 +1819,46 @@ void GenerationStage::SynthesiseTemplate(SynthesisResources& resources,
         std::fill(active_sample_indices.begin() + painted_sample_count,
                   active_sample_indices.end(), line_base);
 
-        chroma_encoder->EncodeLineFromPhaseStart(
-            line_source_samples, phase_start, &encoded_line_chroma);
-        for (int x_sample = 0; x_sample < active_window_samples; ++x_sample) {
-          c_out[static_cast<std::size_t>(
-              active_sample_indices[static_cast<std::size_t>(x_sample)])] +=
-              encoded_line_chroma[static_cast<std::size_t>(x_sample)];
+        if (secam_encoder != nullptr) {
+          // The SECAM encoder emits the whole line from 0H: subcarrier
+          // blanking, the undeviated back-porch reference and the
+          // frequency-modulated picture chroma. Neutral placeholder pixels in
+          // the unpainted tail encode as the undeviated subcarrier.
+          secam_encoder->EncodeLine(
+              SecamComponentForLine(line.line_number_1based,
+                                    secam_frame_parity),
+              SecamInitialPhaseRadForLine(line.line_number_1based,
+                                          secam_frame_parity),
+              line_source_samples, active_window_start, line_samples,
+              &secam_line_chroma);
+          for (int i = 0; i < line_samples; ++i) {
+            c_out[static_cast<std::size_t>(line_base + i)] +=
+                secam_line_chroma[static_cast<std::size_t>(i)];
+          }
+        } else {
+          chroma_encoder->EncodeLineFromPhaseStart(
+              line_source_samples, phase_start, &encoded_line_chroma);
+          for (int x_sample = 0; x_sample < active_window_samples; ++x_sample) {
+            c_out[static_cast<std::size_t>(
+                active_sample_indices[static_cast<std::size_t>(x_sample)])] +=
+                encoded_line_chroma[static_cast<std::size_t>(x_sample)];
+          }
         }
+      }
+    }
+
+    if (secam_encoder != nullptr && resources.secam_field_identification &&
+        IsSecamFieldIdentificationLine(line.line_number_1based)) {
+      // ITU-R BT.1700 Annex 1 Part C Table 4 item 13 / Figure 16: field
+      // identification trapezoids on lines 7-15 and 320-328.
+      secam_encoder->EncodeIdentificationLine(
+          SecamComponentForLine(line.line_number_1based, secam_frame_parity),
+          SecamInitialPhaseRadForLine(line.line_number_1based,
+                                      secam_frame_parity),
+          line_samples, &secam_line_chroma);
+      for (int i = 0; i < line_samples; ++i) {
+        c_out[static_cast<std::size_t>(line_base + i)] +=
+            secam_line_chroma[static_cast<std::size_t>(i)];
       }
     }
 
