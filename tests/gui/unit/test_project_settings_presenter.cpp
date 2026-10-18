@@ -56,6 +56,49 @@ TEST(ProjectSettingsPresenterTest, EnablementFollowsStandardPalM) {
   EXPECT_TRUE(state.setup_ire_editable);
 }
 
+TEST(ProjectSettingsPresenterTest, SecamOfferedForPalOnly) {
+  EXPECT_TRUE(BuildProjectSettingsFormState(MakeProject(Standard::kPal))
+                  .secam_editable);
+  EXPECT_FALSE(BuildProjectSettingsFormState(MakeProject(Standard::kNtsc))
+                   .secam_editable);
+  EXPECT_FALSE(BuildProjectSettingsFormState(MakeProject(Standard::kPalM))
+                   .secam_editable);
+}
+
+TEST(ProjectSettingsPresenterTest, SecamAndPilotBurstAreMutuallyExclusive) {
+  Project project = MakeProject(Standard::kPal);
+  project.cvbs_presets.chroma_encoding = ChromaEncoding::kSecam;
+  ProjectSettingsFormState state = BuildProjectSettingsFormState(project);
+  EXPECT_FALSE(state.pilot_burst_editable);
+  EXPECT_TRUE(state.secam_editable);
+  EXPECT_TRUE(state.secam_field_identification_editable);
+
+  project.cvbs_presets.chroma_encoding = ChromaEncoding::kStandard;
+  project.cvbs_presets.pal_laserdisc_pilot_burst = true;
+  state = BuildProjectSettingsFormState(project);
+  EXPECT_TRUE(state.pilot_burst_editable);
+  EXPECT_FALSE(state.secam_editable);
+  EXPECT_FALSE(state.secam_field_identification_editable);
+}
+
+TEST(ProjectSettingsPresenterTest, NormalizeClearsSecamOutsidePal) {
+  CvbsPresets presets;
+  presets.video_standard_preset = Standard::kNtsc;
+  presets.chroma_encoding = ChromaEncoding::kSecam;
+  presets.secam_field_identification = false;
+
+  const CvbsPresets ntsc = NormalizeCvbsPresetsForStandard(presets);
+  EXPECT_EQ(ntsc.chroma_encoding, ChromaEncoding::kStandard);
+  EXPECT_TRUE(ntsc.secam_field_identification);
+
+  presets.video_standard_preset = Standard::kPal;
+  presets.pal_laserdisc_pilot_burst = true;
+  const CvbsPresets pal = NormalizeCvbsPresetsForStandard(presets);
+  EXPECT_EQ(pal.chroma_encoding, ChromaEncoding::kSecam);
+  EXPECT_FALSE(pal.secam_field_identification);
+  EXPECT_FALSE(pal.pal_laserdisc_pilot_burst);
+}
+
 TEST(ProjectSettingsPresenterTest, YSuffixFlagFollowsSignalType) {
   Project project = MakeProject(Standard::kPal);
   EXPECT_FALSE(
@@ -107,6 +150,7 @@ TEST(ProjectSettingsPresenterTest, NormalizedPresetsPassValidatorFlagRules) {
     presets.pal_laserdisc_pilot_burst = true;
     presets.ntsc_black_setup_ire_specified = true;
     presets.ntsc_black_setup_ire = 7.5;
+    presets.chroma_encoding = ChromaEncoding::kSecam;
     project.cvbs_presets = NormalizeCvbsPresetsForStandard(presets);
 
     ProjectValidator validator;
@@ -115,6 +159,7 @@ TEST(ProjectSettingsPresenterTest, NormalizedPresetsPassValidatorFlagRules) {
       EXPECT_EQ(error.find("pal_laserdisc_pilot_burst"), std::string::npos)
           << error;
       EXPECT_EQ(error.find("ntsc_black_setup_ire"), std::string::npos) << error;
+      EXPECT_EQ(error.find("chroma_encoding"), std::string::npos) << error;
     }
   }
 }

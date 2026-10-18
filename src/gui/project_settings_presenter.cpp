@@ -89,7 +89,13 @@ ProjectSettingsFormState BuildProjectSettingsFormState(const Project& project) {
   state.ntsc_black_setup_ire_options = {7.5, 0.0};
 
   const Standard standard = project.cvbs_presets.video_standard_preset;
-  state.pilot_burst_editable = standard == Standard::kPal;
+  const bool secam =
+      project.cvbs_presets.chroma_encoding == ChromaEncoding::kSecam;
+  state.pilot_burst_editable = standard == Standard::kPal && !secam;
+  state.secam_editable = standard == Standard::kPal &&
+                         !project.cvbs_presets.pal_laserdisc_pilot_burst;
+  state.secam_field_identification_editable =
+      standard == Standard::kPal && secam;
   state.vbi_burst_editable = standard == Standard::kNtsc;
   state.setup_ire_editable =
       standard == Standard::kNtsc || standard == Standard::kPalM;
@@ -110,6 +116,12 @@ ProjectSettingsFormState BuildProjectSettingsFormState(const Project& project) {
 CvbsPresets NormalizeCvbsPresetsForStandard(CvbsPresets presets) {
   if (presets.video_standard_preset != Standard::kPal) {
     presets.pal_laserdisc_pilot_burst = false;
+    presets.chroma_encoding = ChromaEncoding::kStandard;
+  }
+  if (presets.chroma_encoding == ChromaEncoding::kSecam) {
+    presets.pal_laserdisc_pilot_burst = false;
+  } else {
+    presets.secam_field_identification = true;
   }
   if (presets.video_standard_preset != Standard::kNtsc) {
     presets.ntsc_laserdisc_vbi_burst = false;

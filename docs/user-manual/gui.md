@@ -66,7 +66,7 @@ Every dock can be hidden, floated or rearranged; **View → Panels** toggles the
 **New Project…** opens the full project settings editor in a dialog, so all project-wide settings are decided before the project exists:
 
 - **Project** — name, version, description.
-- **CVBS Presets** — video standard, sample encoding, signal state, and the standard-specific options (PAL pilot burst, NTSC VBI burst, NTSC black setup override). Options that do not apply to the selected standard are disabled rather than hidden.
+- **CVBS Presets** — video standard, sample encoding, signal state, and the standard-specific options (PAL pilot burst, NTSC VBI burst, NTSC black setup override, and for PAL projects the [SECAM chroma encoding](video-signal.md#secam-chroma) with its field identification option). SECAM and the PAL pilot burst exclude each other, so ticking one disables the other. Options that do not apply to the selected standard are disabled rather than hidden.
 - **Output** — video path and signal type, plus the optional EFM digital audio channel-pair selection.
 - **Laserdisc & VITS** — disc format (CAV/CLV), VITS placement policy and the VITS set.
 

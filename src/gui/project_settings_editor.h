@@ -85,6 +85,8 @@ class ProjectSettingsEditor : public QWidget {
   QCheckBox* pilot_burst_check_ = nullptr;
   QCheckBox* vbi_burst_check_ = nullptr;
   QCheckBox* setup_ire_check_ = nullptr;
+  QCheckBox* secam_check_ = nullptr;
+  QCheckBox* secam_field_id_check_ = nullptr;
   QComboBox* setup_ire_combo_ = nullptr;
 
   // One VITS checklist row: the type, its tick box, and the target-line editor.
