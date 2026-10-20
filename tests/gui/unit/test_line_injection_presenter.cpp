@@ -169,6 +169,35 @@ TEST(LineInjectionPresenterTest, ReconcileKeepsStillValidVitsTypes) {
   EXPECT_EQ(palm.vits[0].vits_type, "virs");
 }
 
+TEST(LineInjectionPresenterTest, ReconcileClearsLaserdiscFormatForSecam) {
+  // There is no SECAM LaserVision format: the disc format is dropped and
+  // laserdisc placement falls back to standard placement.
+  ProjectLineInjections pal;
+  pal.disc_type = "CAV";
+  pal.placement = VitsPlacement::kLaserdisc;
+  pal.vits = LaserdiscVitsSet(Standard::kPal);
+
+  const ProjectLineInjections secam =
+      ReconcileVitsForStandard(pal, Standard::kSecam);
+
+  EXPECT_TRUE(secam.disc_type.empty());
+  EXPECT_EQ(secam.placement, VitsPlacement::kStandard);
+  EXPECT_TRUE(secam.vits.empty());
+}
+
+TEST(LineInjectionPresenterTest, ReconcileKeepsPalVitsTypesForSecam) {
+  // SECAM uses the 625-line PAL VITS catalogue.
+  ProjectLineInjections pal;
+  pal.vits.push_back(VitsInjection{"vits17", {17}});
+
+  const ProjectLineInjections secam =
+      ReconcileVitsForStandard(pal, Standard::kSecam);
+
+  ASSERT_EQ(secam.vits.size(), 1U);
+  EXPECT_EQ(secam.vits[0].vits_type, "vits17");
+  EXPECT_EQ(RecommendedVitsLine(Standard::kSecam, "vits17"), 17);
+}
+
 TEST(LineInjectionPresenterTest, RecommendedLinesComeFromCatalogue) {
   EXPECT_EQ(RecommendedVitsLine(Standard::kPal, "vits17"), 17);
   EXPECT_EQ(RecommendedVitsLine(Standard::kPal, "itu-multiburst"), 18);

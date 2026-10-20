@@ -9,10 +9,11 @@ This page covers the signal format decisions — everything under [`cvbs_presets
 | `PAL` | 625 | 25 fps | 4.43361875 MHz | 720×576 |
 | `NTSC` | 525 | 30000/1001 fps (≈29.97) | 3.579545 MHz | 720×486 |
 | `PAL_M` | 525 | 30000/1001 fps | 3.575611 MHz | 720×486 |
+| `SECAM` | 625 | 25 fps | 4.40625 / 4.25 MHz, frequency modulated | 720×576 |
 
 `PAL` means the 625/50 PAL family (PAL-B/G/H/I in baseband terms) and `NTSC` means NTSC-M as defined by SMPTE 170M. `PAL_M` is the Brazilian System M line structure with PAL colour encoding — a 525-line raster and 60 Hz field rate, but PAL's alternating-phase chroma.
 
-PAL-N, PAL-60, NTSC 4.43 and SECAM are out of scope. Only baseband composite is generated; RF-layer differences between broadcast variants (PAL-I sound spacing, for example) are not modelled.
+`SECAM` is 625-line SECAM per ITU-R BT.1700 Annex 1 Part C: the same line timing, levels and raster as `PAL`, with [frequency-modulated chroma](#secam-chroma). MESECAM is a videotape recording method rather than a baseband standard; its decoded output is SECAM. PAL-N, PAL-60 and NTSC 4.43 are out of scope. Only baseband composite is generated; RF-layer differences between broadcast variants (PAL-I sound spacing, for example) are not modelled.
 
 The output resolution is fixed by the standard and cannot be set in the project. Sources must already match it — videosynth does not scale.
 
@@ -32,7 +33,7 @@ The output resolution is fixed by the standard and cannot be set in the project.
 | `RAW_S16_28M` | 28 MHz | Signed 16-bit millivolts | Resampled from the 4fsc lattice |
 | `RAW_S16_40M` | 40 MHz | Signed 16-bit millivolts | Resampled from the 4fsc lattice |
 
-**4fsc** means the sample clock is phase-locked to the colour subcarrier at four times its frequency: 17,734,475 Hz for PAL and 14,318,180 Hz for NTSC. NTSC is orthogonal at 4fsc — 910 samples × 525 lines = 477,750 samples per frame. PAL is not, and uses 709,379 samples per frame via a distributed one-sample slip (1135 nominal samples per line, with four lines per frame at 1134).
+**4fsc** means the sample clock is phase-locked to the colour subcarrier at four times its frequency: 17,734,475 Hz for PAL and 14,318,180 Hz for NTSC. SECAM has no single subcarrier and is stored on the PAL 4fsc lattice, as the CVBS file format specifies. NTSC is orthogonal at 4fsc — 910 samples × 525 lines = 477,750 samples per frame. PAL is not, and uses 709,379 samples per frame via a distributed one-sample slip (1135 nominal samples per line, with four lines per frame at 1134).
 
 Generation always happens on the 4fsc lattice. The raw presets are produced by resampling that lattice to the requested rate in the output stage.
 
@@ -54,7 +55,7 @@ Quantisation follows the digital interface standards for each system:
 
 | Standard | mV per code | Blanking code | Legal code range |
 |----------|-------------|---------------|------------------|
-| PAL | 1.1905 | 256 | 4–1019 |
+| PAL / SECAM | 1.1905 | 256 | 4–1019 |
 | NTSC / PAL-M | 1.2755 | 240 | 16–1019 |
 
 Sub-black and over-white excursions inside the legal range are preserved rather than clipped to nominal black and white — a test signal that deliberately runs outside 0–100 IRE stays intact.
@@ -86,6 +87,37 @@ cvbs_presets:
 Superimposes a 3.75 MHz (240 × f_H) sinusoidal burst at ±300 mV on **every** sync pulse in the luma channel, per IEC 60856 §9.1.2. Laserdisc players use it as a tracking reference.
 
 PAL only — enabling it on an NTSC project is a validation error. Pair it with a signed or raw sample encoding so the −600 mV trough survives quantisation.
+
+### SECAM chroma
+
+```yaml
+cvbs_presets:
+  video_standard_preset: SECAM
+  signal_state_preset: STANDARD_STABLE_UNLOCKED
+```
+
+The `SECAM` preset generates 625-line SECAM chroma per ITU-R BT.1700 Annex 1 Part C. Line timing, levels, the active raster and the 4fsc sample lattice are those of `PAL`, and only the chrominance differs. The metadata file declares the `SECAM` preset. Because FM chroma has no fixed subcarrier phase, the file is declared `STANDARD_STABLE_UNLOCKED` rather than phase locked (see [`signal_state_preset`](../reference/cvbs-presets.md#signal_state_preset)).
+
+| Stage | Behaviour | Reference |
+|-------|-----------|-----------|
+| Colour difference | D'R = −1.902 (R'−Y'), D'B = 1.505 (B'−Y'), sent alternately line by line | BT.1700 Part C Table 4 item 9 |
+| Low-pass | ≤ 3 dB at 1.3 MHz, ≥ 30 dB at 3.5 MHz | item 10c |
+| Video precorrection | (1 + j f/85 kHz) / (1 + j f/255 kHz) | item 10f |
+| Frequency modulation | f_OR = 4.40625 MHz ± 280 kHz·D'R*, f_OB = 4.25 MHz ± 230 kHz·D'B*, limited to +350/−506 kHz (D'R) and +506/−350 kHz (D'B) | items 5, 10e |
+| Bell filter | (1 + j16F) / (1 + j1.26F), F = f/f0 − f0/f, f0 = 4.286 MHz; 2·M0 = 23 % of 700 mV | item 10d |
+| Subcarrier phase | 0°, 0°, 180° line pattern, inverted every frame | Table 4 Note 1 |
+| Subcarrier blanking | From the start of the front porch to 5.6 µs after 0H, and in field blanking | BT.470-6 Table 2 item 2.17 |
+| Line identification | Undeviated subcarrier on the back porch instead of a colour burst | item 13 |
+| Field identification | Trapezoids on lines 7–15 and 320–328 reaching +350 kHz (D'R) and −350 kHz (D'B); disable with `secam_field_identification: false` | item 13, Figures 16 and 17 |
+
+The D'R/D'B line sequence follows BT.1700 Figure 16 — line 7 of the first frame is a D'R line — and, because a frame has an odd number of lines, every line swaps component from one frame to the next. The sequence repeats every 2 frames.
+
+OSD overlays carry the undeviated subcarrier under their text, as a colourless area of a SECAM picture does. The subcarrier phase restarts at the edges of the text, so a decoder may show a brief transient there.
+
+SECAM projects cannot use the laserdisc features: there is no SECAM LaserVision format, so laserdisc line injections, `line_injections.disc_type`, laserdisc VITS placement, the pilot burst and EFM digital audio are validation errors.
+
+!!! note "Limitations"
+    VITS test signals use the 625-line PAL catalogue, so any chroma packet in them is PAL-modulated; a SECAM project with VITS produces a validation warning. The luminance intermodulation correction that BT.470 allows for SECAM is not applied.
 
 ### NTSC laserdisc VBI burst
 

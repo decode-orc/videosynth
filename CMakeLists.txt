@@ -158,6 +158,7 @@ add_library(videosynth_core
     src/line_placement_engine.cpp
     src/status_code_generator.cpp
     src/chroma_encoder.cpp
+    src/secam_chroma_encoder.cpp
     src/progressive_frame_source.cpp
     src/generation_stage.cpp
     src/logger.cpp

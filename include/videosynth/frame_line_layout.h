@@ -26,7 +26,7 @@ inline std::vector<int> BuildLineSampleCounts(Standard standard,
                                               int nominal_samples) {
   std::vector<int> counts(static_cast<std::size_t>(lines_per_frame),
                           nominal_samples);
-  if (standard == Standard::kPal) {
+  if (Is625LineStandard(standard)) {
     // EBU Tech. 3280-E Section 1.2: 625-line PAL at 4fsc has 1135.0064
     // samples/line average, i.e., 709,379 samples/frame. The normative
     // placement of the four extra samples per frame is two on line 313 and two

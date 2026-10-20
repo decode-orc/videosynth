@@ -711,7 +711,7 @@ TEST(OutputStageTest, ClampsOutOfRangeValuesToLegalCodeSpace) {
   std::filesystem::remove(metadata_path);
 }
 
-TEST(OutputStageTest, WritesSchemaVersion11) {
+TEST(OutputStageTest, WritesSchemaVersion12) {
   OutputStage output;
   Project project = MakeProject(Standard::kPal);
   const std::size_t frame_span =
@@ -722,10 +722,10 @@ TEST(OutputStageTest, WritesSchemaVersion11) {
 
   const std::filesystem::path video_path =
       std::filesystem::temp_directory_path() /
-      "videosynth_output_stage_schema_v11.cvbs";
+      "videosynth_output_stage_schema_v12.cvbs";
   const std::filesystem::path metadata_path =
       std::filesystem::temp_directory_path() /
-      "videosynth_output_stage_schema_v11.meta";
+      "videosynth_output_stage_schema_v12.meta";
   project.output.video_path = video_path.string();
   project.output.metadata_path = metadata_path.string();
   std::filesystem::remove(video_path);
@@ -734,7 +734,7 @@ TEST(OutputStageTest, WritesSchemaVersion11) {
   std::vector<std::string> errors;
   ASSERT_TRUE(output.Write(project, y, c, &errors));
 
-  // Verify PRAGMA user_version = 11 per the CVBS specification (v1.6.0).
+  // Verify PRAGMA user_version = 12 per the CVBS specification (v1.7.0).
   sqlite3* db = nullptr;
   ASSERT_EQ(sqlite3_open(metadata_path.c_str(), &db), SQLITE_OK);
   int user_version = 0;
@@ -746,13 +746,74 @@ TEST(OutputStageTest, WritesSchemaVersion11) {
   }
   sqlite3_finalize(stmt);
   sqlite3_close(db);
-  EXPECT_EQ(user_version, 11);
+  EXPECT_EQ(user_version, 12);
 
   // No audio declared → no audio_channel_pair rows.
   EXPECT_TRUE(ReadAudioChannelPairs(metadata_path).empty());
 
   std::filesystem::remove(video_path);
   std::filesystem::remove(metadata_path);
+}
+
+TEST(OutputStageTest, WritesSecamPresetWithUnlockedSignalState) {
+  // CVBS File Format Specification v1.7.0, Preset: SECAM: the file declares
+  // the SECAM preset and a signal state that is not phase locked.
+  OutputStage output;
+  Project project = MakeProject(Standard::kSecam);
+  project.cvbs_presets.signal_state_preset = "STANDARD_STABLE_UNLOCKED";
+  const std::size_t frame_span =
+      static_cast<std::size_t>(SamplesPerFrame4fsc(Standard::kSecam));
+  ASSERT_EQ(frame_span, 709379U);
+
+  std::vector<SampleFixed> y(frame_span, MillivoltsToSampleFixed(0.0));
+  std::vector<SampleFixed> c(frame_span, MillivoltsToSampleFixed(0.0));
+
+  const std::filesystem::path video_path =
+      std::filesystem::temp_directory_path() /
+      "videosynth_output_stage_secam.cvbs";
+  const std::filesystem::path metadata_path =
+      std::filesystem::temp_directory_path() /
+      "videosynth_output_stage_secam.meta";
+  project.output.video_path = video_path.string();
+  project.output.metadata_path = metadata_path.string();
+  std::filesystem::remove(video_path);
+  std::filesystem::remove(metadata_path);
+
+  std::vector<std::string> errors;
+  ASSERT_TRUE(output.Write(project, y, c, &errors));
+
+  CvbsMetadata metadata;
+  ASSERT_TRUE(ReadCvbsMetadata(metadata_path, &metadata));
+  EXPECT_EQ(metadata.preset, "SECAM");
+  EXPECT_EQ(metadata.signal_state_preset, "STANDARD_STABLE_UNLOCKED");
+  EXPECT_FALSE(metadata.has_black_level);
+
+  // PAL and SECAM share the 10-bit level table: blanking = 256.
+  const std::vector<std::int16_t> samples = ReadSamples(video_path, 1);
+  EXPECT_EQ(samples[0], 256);
+
+  std::filesystem::remove(video_path);
+  std::filesystem::remove(metadata_path);
+}
+
+TEST(OutputStageTest, RejectsPhaseLockedSignalStateForSecam) {
+  OutputStage output;
+  Project project = MakeProject(Standard::kSecam);
+  const std::size_t frame_span =
+      static_cast<std::size_t>(SamplesPerFrame4fsc(Standard::kSecam));
+  std::vector<SampleFixed> y(frame_span, MillivoltsToSampleFixed(0.0));
+  std::vector<SampleFixed> c(frame_span, MillivoltsToSampleFixed(0.0));
+  project.output.video_path = (std::filesystem::temp_directory_path() /
+                               "videosynth_output_stage_secam_locked.cvbs")
+                                  .string();
+  project.output.metadata_path = (std::filesystem::temp_directory_path() /
+                                  "videosynth_output_stage_secam_locked.meta")
+                                     .string();
+
+  std::vector<std::string> errors;
+  EXPECT_FALSE(output.Write(project, y, c, &errors));
+  ASSERT_FALSE(errors.empty());
+  EXPECT_NE(errors.front().find("STANDARD_STABLE_UNLOCKED"), std::string::npos);
 }
 
 TEST(OutputStageTest, RejectsInvalidOutputConstraints) {

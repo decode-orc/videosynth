@@ -542,6 +542,25 @@ bool VitsDefinitionProvider::TryGetDefinition(Standard standard,
     }
   }
 
+  // SECAM shares the 625-line structure and has no VITS catalogue of its own,
+  // so the PAL definitions apply unchanged. The definition keeps the PAL
+  // standard, so chroma packets stay PAL-modulated; the project validator
+  // warns about this.
+  if (standard == Standard::kSecam) {
+    for (const VitsDefinition& definition : Catalog()) {
+      if (definition.standard == Standard::kPal &&
+          definition.vits_type == vits_type) {
+        if (out_definition != nullptr) {
+          *out_definition = definition;
+        }
+        if (error != nullptr) {
+          error->clear();
+        }
+        return true;
+      }
+    }
+  }
+
   if (error != nullptr) {
     *error = "Unsupported vits_type '" + vits_type + "' for standard '" +
              StandardToString(standard) + "'.";
@@ -551,10 +570,15 @@ bool VitsDefinitionProvider::TryGetDefinition(Standard standard,
 
 std::vector<std::string> VitsDefinitionProvider::ListVitsTypes(
     Standard standard) const {
-  // PAL-M uses System M line structure, so the M/NTSC catalogue applies
-  // (mirrors the TryGetDefinition fallback).
-  const Standard lookup =
-      (standard == Standard::kPalM) ? Standard::kNtsc : standard;
+  // PAL-M uses System M line structure, so the M/NTSC catalogue applies, and
+  // SECAM uses the 625-line PAL catalogue (mirrors the TryGetDefinition
+  // fallbacks).
+  Standard lookup = standard;
+  if (standard == Standard::kPalM) {
+    lookup = Standard::kNtsc;
+  } else if (standard == Standard::kSecam) {
+    lookup = Standard::kPal;
+  }
 
   std::vector<std::string> vits_types;
   for (const VitsDefinition& definition : Catalog()) {

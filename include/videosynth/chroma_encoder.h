@@ -131,6 +131,16 @@ class PalMChromaEncoder final : public QuadratureChromaEncoder {
   explicit PalMChromaEncoder(double sample_rate_hz);
 };
 
+// Designs a unity-DC-gain Hamming-windowed sinc low-pass kernel.
+//
+// Shared by the quadrature encoders and the SECAM encoder, which filter their
+// colour-difference signals the same way. Throws std::invalid_argument when
+// the cutoff is not inside (0, Nyquist) or taps is not an odd number >= 3.
+//
+// Thread-safety: Stateless; safe to call concurrently.
+std::vector<double> DesignChromaLowPassKernel(double cutoff_hz,
+                                              double sample_rate_hz, int taps);
+
 // Thread-safety: CreateChromaEncoder returns a new encoder instance. The
 // caller owns the returned unique_ptr and is responsible for thread-safety.
 std::unique_ptr<IChromaEncoder> CreateChromaEncoder(Standard standard,

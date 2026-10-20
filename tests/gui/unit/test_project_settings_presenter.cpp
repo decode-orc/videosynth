@@ -10,6 +10,8 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <string>
+#include <vector>
 
 #include "project_settings_presenter.h"
 #include "videosynth/model.h"
@@ -54,6 +56,55 @@ TEST(ProjectSettingsPresenterTest, EnablementFollowsStandardPalM) {
   EXPECT_FALSE(state.pilot_burst_editable);
   EXPECT_FALSE(state.vbi_burst_editable);
   EXPECT_TRUE(state.setup_ire_editable);
+}
+
+TEST(ProjectSettingsPresenterTest, EnablementFollowsStandardSecam) {
+  const ProjectSettingsFormState state =
+      BuildProjectSettingsFormState(MakeProject(Standard::kSecam));
+  EXPECT_FALSE(state.pilot_burst_editable);
+  EXPECT_FALSE(state.vbi_burst_editable);
+  EXPECT_FALSE(state.setup_ire_editable);
+  EXPECT_TRUE(state.secam_field_identification_editable);
+  EXPECT_FALSE(state.laserdisc_editable);
+  EXPECT_FALSE(state.efm_output_editable);
+  EXPECT_EQ(state.signal_state_options,
+            std::vector<std::string>{"STANDARD_STABLE_UNLOCKED"});
+}
+
+TEST(ProjectSettingsPresenterTest, SecamOptionsOnlyApplyToSecam) {
+  const std::vector<std::string> standards =
+      BuildProjectSettingsFormState(MakeProject(Standard::kPal))
+          .standard_options;
+  EXPECT_NE(std::find(standards.begin(), standards.end(), "SECAM"),
+            standards.end());
+  for (const Standard standard :
+       {Standard::kPal, Standard::kNtsc, Standard::kPalM}) {
+    const ProjectSettingsFormState state =
+        BuildProjectSettingsFormState(MakeProject(standard));
+    EXPECT_FALSE(state.secam_field_identification_editable);
+    EXPECT_TRUE(state.laserdisc_editable);
+    EXPECT_EQ(state.signal_state_options,
+              std::vector<std::string>{"STANDARD_STABLE_LOCKED"});
+  }
+}
+
+TEST(ProjectSettingsPresenterTest, NormalizeAppliesSecamSignalStateAndFlags) {
+  CvbsPresets presets;
+  presets.video_standard_preset = Standard::kSecam;
+  presets.signal_state_preset = "STANDARD_STABLE_LOCKED";
+  presets.pal_laserdisc_pilot_burst = true;
+  presets.secam_field_identification = false;
+
+  const CvbsPresets secam = NormalizeCvbsPresetsForStandard(presets);
+  EXPECT_EQ(secam.signal_state_preset, "STANDARD_STABLE_UNLOCKED");
+  EXPECT_FALSE(secam.pal_laserdisc_pilot_burst);
+  EXPECT_FALSE(secam.secam_field_identification);
+
+  presets.video_standard_preset = Standard::kPal;
+  presets.signal_state_preset = "STANDARD_STABLE_UNLOCKED";
+  const CvbsPresets pal = NormalizeCvbsPresetsForStandard(presets);
+  EXPECT_EQ(pal.signal_state_preset, "STANDARD_STABLE_LOCKED");
+  EXPECT_TRUE(pal.secam_field_identification);
 }
 
 TEST(ProjectSettingsPresenterTest, YSuffixFlagFollowsSignalType) {
@@ -101,9 +152,11 @@ TEST(ProjectSettingsPresenterTest, NormalizeClearsFlagsForeignToStandard) {
 // preset rules (the enablement mirrors validation).
 TEST(ProjectSettingsPresenterTest, NormalizedPresetsPassValidatorFlagRules) {
   for (const Standard standard :
-       {Standard::kPal, Standard::kNtsc, Standard::kPalM}) {
+       {Standard::kPal, Standard::kNtsc, Standard::kPalM, Standard::kSecam}) {
     Project project = MakeProject(standard);
     CvbsPresets presets = project.cvbs_presets;
+    presets.signal_state_preset = "NOT_A_STATE";
+    presets.secam_field_identification = false;
     presets.pal_laserdisc_pilot_burst = true;
     presets.ntsc_black_setup_ire_specified = true;
     presets.ntsc_black_setup_ire = 7.5;
@@ -115,6 +168,11 @@ TEST(ProjectSettingsPresenterTest, NormalizedPresetsPassValidatorFlagRules) {
       EXPECT_EQ(error.find("pal_laserdisc_pilot_burst"), std::string::npos)
           << error;
       EXPECT_EQ(error.find("ntsc_black_setup_ire"), std::string::npos) << error;
+      EXPECT_EQ(error.find("signal_state_preset"), std::string::npos) << error;
+    }
+    for (const std::string& warning : result.warnings) {
+      EXPECT_EQ(warning.find("secam_field_identification"), std::string::npos)
+          << warning;
     }
   }
 }

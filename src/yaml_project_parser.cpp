@@ -413,9 +413,10 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
 
     const YAML::Node presets = root["cvbs_presets"];
     const std::set<std::string> preset_keys = {
-        "video_standard_preset",    "sample_encoding_preset",
-        "signal_state_preset",      "pal_laserdisc_pilot_burst",
-        "ntsc_laserdisc_vbi_burst", "ntsc_black_setup_ire"};
+        "video_standard_preset",     "sample_encoding_preset",
+        "signal_state_preset",       "pal_laserdisc_pilot_burst",
+        "ntsc_laserdisc_vbi_burst",  "ntsc_black_setup_ire",
+        "secam_field_identification"};
     ValidateAllowedKeys(presets, preset_keys, "cvbs_presets", &result.errors);
     if (!result.errors.empty()) {
       return result;
@@ -427,9 +428,12 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
     result.project.cvbs_presets.sample_encoding_preset =
         presets["sample_encoding_preset"].as<std::string>(
             result.project.cvbs_presets.sample_encoding_preset);
+    // When omitted, the signal state defaults to the one generated output
+    // declares for the standard (unlocked for SECAM, locked otherwise).
     result.project.cvbs_presets.signal_state_preset =
         presets["signal_state_preset"].as<std::string>(
-            result.project.cvbs_presets.signal_state_preset);
+            GeneratedSignalStatePreset(
+                result.project.cvbs_presets.video_standard_preset));
     result.project.cvbs_presets.pal_laserdisc_pilot_burst =
         presets["pal_laserdisc_pilot_burst"].as<bool>(
             result.project.cvbs_presets.pal_laserdisc_pilot_burst);
@@ -441,6 +445,9 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
           presets["ntsc_black_setup_ire"].as<double>();
       result.project.cvbs_presets.ntsc_black_setup_ire_specified = true;
     }
+    result.project.cvbs_presets.secam_field_identification =
+        presets["secam_field_identification"].as<bool>(
+            result.project.cvbs_presets.secam_field_identification);
 
     const YAML::Node output = root["output"];
     const std::set<std::string> output_keys = {"video_path", "signal_type",

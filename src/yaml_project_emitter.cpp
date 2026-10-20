@@ -66,6 +66,9 @@ void EmitCvbsPresets(YAML::Emitter& out, const CvbsPresets& presets) {
     out << YAML::Key << "ntsc_black_setup_ire" << YAML::Value
         << presets.ntsc_black_setup_ire;
   }
+  if (!presets.secam_field_identification) {
+    out << YAML::Key << "secam_field_identification" << YAML::Value << false;
+  }
   out << YAML::EndMap;
 }
 

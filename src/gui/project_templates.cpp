@@ -54,8 +54,8 @@ void AppendCode(Section* section, const std::string& code_type) {
 }  // namespace
 
 std::string BundledRaster(Standard standard) {
-  return standard == Standard::kPal ? "720x576"
-                                    : "720x486";  // System-M is 525.
+  return Is625LineStandard(standard) ? "720x576"
+                                     : "720x486";  // System-M is 525.
 }
 
 // Bundled colour-bar EXR shipped for the standard's active raster, referenced
@@ -110,7 +110,8 @@ Project MakeDefaultProject(Standard standard) {
   project.version = "1.0";
   project.cvbs_presets.video_standard_preset = resolved;
   project.cvbs_presets.sample_encoding_preset = "CVBS_U10_4FSC";
-  project.cvbs_presets.signal_state_preset = "STANDARD_STABLE_LOCKED";
+  project.cvbs_presets.signal_state_preset =
+      GeneratedSignalStatePreset(resolved);
   project.output.video_path = "output/new_project.cvbs";
   project.output.metadata_path = "output/new_project.meta";
 

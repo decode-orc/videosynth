@@ -705,9 +705,9 @@ void DropoutInjectionStage::ComputeFrameDropouts(
   const SignalLevels levels = GetSignalLevels(project.cvbs_presets);
 
   const SampleFixed clamp_min = MillivoltsToSampleFixed(
-      (standard == Standard::kPal) ? kPalClampMinMv : kNtscClampMinMv);
+      Is625LineStandard(standard) ? kPalClampMinMv : kNtscClampMinMv);
   const SampleFixed clamp_max = MillivoltsToSampleFixed(
-      (standard == Standard::kPal) ? kPalClampMaxMv : kNtscClampMaxMv);
+      Is625LineStandard(standard) ? kPalClampMaxMv : kNtscClampMaxMv);
 
   const std::size_t section_index = FindSectionIndex(project, section);
   const int64_t frame_id = static_cast<int64_t>(global_frame);

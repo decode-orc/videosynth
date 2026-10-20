@@ -77,19 +77,22 @@ EfmOutputStatus ClassifyEfmOutput(const Project& project) {
 ProjectSettingsFormState BuildProjectSettingsFormState(const Project& project) {
   ProjectSettingsFormState state;
 
-  state.standard_options = {"PAL", "NTSC", "PAL_M"};
+  state.standard_options = {"PAL", "NTSC", "PAL_M", "SECAM"};
   // The supported preset set from model.h (IsSupportedSampleEncodingPreset).
   state.sample_encoding_options = {"CVBS_U10_4FSC",   "CVBS_U16_4FSC",
                                    "CVBS_TPG21_4FSC", "CVBS_S16_4FSC",
                                    "RAW_S16_28M",     "RAW_S16_40M"};
-  // ProjectValidator only accepts the time-base stable, phase-locked state.
-  state.signal_state_options = {"STANDARD_STABLE_LOCKED"};
+  const Standard standard = project.cvbs_presets.video_standard_preset;
+  // ProjectValidator only accepts the state generated output declares:
+  // time-base stable and phase locked, or unlocked for SECAM.
+  state.signal_state_options = {GeneratedSignalStatePreset(standard)};
   state.signal_type_options = {"composite", "yc"};
   // ProjectValidator: ntsc_black_setup_ire must be 7.5 or 0.0.
   state.ntsc_black_setup_ire_options = {7.5, 0.0};
 
-  const Standard standard = project.cvbs_presets.video_standard_preset;
   state.pilot_burst_editable = standard == Standard::kPal;
+  state.secam_field_identification_editable = standard == Standard::kSecam;
+  state.laserdisc_editable = standard != Standard::kSecam;
   state.vbi_burst_editable = standard == Standard::kNtsc;
   state.setup_ire_editable =
       standard == Standard::kNtsc || standard == Standard::kPalM;
@@ -110,6 +113,13 @@ ProjectSettingsFormState BuildProjectSettingsFormState(const Project& project) {
 CvbsPresets NormalizeCvbsPresetsForStandard(CvbsPresets presets) {
   if (presets.video_standard_preset != Standard::kPal) {
     presets.pal_laserdisc_pilot_burst = false;
+  }
+  if (presets.video_standard_preset != Standard::kSecam) {
+    presets.secam_field_identification = true;
+  }
+  if (presets.video_standard_preset != Standard::kUnknown) {
+    presets.signal_state_preset =
+        GeneratedSignalStatePreset(presets.video_standard_preset);
   }
   if (presets.video_standard_preset != Standard::kNtsc) {
     presets.ntsc_laserdisc_vbi_burst = false;

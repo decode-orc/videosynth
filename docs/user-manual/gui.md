@@ -66,9 +66,9 @@ Every dock can be hidden, floated or rearranged; **View → Panels** toggles the
 **New Project…** opens the full project settings editor in a dialog, so all project-wide settings are decided before the project exists:
 
 - **Project** — name, version, description.
-- **CVBS Presets** — video standard, sample encoding, signal state, and the standard-specific options (PAL pilot burst, NTSC VBI burst, NTSC black setup override). Options that do not apply to the selected standard are disabled rather than hidden.
+- **CVBS Presets** — video standard, sample encoding, signal state, and the standard-specific options (PAL pilot burst, NTSC VBI burst, NTSC black setup override, SECAM field identification). The signal state follows the standard: `STANDARD_STABLE_UNLOCKED` for [SECAM](video-signal.md#secam-chroma), `STANDARD_STABLE_LOCKED` otherwise. Options that do not apply to the selected standard are disabled rather than hidden.
 - **Output** — video path and signal type, plus the optional EFM digital audio channel-pair selection.
-- **Laserdisc & VITS** — disc format (CAV/CLV), VITS placement policy and the VITS set.
+- **Laserdisc & VITS** — disc format (CAV/CLV), VITS placement policy and the VITS set. SECAM projects have no laserdisc format, so the disc format and laserdisc placement are disabled.
 
 Clicking **Create** asks where to save the project. The file is written as part of creation, so `{project}`-relative paths and the preview always have a real anchor.
 

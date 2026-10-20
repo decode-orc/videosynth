@@ -103,10 +103,11 @@ To avoid ambiguity, this specification uses **PAL** and **NTSC** with the follow
 
 - **PAL** means the **625/50 PAL family with 4.43361875 MHz subcarrier** (PAL-B/G/H/I timing family in baseband composite terms).
 - **NTSC** means **NTSC-M 525/59.94 with 3.579545 MHz subcarrier** as defined by SMPTE 170M.
+- **SECAM** means **625/50 SECAM** with frequency-modulated chrominance on $f_{OR}$ = 4.40625 MHz / $f_{OB}$ = 4.25 MHz as defined by ITU-R BT.1700 Annex 1 Part C.
 
 The following are **out of scope** for this specification unless explicitly added in a future revision:
 
-- PAL-N, PAL-60, NTSC 4.43, SECAM, and other non-625/50-PAL or non-NTSC-M variants (PAL-M — 525/59.94 with the System M line structure and 3.575611 MHz subcarrier — **is** supported).
+- PAL-N, PAL-60, NTSC 4.43, and other variants outside 625/50 PAL, 625/50 SECAM and NTSC-M (PAL-M — 525/59.94 with the System M line structure and 3.575611 MHz subcarrier — **is** supported; see also [SECAM Chroma Encoding Model](#secam-chroma-encoding-model)). MESECAM is a videotape recording method whose decoded baseband output is SECAM, so it needs no preset of its own.
 - RF transmission/channel-plan differences (for example PAL-I RF sound spacing), because this document defines **baseband CVBS generation** rather than broadcast RF modulation.
 
 Practical interpretation:
@@ -118,6 +119,7 @@ Practical interpretation:
 | ------------ | ------------------------------------------- | -------------- | -------------- | --------------------- | --------------- | --------------- |
 | PAL (625/50 family) | 720x576 | 25 fps         | 50 Hz          | 4.43361875 MHz        | 625             | ITU-R BT.470-6  |
 | NTSC-M (525/59.94)  | 720x486 | ~29.97 fps     | ~59.94 Hz      | 3.579545 MHz          | 525             | SMPTE 170M-2004 |
+| SECAM (625/50)      | 720x576 | 25 fps         | 50 Hz          | 4.40625 / 4.25 MHz (FM) | 625           | ITU-R BT.1700 Annex 1 Part C |
 
 For file-based frame sources, ingestion is strict and fail-closed: only the exact supported raster for the selected standard is accepted.
 
@@ -126,8 +128,8 @@ For file-based frame sources, ingestion is strict and fail-closed: only the exac
 
 Current implementation status:
 
-- **Locked**: Implemented. The runtime requires `signal_state_preset: STANDARD_STABLE_LOCKED`.
-- **Unlocked**: Target design only; not implemented in the current runtime.
+- **Locked**: Implemented. The runtime requires `signal_state_preset: STANDARD_STABLE_LOCKED` for PAL, NTSC and PAL-M.
+- **Unlocked**: Implemented for SECAM only. SECAM chroma is frequency modulated and the CVBS File Format Specification v1.7.0 defines no Sc/H convention for it, so generated SECAM output (time-base stable at the standard rate) is declared `STANDARD_STABLE_UNLOCKED`, and that is the only state accepted for SECAM. Unlocked output for the quadrature standards is target design only.
 
 ### **Sample Rates**
 
@@ -326,6 +328,18 @@ $$
 - The NTSC colour sequence is modeled as a 2-frame SC-H progression using a frame phase offset of $0$ then $\pi$, repeating (SMPTE 170M field/frame color-sequence behavior).
 - In baseline mode, burst is present on horizontal lines and suppressed on equalizing/broad-sync lines; when NTSC laserdisc VBI burst mode is enabled, burst is additionally inserted on equalizing and broad-sync pulses per [IEC 60857](../analogue-video-specifications/docs/laserdisc/IEC-60857-1986-Laservision-NTSC/IEC-60857-1986-Laservision-NTSC.md) §9.1.2.
 
+### **SECAM Chroma Encoding Model**
+
+SECAM is selected with `cvbs_presets.video_standard_preset: SECAM` and follows [ITU-R BT.1700](../analogue-video-specifications/docs/video_formats/BT-1700-E/BT-1700-E.md) Annex 1 Part C Table 4 together with [ITU-R BT.470-6](../analogue-video-specifications/docs/video_formats/BT-470-6-1998/BT-470-6-1998.md) Table 2 items 2.17/2.18. The [CVBS File Format Specification](../cvbs-file-format-specification/docs/video-standard-presets.md) v1.7.0 `SECAM` preset stores SECAM on the PAL 4fsc lattice (17,734,475 Hz, 709,379 samples/frame) with the PAL 10-bit level table, following the vhs-decode convention. `Standard::kSecam` therefore shares the 625-line timing, sync structure, levels, active raster and audio framing with `Standard::kPal` (`Is625LineStandard` in `model.h`); only the C channel differs, and the metadata declares `SECAM` with `STANDARD_STABLE_UNLOCKED`.
+
+- `SecamChromaEncoder` (`src/secam_chroma_encoder.cpp`, behind `ISecamChromaEncoder`) replaces both the quadrature encoder and the colour burst; the line timing model disables the burst on every SECAM line. It renders each line from 0H: colour difference (item 9: $D_R' = -1.902(E_R'-E_Y')$, $D_B' = 1.505(E_B'-E_Y')$) → 33-tap 1.7 MHz low-pass (item 10c) → video precorrection $(1 + jf/f_1)/(1 + jf/3f_1)$, $f_1$ = 85 kHz, bilinear (item 10f) → FM of $f_{OR}$ = 4.40625 MHz (280 kHz per unit) or $f_{OB}$ = 4.25 MHz (230 kHz per unit), clipped to the item 10e maximum deviations → bell filter $(1+j16F)/(1+j1.26F)$, $f_0$ = 4.286 MHz, discretised by matched-z and normalised to unity at $f_0$ (item 10d) → amplitude $M_0$ = 0.115 × 700 mV → subcarrier gate open from 5.6 µs after 0H to the start of the front porch (BT.470-6 item 2.17a).
+- Outside the active window the colour difference is zero, so the back porch carries the undeviated subcarrier as the line identification reference (item 13); no burst is generated.
+- The D'R/D'B line sequence follows Figure 16 (line 7 of the first frame is D'R) and runs continuously through the odd-length frame, so it has a 2-frame period. The subcarrier phase at 0H follows the Note 1 pattern 0°, 0°, 180° by frame line, inverted every frame. Because the encoder renders every line from 0H independently of the 4fsc lattice position, the SECAM colour sequence period used by the frame template cache is 2 frames, matching the specification's 2-frame SECAM sequence.
+- Field-blanking lines carry no subcarrier, except the field identification lines 7–15 and 320–328 (enabled by default, `secam_field_identification`), which carry the Figure 17 trapezoids (D'R* to +1.25 over 15 µs, D'B* to −1.52 over 18 µs, starting at the end of line blanking) without low-pass or precorrection.
+- OSD overlays write the colourless (undeviated) subcarrier under their text: the synthesis resources precompute one neutral line per D'R/D'B component and 0H phase, and `OsdRenderer` copies it in place of the zero chroma used for the quadrature standards. The carrier phase restarts at the text edges.
+- No SECAM LaserVision format exists, so laserdisc line injections, `disc_type`, laserdisc VITS placement, the pilot burst and EFM audio are validation errors for SECAM.
+- Known gaps: VITS use the 625-line PAL catalogue and keep their PAL-modulated chroma packets (validator warning), and the optional SECAM luminance intermodulation correction (BT.470-6 Table 2 note 6) is not modelled.
+
 **Progressive sources** are converted during ingestion by `progressive_source`, but only when they match one of the supported source profiles defined in [Section 8.1](#81-frame-based-sections). Inputs that do not match a supported profile are invalid.
 
 All accepted progressive inputs are normalized to **10-bit 4:4:4 YCbCr BT.601 studio swing** before frame data is passed to the generator. The conversion path uses source metadata (primaries, transfer, matrix, range) when present.
@@ -486,7 +500,7 @@ The output stage generates files as per the [CVBS File Format Specification](../
 
 **Composite output** (`signal_type: composite`, default):
 1. **Video File** (`.cvbs`): Raw samples of the composite signal (Y + C + sync).
-2. **Metadata File** (`.meta`): SQLite metadata database (`user_version = 11`, CVBS File Format Specification v1.6.0) — video standard preset, sample encoding preset, signal state preset, `sequence_continuous` (always `TRUE`: synthesised output is one unbroken sequence), frame count, etc.
+2. **Metadata File** (`.meta`): SQLite metadata database (`user_version = 12`, CVBS File Format Specification v1.7.0) — video standard preset, sample encoding preset, signal state preset, `sequence_continuous` (always `TRUE`: synthesised output is one unbroken sequence), frame count, etc.
 
 **Dual-file Y/C output** (`signal_type: yc`):
 1. **Luma File** (`.cvbsy`): Raw luma samples (Y + sync) encoded identically to composite luma.
@@ -783,6 +797,7 @@ The current parser, validator, and runtime implement only a subset of the YAML s
 - The `line_injections` schema is split across two levels of the data model. A **project-level** `line_injections:` block (a sibling of `output:` and `sections:`) is parsed into a `ProjectLineInjections` value on `Project` holding the project-wide `disc_type` (`CAV`/`CLV`), the optional `placement` policy (`standard` default / `laserdisc` / `custom`, governing how VITS `target_lines` are constrained — see [VITS](#vits-vertical-interval-test-signals)), and the `vits` set (each entry a `vits_type` plus `target_lines`) applied to every frame of every section. Each **section-level** `line_injections:` list holds only `Section::LineInjection` entries (`type` plus, per type, `target_lines`/`codes`) — the per-section biphase `codes` (picture_number, chapter_number, lead_in/out, etc.) that legitimately differ between lead-in, programme, and lead-out. Both levels receive validator-level schema/compatibility checks for injection type, `target_lines`, and standard-dependent VITS constraints.
 - VITS line injections have a generation-stage orchestration path and are applied only on their targeted frame lines within the owning section span.
 - Built-in VITS catalog entries now carry full waveform-definition primitive/composite trees for every supported `vits_type`, so the default runtime path can render all supported PAL and NTSC VITS patterns.
+- `video_standard_preset: SECAM` and `secam_field_identification` (default `true`) are parsed, emitted, validated, and implemented; SECAM requires `signal_state_preset: STANDARD_STABLE_UNLOCKED` (the default when the key is omitted). See [SECAM Chroma Encoding Model](#secam-chroma-encoding-model).
 - `pal_laserdisc_pilot_burst` is parsed, validated, and fully implemented: a 3.75 MHz (240 × f_H) sinusoidal burst at ±300 mV is superimposed on every sync pulse in the Y channel when enabled.
 - `ntsc_laserdisc_vbi_burst` is parsed and validated for standard compatibility, but its runtime signal behavior remains deferred. Because a silent no-op would produce a file that looks compliant and is not, enabling it is a **validation error** ("ntsc_laserdisc_vbi_burst is parsed but not implemented in the current runtime") rather than being ignored.
 
@@ -799,12 +814,13 @@ project:
   description: "A test output with colour bars and line injections"  # Optional
 
 cvbs_presets:
-  video_standard_preset: PAL     # PAL, NTSC, or PAL_M (only one allowed per project)
+  video_standard_preset: PAL     # PAL, NTSC, PAL_M, or SECAM (only one allowed per project)
   sample_encoding_preset: CVBS_U10_4FSC  # CVBS_U10_4FSC, CVBS_U16_4FSC, CVBS_TPG21_4FSC, CVBS_S16_4FSC, RAW_S16_28M, RAW_S16_40M
-  signal_state_preset: STANDARD_STABLE_LOCKED  # only STANDARD_STABLE_LOCKED is accepted by the current runtime
+  signal_state_preset: STANDARD_STABLE_LOCKED  # STANDARD_STABLE_LOCKED; STANDARD_STABLE_UNLOCKED for SECAM (default: per standard)
   pal_laserdisc_pilot_burst: false  # PAL only; inject 3.75 MHz pilot burst on all sync pulses (IEC 60856 §9.1.2); default: false
   ntsc_laserdisc_vbi_burst: false   # NTSC only; insert colour burst on equalizing and broad sync pulses (IEC 60857 §9.1.2); default: false
   ntsc_black_setup_ire: 7.5     # NTSC only; allowed values: 7.5 (standard setup) or 0.0 (black = blanking); default: 7.5
+  secam_field_identification: true  # SECAM only; field identification signals on lines 7-15 / 320-328; default: true
   # No other key is accepted. Field order/dominance follow the standard,
   # sample data is little-endian, and the locked/unlocked distinction is
   # carried by signal_state_preset itself — there is no separate mode key.
@@ -969,6 +985,7 @@ Design decisions:
 | `PAL` | 48000 | 1920 (constant) |
 | `NTSC` | 48000 | 1602/1601 (SMPTE 272M §14.3 five-frame sequence: 1602, 1601, 1602, 1601, 1602 → 8008 per 5 frames) |
 | `PAL_M` | 48000 | 1602/1601 (as NTSC) |
+| `SECAM` | 48000 | 1920 (constant, as PAL) |
 
 **`audio:` fields**:
 
@@ -1104,8 +1121,8 @@ video_path: "out/pal_test_video.cvbs" # project-relative output file path
   - When `output.signal_type` is `"yc"`, `output.video_path` must end in `".cvbsy"`.
   - `output.signal_type` must be `"composite"` or `"yc"` (default: `"composite"`).
   - When `output.signal_type` is `"yc"`, `output.video_path` must end in `".cvbsy"`; the chroma path is derived automatically by replacing the suffix with `".cvbsc"`.
-  - Output resolution is fixed by the standard (720x576 for PAL, 720x486 for NTSC) and must not be specified in the project file.
-  - 4fsc generation requires a 4fsc `sample_encoding_preset` and a locked `signal_state_preset`.
+  - Output resolution is fixed by the standard (720x576 for PAL and SECAM, 720x486 for NTSC and PAL-M) and must not be specified in the project file.
+  - 4fsc generation requires a 4fsc `sample_encoding_preset` and a locked `signal_state_preset` (unlocked for SECAM).
   - `pal_laserdisc_pilot_burst` can **only be enabled for PAL projects**. If enabled for NTSC, the YAML is considered **invalid**.
   - `ntsc_laserdisc_vbi_burst` can **only be enabled for NTSC projects**. If enabled for PAL, the YAML is considered **invalid**.
   - `ntsc_black_setup_ire` can **only be specified for NTSC projects**. If specified for PAL, the YAML is considered **invalid**.
@@ -1921,8 +1938,8 @@ The rule set below remains the intended validation contract for VITC and custom 
   - Only one `video_standard_preset` (PAL or NTSC) per project.
   - Only one `sample_encoding_preset` per project.
   - Only one `signal_state_preset` per project.
-  - Output resolution is fixed by the standard (720x576 for PAL, 720x486 for NTSC) and must not be specified in the project file.
-  - 4fsc generation requires a 4fsc `sample_encoding_preset` and a locked `signal_state_preset`.
+  - Output resolution is fixed by the standard (720x576 for PAL and SECAM, 720x486 for NTSC and PAL-M) and must not be specified in the project file.
+  - 4fsc generation requires a 4fsc `sample_encoding_preset` and a locked `signal_state_preset` (unlocked for SECAM).
   - `pal_laserdisc_pilot_burst` can **only be enabled for PAL projects**. If enabled for NTSC, the YAML is considered **invalid**.
   - `ntsc_laserdisc_vbi_burst` can **only be enabled for NTSC projects**. If enabled for PAL, the YAML is considered **invalid**.
   - `ntsc_black_setup_ire` can **only be specified for NTSC projects**. If specified for PAL, the YAML is considered **invalid**.

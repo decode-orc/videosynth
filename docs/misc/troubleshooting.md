@@ -24,6 +24,22 @@ Once any section declares a `section_type`, the sequence must be `[lead_in] prog
 
 The pilot burst is defined by IEC 60856 for PAL Laservision. For NTSC there is no equivalent option that is currently implemented.
 
+### `signal_state_preset must be 'STANDARD_STABLE_UNLOCKED' for SECAM projects`
+
+SECAM chroma is frequency modulated, so the CVBS file format defines no subcarrier phase lock for it and a SECAM file must not be declared phase locked. Set `signal_state_preset: STANDARD_STABLE_UNLOCKED`, or leave the key out to get it by default. PAL, NTSC and PAL-M projects need `STANDARD_STABLE_LOCKED`.
+
+### `laserdisc line injections, line_injections.disc_type and laserdisc VITS placement are not available for SECAM projects`
+
+There is no SECAM LaserVision format. Remove the section `laserdisc` injections and `line_injections.disc_type`, and use `standard` or `custom` VITS placement.
+
+### `SECAM warning: VITS test signals are rendered with their PAL definitions`
+
+A warning, not an error. SECAM uses the 625-line PAL VITS catalogue, so VITS lines keep their PAL waveforms, including PAL-modulated chroma packets. Remove the VITS set if a pure SECAM signal matters.
+
+### `secam_field_identification has no effect unless video_standard_preset is SECAM`
+
+A warning, not an error. Field identification is a SECAM signal; remove the key from PAL, NTSC and PAL-M projects.
+
 ### `ntsc_laserdisc_vbi_burst is parsed but not implemented in the current runtime`
 
 The option exists in the schema but has no signal behaviour, so enabling it is an error rather than a silent no-op. Remove it or set it to `false`.

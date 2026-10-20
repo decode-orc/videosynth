@@ -4,7 +4,7 @@ Welcome to the videosynth documentation. Here you will find the user manual and 
 
 # What is videosynth?
 
-**videosynth** is a video signal synthesizer for PAL, PAL-M and NTSC. It generates analogue composite (CVBS) and Y/C video signals as sample files, built in the time domain from the published analogue video standards — ITU-R BT.470/BT.1700, SMPTE 170M/244M, IEC 60856/60857 and IEC 60461.
+**videosynth** is a video signal synthesizer for PAL, PAL-M, NTSC and SECAM. It generates analogue composite (CVBS) and Y/C video signals as sample files, built in the time domain from the published analogue video standards — ITU-R BT.470/BT.1700, SMPTE 170M/244M, IEC 60856/60857 and IEC 60461.
 
 It exists to produce **known-good, reproducible test signals**: material whose every sample you can predict, so that decoders, time base correctors and restoration tools can be exercised against a signal whose correct answer is already known. That includes laserdisc-style discs carrying VBI address codes, deliberately degraded signals with noise and dropouts, and multi-source "stacking" sets that model repeated captures of the same disc.
 
@@ -17,7 +17,7 @@ Both read and write the same YAML project file, and both produce byte-identical 
 
 # What it can generate
 
-- **Standards-based signals** for PAL, PAL-M and NTSC, in composite or Y/C form, at 4fsc or raw high sample rates.
+- **Standards-based signals** for PAL, PAL-M, NTSC and SECAM, in composite or Y/C form, at 4fsc or raw high sample rates.
 - **Picture content** from validated progressive sources — OpenEXR stills and FFV1/Matroska video clips.
 - **Vertical interval test signals** (VITS) — the EBU, ITU, NTC-7, FCC and VIRS families.
 - **Laserdisc VBI metadata** — IEC 60856/60857 24-bit biphase codes and NTSC 40-bit FM codes: picture numbers, programme time codes, chapters, picture stops, programme status, lead-in and lead-out.

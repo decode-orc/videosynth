@@ -138,7 +138,7 @@ bool FrameRateMatchesStandard(double frame_rate_hz,
     return true;
   }
 
-  if (standard == videosynth::Standard::kPal) {
+  if (videosynth::Is625LineStandard(standard)) {
     return std::abs(frame_rate_hz - 25.0) <= 1.0e-3;
   }
   if (standard == videosynth::Standard::kNtsc ||
@@ -155,7 +155,7 @@ bool RasterMatchesStandard(int width, int height,
     return true;
   }
 
-  if (standard == videosynth::Standard::kPal) {
+  if (videosynth::Is625LineStandard(standard)) {
     return width == 720 && height == 576;
   }
   if (standard == videosynth::Standard::kNtsc ||
@@ -192,7 +192,7 @@ bool SampleAspectMatchesStandard(double sample_aspect_ratio,
     return true;
   }
 
-  if (standard == videosynth::Standard::kPal) {
+  if (videosynth::Is625LineStandard(standard)) {
     return std::abs(sample_aspect_ratio - (128.0 / 117.0)) <= 2.0e-3;
   }
   if (standard == videosynth::Standard::kNtsc ||
@@ -275,7 +275,7 @@ bool ValidateProfileBySourceFamily(
       return false;
     }
 
-    if (standard == videosynth::Standard::kPal) {
+    if (videosynth::Is625LineStandard(standard)) {
       if (profile.field_order != "tb") {
         if (error != nullptr) {
           *error =
@@ -459,7 +459,7 @@ void ValidateDeferredLineInjectionSupport(
 
 bool IsValidFrameLineForStandard(int line_1based,
                                  videosynth::Standard standard) {
-  if (standard == videosynth::Standard::kPal) {
+  if (videosynth::Is625LineStandard(standard)) {
     return line_1based >= 1 && line_1based <= 625;
   }
   if (standard == videosynth::Standard::kNtsc ||
@@ -804,6 +804,50 @@ bool ValidateLineInjectionsForSection(const videosynth::Section& section,
   return true;
 }
 
+// SECAM preset rules. There is no SECAM LaserVision format (IEC 60856 defines
+// PAL discs only), so laserdisc codes, disc_type and laserdisc VITS placement
+// are rejected; the pilot burst and EFM audio are rejected by their own
+// PAL-only rules. VITS fall back to the 625-line PAL catalogue.
+void ValidateSecamPreset(const videosynth::Project& project,
+                         videosynth::ValidationResult* result) {
+  if (result == nullptr) {
+    return;
+  }
+
+  const videosynth::CvbsPresets& presets = project.cvbs_presets;
+  if (presets.video_standard_preset != videosynth::Standard::kSecam) {
+    if (!presets.secam_field_identification) {
+      result->warnings.push_back(
+          "secam_field_identification has no effect unless "
+          "video_standard_preset is SECAM.");
+    }
+    return;
+  }
+
+  const videosynth::ProjectLineInjections& li = project.line_injections;
+  bool any_laserdisc_section = false;
+  for (const videosynth::Section& section : project.sections) {
+    if (SectionHasLaserdiscInjection(section)) {
+      any_laserdisc_section = true;
+      break;
+    }
+  }
+  if (any_laserdisc_section || !li.disc_type.empty() ||
+      li.placement == videosynth::VitsPlacement::kLaserdisc) {
+    result->is_valid = false;
+    result->errors.push_back(
+        "Project configuration error: laserdisc line injections, "
+        "line_injections.disc_type and laserdisc VITS placement are not "
+        "available for SECAM projects.");
+  }
+
+  if (!li.vits.empty()) {
+    result->warnings.push_back(
+        "SECAM warning: VITS test signals are rendered with their PAL "
+        "definitions, including any PAL-modulated chroma packets.");
+  }
+}
+
 // Validates the project-wide line_injections block: the laserdisc disc_type
 // selection and the VITS test-signal set. Cross-references the sections to
 // require disc_type whenever any section declares laserdisc codes, and applies
@@ -1037,7 +1081,7 @@ void ValidateNoiseParameters(const videosynth::Section& section,
   // injection is present on the line orc-gui inspects for White SNR. VITS are
   // project-wide, so the check consults the project VITS target-line set.
   if (section.noise.noise_spread_db > 0.0) {
-    const int expected_line = (standard == videosynth::Standard::kPal)
+    const int expected_line = videosynth::Is625LineStandard(standard)
                                   ? kOrcGuiWhiteSNRLinePal
                                   : kOrcGuiWhiteSNRLineNtsc;
     const bool has_white_flag_vits =
@@ -1589,7 +1633,7 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
     result.is_valid = false;
     result.errors.push_back(
         "Project configuration error: video_standard_preset must be 'PAL', "
-        "'NTSC', or 'PAL_M'.");
+        "'NTSC', 'PAL_M', or 'SECAM'.");
   }
 
   if (!IsSupportedSampleEncodingPreset(
@@ -1601,21 +1645,23 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
         "supported CVBS or raw presets.");
   }
 
-  if (project.cvbs_presets.signal_state_preset != "STANDARD_STABLE_LOCKED") {
+  // Generated output is time-base stable at the standard 4fsc rate and phase
+  // locked, except SECAM, which defines no Sc/H convention and must be declared
+  // unlocked (CVBS File Format Specification v1.7.0, Preset: SECAM).
+  const bool secam =
+      project.cvbs_presets.video_standard_preset == Standard::kSecam;
+  const std::string required_signal_state =
+      GeneratedSignalStatePreset(project.cvbs_presets.video_standard_preset);
+  if (project.cvbs_presets.signal_state_preset != required_signal_state) {
     result.is_valid = false;
     result.errors.push_back(
-        "Project configuration error: signal_state_preset must be "
-        "'STANDARD_STABLE_LOCKED'.");
-  }
-
-  if (!IsLockedSignalStatePreset(project.cvbs_presets.signal_state_preset)) {
-    result.is_valid = false;
-    result.errors.push_back(
-        "Project configuration error: signal_state_preset must indicate a "
-        "time-base stable, phase-locked state.");
+        "Project configuration error: signal_state_preset must be '" +
+        required_signal_state + "'" + (secam ? " for SECAM projects" : "") +
+        ".");
   }
 
   ValidateDeferredLaserdiscPresetFlags(project, &result);
+  ValidateSecamPreset(project, &result);
 
   if (project.cvbs_presets.video_standard_preset != Standard::kNtsc &&
       project.cvbs_presets.video_standard_preset != Standard::kPalM &&

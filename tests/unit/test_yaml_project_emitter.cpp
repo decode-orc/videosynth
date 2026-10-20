@@ -76,6 +76,7 @@ TEST(YamlProjectEmitterTest, MinimalProjectOmitsUnsetOptionalBlocks) {
   EXPECT_EQ(emitted.find("signal_type"), std::string::npos);
   EXPECT_EQ(emitted.find("start_frame"), std::string::npos);
   EXPECT_EQ(emitted.find("ntsc_black_setup_ire"), std::string::npos);
+  EXPECT_EQ(emitted.find("secam_field_identification"), std::string::npos);
 }
 
 TEST(YamlProjectEmitterTest, LaserdiscVitsPlacementRoundTrips) {
@@ -233,6 +234,48 @@ sections:
     source: assets/bars.exr
     duration_frames: 10
 )");
+}
+
+TEST(YamlProjectEmitterTest, SecamPresetRoundTripsWithUnlockedSignalState) {
+  ExpectRoundTrip(R"(
+cvbs_presets:
+  video_standard_preset: SECAM
+  sample_encoding_preset: CVBS_U10_4FSC
+  signal_state_preset: STANDARD_STABLE_UNLOCKED
+output:
+  video_path: out/video.cvbs
+sections:
+  - name: Bars
+    type: progressive
+    source: assets/bars.exr
+    duration_frames: 10
+)");
+}
+
+TEST(YamlProjectEmitterTest, SecamFieldIdentificationDisabledRoundTrips) {
+  constexpr const char* kYaml = R"(
+cvbs_presets:
+  video_standard_preset: SECAM
+  sample_encoding_preset: CVBS_U10_4FSC
+  signal_state_preset: STANDARD_STABLE_UNLOCKED
+  secam_field_identification: false
+output:
+  video_path: out/video.cvbs
+sections:
+  - name: Bars
+    type: progressive
+    source: assets/bars.exr
+    duration_frames: 10
+)";
+  ExpectRoundTrip(kYaml);
+
+  YamlProjectParser parser;
+  const ParseResult parsed = parser.ParseString(kYaml);
+  ASSERT_TRUE(parsed.ok);
+  const std::string emitted = YamlProjectEmitter().EmitString(parsed.project);
+  EXPECT_NE(emitted.find("video_standard_preset: SECAM"), std::string::npos);
+  EXPECT_NE(emitted.find("secam_field_identification: false"),
+            std::string::npos);
 }
 
 TEST(YamlProjectEmitterTest, YcOutputRoundTripsSignalType) {
