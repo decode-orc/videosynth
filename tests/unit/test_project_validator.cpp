@@ -280,46 +280,119 @@ TEST(ProjectValidatorTest, RejectsNtscLaserdiscVbiBurstOnPalProject) {
             "enabled for NTSC projects.");
 }
 
-TEST(ProjectValidatorTest, AcceptsSecamChromaEncodingOnPalProject) {
+Project MakeValidSecamProject() {
   Project project = MakeValidProject();
-  project.cvbs_presets.chroma_encoding = ChromaEncoding::kSecam;
+  project.cvbs_presets.video_standard_preset = Standard::kSecam;
+  project.cvbs_presets.signal_state_preset = "STANDARD_STABLE_UNLOCKED";
+  return project;
+}
 
+// True when any diagnostic in `messages` contains `needle`.
+bool ContainsMessage(const std::vector<std::string>& messages,
+                     const std::string& needle) {
+  for (const std::string& message : messages) {
+    if (message.find(needle) != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
+TEST(ProjectValidatorTest, AcceptsSecamProjectWithUnlockedSignalState) {
   ProjectValidator validator;
-  const ValidationResult result = validator.Validate(project);
+  const ValidationResult result = validator.Validate(MakeValidSecamProject());
 
   EXPECT_TRUE(result.is_valid);
   EXPECT_TRUE(result.errors.empty());
+  EXPECT_TRUE(result.warnings.empty());
 }
 
-TEST(ProjectValidatorTest, RejectsSecamChromaEncodingOnNtscProject) {
-  Project project = MakeValidProject();
-  project.cvbs_presets.video_standard_preset = Standard::kNtsc;
-  project.cvbs_presets.chroma_encoding = ChromaEncoding::kSecam;
+TEST(ProjectValidatorTest, RejectsPhaseLockedSignalStateForSecam) {
+  // CVBS File Format Specification v1.7.0, Preset: SECAM: no Sc/H convention,
+  // so a SECAM file must not be declared phase locked.
+  Project project = MakeValidSecamProject();
+  project.cvbs_presets.signal_state_preset = "STANDARD_STABLE_LOCKED";
 
   ProjectValidator validator;
   const ValidationResult result = validator.Validate(project);
 
   EXPECT_FALSE(result.is_valid);
-  EXPECT_NE(std::find(result.errors.begin(), result.errors.end(),
-                      "Project configuration error: chroma_encoding SECAM "
-                      "requires video_standard_preset PAL (625-line, 50 Hz)."),
-            result.errors.end());
+  EXPECT_TRUE(ContainsMessage(
+      result.errors,
+      "Project configuration error: signal_state_preset must be "
+      "'STANDARD_STABLE_UNLOCKED' for SECAM projects."));
 }
 
-TEST(ProjectValidatorTest, RejectsSecamWithPalLaserdiscPilotBurst) {
+TEST(ProjectValidatorTest, RejectsUnlockedSignalStateForPal) {
   Project project = MakeValidProject();
-  project.cvbs_presets.chroma_encoding = ChromaEncoding::kSecam;
+  project.cvbs_presets.signal_state_preset = "STANDARD_STABLE_UNLOCKED";
+
+  ProjectValidator validator;
+  const ValidationResult result = validator.Validate(project);
+
+  EXPECT_FALSE(result.is_valid);
+  EXPECT_TRUE(ContainsMessage(result.errors,
+                              "Project configuration error: "
+                              "signal_state_preset must be "
+                              "'STANDARD_STABLE_LOCKED'."));
+}
+
+TEST(ProjectValidatorTest, RejectsPalLaserdiscPilotBurstOnSecamProject) {
+  Project project = MakeValidSecamProject();
   project.cvbs_presets.pal_laserdisc_pilot_burst = true;
 
   ProjectValidator validator;
   const ValidationResult result = validator.Validate(project);
 
   EXPECT_FALSE(result.is_valid);
-  EXPECT_NE(std::find(result.errors.begin(), result.errors.end(),
-                      "Project configuration error: "
-                      "pal_laserdisc_pilot_burst cannot be combined with "
-                      "chroma_encoding SECAM."),
-            result.errors.end());
+  EXPECT_TRUE(ContainsMessage(result.errors,
+                              "Project configuration error: "
+                              "pal_laserdisc_pilot_burst can only be enabled "
+                              "for PAL projects."));
+}
+
+TEST(ProjectValidatorTest, RejectsLaserdiscDiscTypeOnSecamProject) {
+  Project project = MakeValidSecamProject();
+  project.line_injections.disc_type = "CAV";
+
+  ProjectValidator validator;
+  const ValidationResult result = validator.Validate(project);
+
+  EXPECT_FALSE(result.is_valid);
+  EXPECT_TRUE(ContainsMessage(
+      result.errors,
+      "Project configuration error: laserdisc line injections, "
+      "line_injections.disc_type and laserdisc VITS placement are not "
+      "available for SECAM projects."));
+}
+
+TEST(ProjectValidatorTest, WarnsThatSecamVitsKeepPalDefinitions) {
+  Project project = MakeValidSecamProject();
+  project.line_injections.vits.push_back(VitsInjection{"vits17", {17}});
+
+  ProjectValidator validator;
+  const ValidationResult result = validator.Validate(project);
+
+  EXPECT_TRUE(result.is_valid)
+      << (result.errors.empty() ? "" : result.errors[0]);
+  EXPECT_TRUE(ContainsMessage(
+      result.warnings,
+      "SECAM warning: VITS test signals are rendered with their PAL "
+      "definitions, including any PAL-modulated chroma packets."));
+}
+
+TEST(ProjectValidatorTest, WarnsWhenSecamFieldIdentificationSetWithoutSecam) {
+  Project project = MakeValidProject();
+  project.cvbs_presets.secam_field_identification = false;
+
+  ProjectValidator validator;
+  const ValidationResult result = validator.Validate(project);
+
+  EXPECT_TRUE(result.is_valid);
+  EXPECT_TRUE(ContainsMessage(
+      result.warnings,
+      "secam_field_identification has no effect unless video_standard_preset "
+      "is SECAM."));
 }
 
 TEST(ProjectValidatorTest, AcceptsPalLaserdiscPilotBurstOnPalProject) {
@@ -1490,17 +1563,6 @@ TEST(ProjectValidatorTest, RejectsNegativeRampPeriod) {
 
   EXPECT_FALSE(result.is_valid);
   ASSERT_FALSE(result.errors.empty());
-}
-
-// True when any diagnostic in `messages` contains `needle`.
-bool ContainsMessage(const std::vector<std::string>& messages,
-                     const std::string& needle) {
-  for (const std::string& message : messages) {
-    if (message.find(needle) != std::string::npos) {
-      return true;
-    }
-  }
-  return false;
 }
 
 Section MakeEfmSection(const std::string& name, SectionType section_type,

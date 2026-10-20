@@ -1,8 +1,8 @@
 /*
  * File:        test_secam_generation.cpp
  * Module:      generation_tests
- * Purpose:     Verifies end-to-end SECAM chroma generation on the 625-line PAL
- * preset from the committed SECAM fixture project.
+ * Purpose:     Verifies end-to-end SECAM chroma generation on the 625-line
+ * SECAM preset from the committed SECAM fixture project.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 itewreed
@@ -123,7 +123,7 @@ class SecamGenerationTest : public ::testing::Test {
 
   static std::size_t FrameLine(int frame, int line_1based) {
     return static_cast<std::size_t>(frame) *
-               static_cast<std::size_t>(SamplesPerFrame4fsc(Standard::kPal)) +
+               static_cast<std::size_t>(SamplesPerFrame4fsc(Standard::kSecam)) +
            LineOffset(line_1based);
   }
 
@@ -133,7 +133,7 @@ class SecamGenerationTest : public ::testing::Test {
   }
 
   static double SampleRate() {
-    return GetTimingConstants(Standard::kPal).sample_rate_4fsc_hz;
+    return GetTimingConstants(Standard::kSecam).sample_rate_4fsc_hz;
   }
 
   static double Tone(int frame, int line, double from_us, double to_us,
@@ -157,7 +157,7 @@ std::vector<SampleFixed> SecamGenerationTest::c_mv_;
 TEST_F(SecamGenerationTest, GeneratesAllFixtureFrames) {
   EXPECT_EQ(
       c_mv_.size(),
-      static_cast<std::size_t>(SamplesPerFrame4fsc(Standard::kPal)) * 16U);
+      static_cast<std::size_t>(SamplesPerFrame4fsc(Standard::kSecam)) * 16U);
 }
 
 TEST_F(SecamGenerationTest, BackPorchCarriesLineReferenceInsteadOfPalBurst) {
@@ -194,6 +194,23 @@ TEST_F(SecamGenerationTest, FieldBlankingLinesWithoutIdentificationAreBlank) {
           << "line " << line << " sample " << i;
     }
   }
+}
+
+TEST_F(SecamGenerationTest, OsdTextCarriesUndeviatedSubcarrier) {
+  // The fixture's OSD overlay covers field-1 frame lines 123-154 and samples
+  // 477-636 of frames 0-3. Under the text a SECAM signal carries no colour
+  // difference, i.e. the undeviated subcarrier (line 125 is D'R and line 126
+  // D'B in frame 0), instead of the blanked chroma of the quadrature
+  // standards.
+  EXPECT_NEAR(Frequency(0, 125, 28.0, 34.5), kForHz, 10.0e3);
+  EXPECT_NEAR(Frequency(0, 126, 28.0, 34.5), kFobHz, 10.0e3);
+  EXPECT_GT(Tone(0, 125, 28.0, 34.5, kForHz), 20.0);
+}
+
+TEST_F(SecamGenerationTest, BarsWithoutOsdDeviateTheSubcarrier) {
+  // Control for the OSD test: the same window of a 75 % bars frame with the
+  // same frame parity and no overlay is clearly deviated.
+  EXPECT_GT(std::abs(Frequency(4, 125, 28.0, 34.5) - kForHz), 50.0e3);
 }
 
 }  // namespace

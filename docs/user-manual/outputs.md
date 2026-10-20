@@ -36,9 +36,9 @@ At 16 bits per sample that is roughly 1.4 MB per PAL frame and 0.95 MB per NTSC 
 
 | Column | Contents |
 |--------|----------|
-| `preset` | `PAL`, `NTSC` or `PAL_M` |
+| `preset` | `PAL`, `NTSC`, `PAL_M` or `SECAM` |
 | `sample_encoding_preset` | The encoding the samples are in |
-| `signal_state_preset` | `STANDARD_STABLE_LOCKED` |
+| `signal_state_preset` | `STANDARD_STABLE_LOCKED`; `STANDARD_STABLE_UNLOCKED` for `SECAM` |
 | `sequence_continuous` | Always `TRUE` — the synthesised signal is one unbroken sequence |
 | `signal_type` | `composite` or `yc` |
 | `decoder` | The producing tool |

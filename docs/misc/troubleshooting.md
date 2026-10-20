@@ -24,21 +24,21 @@ Once any section declares a `section_type`, the sequence must be `[lead_in] prog
 
 The pilot burst is defined by IEC 60856 for PAL Laservision. For NTSC there is no equivalent option that is currently implemented.
 
-### `chroma_encoding SECAM requires video_standard_preset PAL (625-line, 50 Hz)`
+### `signal_state_preset must be 'STANDARD_STABLE_UNLOCKED' for SECAM projects`
 
-SECAM is a 625-line, 50 Hz system and is carried on the PAL preset's line structure and sample lattice. Set `video_standard_preset: PAL`.
+SECAM chroma is frequency modulated, so the CVBS file format defines no subcarrier phase lock for it and a SECAM file must not be declared phase locked. Set `signal_state_preset: STANDARD_STABLE_UNLOCKED`, or leave the key out to get it by default. PAL, NTSC and PAL-M projects need `STANDARD_STABLE_LOCKED`.
 
-### `pal_laserdisc_pilot_burst cannot be combined with chroma_encoding SECAM`
+### `laserdisc line injections, line_injections.disc_type and laserdisc VITS placement are not available for SECAM projects`
 
-The pilot burst belongs to PAL Laservision. Remove one of the two keys.
+There is no SECAM LaserVision format. Remove the section `laserdisc` injections and `line_injections.disc_type`, and use `standard` or `custom` VITS placement.
 
-### `cvbs_presets.chroma_encoding must be STANDARD or SECAM`
+### `SECAM warning: VITS test signals are rendered with their PAL definitions`
 
-Only these two values exist; MESECAM and other variants are not supported.
+A warning, not an error. SECAM uses the 625-line PAL VITS catalogue, so VITS lines keep their PAL waveforms, including PAL-modulated chroma packets. Remove the VITS set if a pure SECAM signal matters.
 
-### `chroma_encoding SECAM warning: VITS test signals are rendered with their PAL definitions`
+### `secam_field_identification has no effect unless video_standard_preset is SECAM`
 
-A warning, not an error. VITS lines keep their PAL waveforms, including PAL-modulated chroma packets. Remove the VITS set if a pure SECAM signal matters.
+A warning, not an error. Field identification is a SECAM signal; remove the key from PAL, NTSC and PAL-M projects.
 
 ### `ntsc_laserdisc_vbi_burst is parsed but not implemented in the current runtime`
 

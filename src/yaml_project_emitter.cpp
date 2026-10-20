@@ -66,10 +66,6 @@ void EmitCvbsPresets(YAML::Emitter& out, const CvbsPresets& presets) {
     out << YAML::Key << "ntsc_black_setup_ire" << YAML::Value
         << presets.ntsc_black_setup_ire;
   }
-  if (presets.chroma_encoding != ChromaEncoding::kStandard) {
-    out << YAML::Key << "chroma_encoding" << YAML::Value
-        << ChromaEncodingToString(presets.chroma_encoding);
-  }
   if (!presets.secam_field_identification) {
     out << YAML::Key << "secam_field_identification" << YAML::Value << false;
   }

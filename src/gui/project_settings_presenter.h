@@ -37,8 +37,9 @@ enum class EfmOutputStatus {
 // View state for the project settings form: the option catalogues plus the
 // standard-dependent enablement flags. Enablement mirrors the rules
 // ProjectValidator applies (pilot burst PAL-only, VBI burst NTSC-only, black
-// setup IRE System-M-only, SECAM chroma PAL-only and exclusive with the pilot
-// burst) so invalid combinations cannot be entered.
+// setup IRE System-M-only, SECAM field identification and the unlocked signal
+// state SECAM-only, no laserdisc format for SECAM) so invalid combinations
+// cannot be entered.
 struct ProjectSettingsFormState {
   std::vector<std::string> standard_options;
   std::vector<std::string> sample_encoding_options;
@@ -50,10 +51,10 @@ struct ProjectSettingsFormState {
   bool pilot_burst_editable = false;
   bool vbi_burst_editable = false;
   bool setup_ire_editable = false;
-  // SECAM chroma rides on the PAL preset and excludes the pilot burst; the
-  // field identification option only applies once SECAM is selected.
-  bool secam_editable = false;
   bool secam_field_identification_editable = false;
+  // False for SECAM: there is no SECAM LaserVision format, so the disc format
+  // and laserdisc VITS placement are unavailable.
+  bool laserdisc_editable = true;
 
   // True when signal_type is "yc" and video_path must carry a ".cvbsy" suffix.
   bool video_path_requires_luma_suffix = false;
@@ -76,10 +77,10 @@ struct ProjectSettingsFormState {
 ProjectSettingsFormState BuildProjectSettingsFormState(const Project& project);
 
 // Clears preset flags the selected standard cannot carry, mirroring
-// ProjectValidator: pilot burst outside PAL, VBI burst outside NTSC, the
-// black setup IRE override outside NTSC/PAL-M, and SECAM chroma outside PAL.
-// SECAM takes precedence over the pilot burst, and the SECAM field
-// identification option returns to its default when SECAM is off. Returns the
+// ProjectValidator: pilot burst outside PAL, VBI burst outside NTSC, and the
+// black setup IRE override outside NTSC/PAL-M. The SECAM field identification
+// option returns to its default outside SECAM, and the signal state is set to
+// the one the standard requires (GeneratedSignalStatePreset). Returns the
 // adjusted presets.
 CvbsPresets NormalizeCvbsPresetsForStandard(CvbsPresets presets);
 

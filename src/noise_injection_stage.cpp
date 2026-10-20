@@ -106,9 +106,9 @@ void NoiseInjectionStage::InjectNoise(
   const double white_mv = levels.white_mv;
 
   const SampleFixed clamp_min = MillivoltsToSampleFixed(
-      (standard == Standard::kPal) ? kPalClampMinMv : kNtscClampMinMv);
+      Is625LineStandard(standard) ? kPalClampMinMv : kNtscClampMinMv);
   const SampleFixed clamp_max = MillivoltsToSampleFixed(
-      (standard == Standard::kPal) ? kPalClampMaxMv : kNtscClampMaxMv);
+      Is625LineStandard(standard) ? kPalClampMaxMv : kNtscClampMaxMv);
 
   for (std::size_t i = 0; i < frame_count; ++i) {
     const std::size_t global_frame = frame_offset + i;

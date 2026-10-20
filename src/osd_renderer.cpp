@@ -35,19 +35,23 @@ SampleFixed OsdRenderer::LumaToSample(double luma, const SignalLevels& levels) {
   return MillivoltsToSampleFixed(mv);
 }
 
-void OsdRenderer::WriteBlock(std::vector<SampleFixed>* out_y_mv,
-                             std::vector<SampleFixed>* out_c_mv,
-                             int frame_sample_base,
-                             const std::vector<int>& line_sample_offsets,
-                             int row_base, int col_base, int scale,
-                             int active_line_start, int active_line_end,
-                             int active_sample_start, int active_sample_end,
-                             SampleFixed sample_value) const {
+void OsdRenderer::WriteBlock(
+    std::vector<SampleFixed>* out_y_mv, std::vector<SampleFixed>* out_c_mv,
+    int frame_sample_base, const std::vector<int>& line_sample_offsets,
+    int row_base, int col_base, int scale, int active_line_start,
+    int active_line_end, int active_sample_start, int active_sample_end,
+    SampleFixed sample_value,
+    const std::vector<const SampleFixed*>* neutral_chroma_lines) const {
   for (int dy = 0; dy < scale; ++dy) {
     const int abs_line = active_line_start + row_base + dy;
     if (abs_line < active_line_start || abs_line >= active_line_end) {
       continue;
     }
+    const SampleFixed* neutral_chroma =
+        (neutral_chroma_lines != nullptr &&
+         static_cast<std::size_t>(abs_line) < neutral_chroma_lines->size())
+            ? (*neutral_chroma_lines)[static_cast<std::size_t>(abs_line)]
+            : nullptr;
     for (int dx = 0; dx < scale; ++dx) {
       const int abs_sample = active_sample_start + col_base + dx;
       if (abs_sample < active_sample_start || abs_sample >= active_sample_end) {
@@ -59,7 +63,9 @@ void OsdRenderer::WriteBlock(std::vector<SampleFixed>* out_y_mv,
               line_sample_offsets[static_cast<std::size_t>(abs_line)]) +
           static_cast<std::size_t>(abs_sample);
       (*out_y_mv)[idx] = sample_value;
-      (*out_c_mv)[idx] = SampleFixed{0};
+      (*out_c_mv)[idx] = (neutral_chroma != nullptr)
+                             ? neutral_chroma[abs_sample]
+                             : SampleFixed{0};
     }
   }
 }
@@ -69,7 +75,8 @@ void OsdRenderer::Render(
     std::vector<SampleFixed>* out_y_mv, std::vector<SampleFixed>* out_c_mv,
     int frame_sample_base, const std::vector<int>& line_sample_offsets,
     int active_line_start, int active_line_end, int active_sample_start,
-    int active_sample_end, const SignalLevels& levels) const {
+    int active_sample_end, const SignalLevels& levels,
+    const std::vector<const SampleFixed*>* neutral_chroma_lines) const {
   const std::size_t overlay_count = config.overlays.size();
   for (std::size_t oi = 0; oi < overlay_count; ++oi) {
     const OsdOverlay& overlay = config.overlays[oi];
@@ -117,12 +124,12 @@ void OsdRenderer::Render(
             WriteBlock(out_y_mv, out_c_mv, frame_sample_base,
                        line_sample_offsets, py, px, overlay.scale,
                        active_line_start, active_line_end, active_sample_start,
-                       active_sample_end, fg_sample);
+                       active_sample_end, fg_sample, neutral_chroma_lines);
           } else if (has_bg) {
             WriteBlock(out_y_mv, out_c_mv, frame_sample_base,
                        line_sample_offsets, py, px, overlay.scale,
                        active_line_start, active_line_end, active_sample_start,
-                       active_sample_end, bg_sample);
+                       active_sample_end, bg_sample, neutral_chroma_lines);
           }
         }
       }

@@ -36,7 +36,9 @@ struct SignalLevels {
 };
 
 inline TimingConstants GetTimingConstants(Standard standard) {
-  if (standard == Standard::kPal) {
+  if (Is625LineStandard(standard)) {
+    // SECAM shares the 625-line timing and the PAL 4fsc storage rate (CVBS File
+    // Format Specification v1.7.0, Preset: SECAM, Sampling rate).
     return TimingConstants{
         // ITU-R BT.1700 Annex 1 Part B Table 1 item 1: 625-line PAL.
         .lines_per_frame = 625,
@@ -85,7 +87,9 @@ inline TimingConstants GetTimingConstants(Standard standard) {
 }
 
 inline SignalLevels GetSignalLevels(Standard standard) {
-  if (standard == Standard::kPal) {
+  if (Is625LineStandard(standard)) {
+    // ITU-R BT.1700 Annex 1 Part C Table 5: SECAM uses the same levels, with
+    // the CVBS SECAM preset defaulting to no set-up (black = blanking).
     return SignalLevels{
         // ITU-R BT.1700 Annex 1 Part B Table 2 item 3: 625 PAL sync level.
         .sync_tip_mv = -300.0,
@@ -153,7 +157,7 @@ inline SignalLevels GetSignalLevels(const CvbsPresets& presets) {
 }
 
 inline int SamplesPerFrame4fsc(Standard standard) {
-  if (standard == Standard::kPal) {
+  if (Is625LineStandard(standard)) {
     // EBU Tech. 3280-E Section 1.2: PAL 4fsc has 1135.0064 samples/line,
     // yielding 709,379 samples/frame over 625 lines.
     return 709379;
@@ -182,7 +186,7 @@ inline int SamplesPerFrame4fsc(Standard standard) {
 // Authoritative audio sample rate in Hz. Fixed at 48000 for every standard
 // (SMPTE 272M §1.2 preferred implementation).
 inline double AudioSampleRateHz(Standard standard) {
-  if (standard == Standard::kPal || standard == Standard::kNtsc ||
+  if (Is625LineStandard(standard) || standard == Standard::kNtsc ||
       standard == Standard::kPalM) {
     return 48000.0;
   }
@@ -193,7 +197,7 @@ inline double AudioSampleRateHz(Standard standard) {
 // Integer nSamplesPerSec written to the WAV `fmt ` chunk header. Always 48000
 // (CVBS File Format Specification, WAV File Format).
 inline int AudioHeaderSampleRateHz(Standard standard) {
-  if (standard == Standard::kPal || standard == Standard::kNtsc ||
+  if (Is625LineStandard(standard) || standard == Standard::kNtsc ||
       standard == Standard::kPalM) {
     return 48000;
   }
@@ -202,13 +206,14 @@ inline int AudioHeaderSampleRateHz(Standard standard) {
 }
 
 // Number of audio samples carried by stored video frame `frame_index`
-// (zero-based, in output order). PAL is a constant 1920 samples/frame
-// (48000 / 25). NTSC and PAL_M follow the SMPTE 272M §14.3 Table 1 five-frame
-// audio-frame sequence at 48 kHz: 1602 samples in audio frame numbers 1, 3, 5
-// and 1601 in audio frame numbers 2, 4 — i.e. 1601 when (frame_index mod 5)
-// is 1 or 3, otherwise 1602 (8008 samples per five-frame sequence).
+// (zero-based, in output order). PAL and SECAM are a constant 1920
+// samples/frame (48000 / 25). NTSC and PAL_M follow the SMPTE 272M §14.3 Table
+// 1 five-frame audio-frame sequence at 48 kHz: 1602 samples in audio frame
+// numbers 1, 3, 5 and 1601 in audio frame numbers 2, 4 — i.e. 1601 when
+// (frame_index mod 5) is 1 or 3, otherwise 1602 (8008 samples per five-frame
+// sequence).
 inline int AudioSamplesForFrame(Standard standard, std::int64_t frame_index) {
-  if (standard == Standard::kPal) {
+  if (Is625LineStandard(standard)) {
     return 1920;
   }
   if (standard == Standard::kNtsc || standard == Standard::kPalM) {

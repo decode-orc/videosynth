@@ -9,6 +9,9 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
+#include <vector>
+
 #include "videosynth/signal_timing_model.h"
 
 namespace videosynth {
@@ -79,9 +82,34 @@ TEST(SignalTimingModelTest, ModelsHalfLinePairingAndBurstPolicy) {
   EXPECT_TRUE(HasTwoHalfLinePulses(SyncPulseKind::kVerticalSync));
   EXPECT_FALSE(HasTwoHalfLinePulses(SyncPulseKind::kHorizontal));
 
-  EXPECT_TRUE(BurstEnabledForLine(SyncPulseKind::kHorizontal));
-  EXPECT_FALSE(BurstEnabledForLine(SyncPulseKind::kEqualizing));
-  EXPECT_FALSE(BurstEnabledForLine(SyncPulseKind::kVerticalSync));
+  EXPECT_TRUE(BurstEnabledForLine(Standard::kPal, SyncPulseKind::kHorizontal));
+  EXPECT_FALSE(BurstEnabledForLine(Standard::kPal, SyncPulseKind::kEqualizing));
+  EXPECT_FALSE(
+      BurstEnabledForLine(Standard::kPal, SyncPulseKind::kVerticalSync));
+}
+
+TEST(SignalTimingModelTest, SecamLinesCarryNoColourBurst) {
+  // ITU-R BT.1700 Annex 1 Part C Table 4 item 13: SECAM identifies lines by
+  // the undeviated back-porch subcarrier, not a burst.
+  EXPECT_FALSE(
+      BurstEnabledForLine(Standard::kSecam, SyncPulseKind::kHorizontal));
+  for (const LineTimingPrimitive& line :
+       BuildFrameTimingPrimitives(Standard::kSecam)) {
+    ASSERT_FALSE(line.burst_enabled) << "line " << line.line_number_1based;
+  }
+}
+
+TEST(SignalTimingModelTest, SecamSharesThe625LineStructure) {
+  const std::vector<LineTimingPrimitive> pal =
+      BuildFrameTimingPrimitives(Standard::kPal);
+  const std::vector<LineTimingPrimitive> secam =
+      BuildFrameTimingPrimitives(Standard::kSecam);
+  ASSERT_EQ(secam.size(), pal.size());
+  for (std::size_t i = 0; i < pal.size(); ++i) {
+    EXPECT_EQ(secam[i].field_index_1based, pal[i].field_index_1based);
+    EXPECT_EQ(secam[i].sync_pulse_kind, pal[i].sync_pulse_kind);
+    EXPECT_EQ(secam[i].content_kind, pal[i].content_kind);
+  }
 }
 
 TEST(SignalTimingModelTest,

@@ -414,7 +414,7 @@ void PreviewPane::OnCursorMoved(int sample_index, double microseconds,
                      .arg(microseconds, 0, 'f', 2)
                      .arg(millivolts, 0, 'f', 1);
   // IRE applies to the System M standards (NTSC, PAL-M).
-  if (info.has_value() && info->standard != Standard::kPal) {
+  if (info.has_value() && !Is625LineStandard(info->standard)) {
     text += tr(" · %1 IRE").arg(MillivoltsToIre(millivolts), 0, 'f', 1);
   }
   readout_label_->setText(text);

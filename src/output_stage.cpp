@@ -219,7 +219,9 @@ bool WriteMetadataDatabase(const Project& project, std::size_t frame_count,
   }
 
   char* error_msg = nullptr;
-  if (sqlite3_exec(db, "PRAGMA user_version = 11;", nullptr, nullptr,
+  // CVBS File Format Specification v1.7.0, SQLite Metadata Schema: version 12
+  // adds the SECAM preset and is otherwise identical to version 11.
+  if (sqlite3_exec(db, "PRAGMA user_version = 12;", nullptr, nullptr,
                    &error_msg) != SQLITE_OK) {
     errors->push_back(std::string("Failed to set PRAGMA user_version: ") +
                       error_msg);
@@ -232,7 +234,7 @@ bool WriteMetadataDatabase(const Project& project, std::size_t frame_count,
       "CREATE TABLE cvbs_file ("
       "    cvbs_file_id                INTEGER PRIMARY KEY,"
       "    preset                      TEXT    NOT NULL"
-      "        CHECK (preset IN ('NTSC', 'PAL', 'PAL_M')),"
+      "        CHECK (preset IN ('NTSC', 'PAL', 'PAL_M', 'SECAM')),"
       "    sample_encoding_preset      TEXT    NOT NULL"
       "        CHECK (sample_encoding_preset IN ('CVBS_U10_4FSC', "
       "'CVBS_U16_4FSC', 'RAW_S16_28M', 'RAW_S16_40M', 'CVBS_TPG21_4FSC', "
@@ -450,10 +452,11 @@ bool OutputStage::BeginWrite(const Project& project,
         "Output stage requires a supported sample_encoding_preset.");
     return false;
   }
-  if (!IsLockedSignalStatePreset(project.cvbs_presets.signal_state_preset)) {
-    errors->push_back(
-        "Output stage requires a time-base stable, phase-locked "
-        "signal_state_preset.");
+  const std::string required_signal_state =
+      GeneratedSignalStatePreset(project.cvbs_presets.video_standard_preset);
+  if (project.cvbs_presets.signal_state_preset != required_signal_state) {
+    errors->push_back("Output stage requires signal_state_preset " +
+                      required_signal_state + " for this video standard.");
     return false;
   }
 

@@ -22,6 +22,8 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QStandardItem>
+#include <QStandardItemModel>
 #include <QVBoxLayout>
 #include <utility>
 
@@ -38,6 +40,8 @@ constexpr int kVitsLinesColumn = 1;
 const char* const kDiscTypeNone = "(none)";
 
 // VITS placement combo item order: 0 standard, 1 laserdisc, 2 custom.
+constexpr int kVitsPlacementLaserdiscIndex = 1;
+
 videosynth::VitsPlacement VitsPlacementFromComboIndex(int index) {
   switch (index) {
     case 1:
@@ -122,12 +126,6 @@ void ProjectSettingsEditor::BuildUi() {
   setup_ire_check_ =
       new QCheckBox(tr("Override NTSC black setup IRE"), presets_group);
   setup_ire_combo_ = new QComboBox(presets_group);
-  secam_check_ =
-      new QCheckBox(tr("SECAM chroma encoding (ITU-R BT.1700 Annex 1 Part C)"),
-                    presets_group);
-  secam_check_->setToolTip(
-      tr("Replaces PAL chroma and burst with 625-line SECAM FM chroma. "
-         "Timing, levels and the file preset stay PAL."));
   secam_field_id_check_ = new QCheckBox(
       tr("SECAM field identification (lines 7–15 / 320–328)"), presets_group);
 
@@ -141,7 +139,6 @@ void ProjectSettingsEditor::BuildUi() {
   setup_row->addWidget(setup_ire_combo_);
   setup_row->addStretch();
   presets_form->addRow(setup_row);
-  presets_form->addRow(secam_check_);
   presets_form->addRow(secam_field_id_check_);
   layout->addWidget(presets_group);
 
@@ -157,11 +154,6 @@ void ProjectSettingsEditor::BuildUi() {
     }
   });
   connect(vbi_burst_check_, &QCheckBox::toggled, this, [this] {
-    if (!updating_) {
-      CommitCvbsPresets();
-    }
-  });
-  connect(secam_check_, &QCheckBox::toggled, this, [this] {
     if (!updating_) {
       CommitCvbsPresets();
     }
@@ -333,8 +325,6 @@ void ProjectSettingsEditor::LoadFromDocument() {
   vbi_burst_check_->setChecked(project.cvbs_presets.ntsc_laserdisc_vbi_burst);
   setup_ire_check_->setChecked(
       project.cvbs_presets.ntsc_black_setup_ire_specified);
-  secam_check_->setChecked(project.cvbs_presets.chroma_encoding ==
-                           ChromaEncoding::kSecam);
   secam_field_id_check_->setChecked(
       project.cvbs_presets.secam_field_identification);
 
@@ -458,8 +448,15 @@ void ProjectSettingsEditor::ApplyEnablement() {
   pilot_burst_check_->setEnabled(state.pilot_burst_editable);
   vbi_burst_check_->setEnabled(state.vbi_burst_editable);
   setup_ire_check_->setEnabled(state.setup_ire_editable);
-  secam_check_->setEnabled(state.secam_editable);
   secam_field_id_check_->setEnabled(state.secam_field_identification_editable);
+  disc_type_combo_->setEnabled(state.laserdisc_editable);
+  if (auto* placement_model =
+          qobject_cast<QStandardItemModel*>(vits_placement_combo_->model())) {
+    if (QStandardItem* laserdisc_item =
+            placement_model->item(kVitsPlacementLaserdiscIndex)) {
+      laserdisc_item->setEnabled(state.laserdisc_editable);
+    }
+  }
   setup_ire_combo_->setEnabled(state.setup_ire_editable &&
                                setup_ire_check_->isChecked());
   video_path_hint_->setText(
@@ -530,9 +527,6 @@ void ProjectSettingsEditor::CommitCvbsPresets() {
   presets.pal_laserdisc_pilot_burst = pilot_burst_check_->isChecked();
   presets.ntsc_laserdisc_vbi_burst = vbi_burst_check_->isChecked();
   presets.ntsc_black_setup_ire_specified = setup_ire_check_->isChecked();
-  presets.chroma_encoding = secam_check_->isChecked()
-                                ? ChromaEncoding::kSecam
-                                : ChromaEncoding::kStandard;
   presets.secam_field_identification = secam_field_id_check_->isChecked();
   presets.ntsc_black_setup_ire =
       setup_ire_check_->isChecked() ? setup_ire_combo_->currentData().toDouble()

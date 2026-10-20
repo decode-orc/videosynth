@@ -28,6 +28,11 @@ enum class Standard {
   // PAL-M: System M line structure (525 lines, ~60 Hz) with PAL colour
   // encoding. Used in Brazil. ITU-R BT.470-6 Table 2 (M/PAL column).
   kPalM,
+  // SECAM: 625-line, 25 frame/s system with frequency-modulated chrominance
+  // (ITU-R BT.1700 Annex 1 Part C). Shares PAL's line and field timing,
+  // signal levels and 4fsc storage lattice (CVBS File Format Specification
+  // v1.7.0, Video Standard Presets, Preset: SECAM).
+  kSecam,
   kUnknown,
 };
 
@@ -41,6 +46,9 @@ inline Standard StandardFromString(const std::string& value) {
   if (value == "PAL_M" || value == "PAL-M") {
     return Standard::kPalM;
   }
+  if (value == "SECAM") {
+    return Standard::kSecam;
+  }
   return Standard::kUnknown;
 }
 
@@ -52,9 +60,19 @@ inline std::string StandardToString(Standard standard) {
       return "NTSC";
     case Standard::kPalM:
       return "PAL_M";
+    case Standard::kSecam:
+      return "SECAM";
     default:
       return "UNKNOWN";
   }
+}
+
+// True for the 625-line, 25 frame/s standards. PAL and SECAM share the line and
+// field timing, sync structure, signal levels, active raster and 4fsc storage
+// lattice; only the colour encoding differs (ITU-R BT.1700 Annex 1 Part B
+// and Part C).
+inline bool Is625LineStandard(Standard standard) {
+  return standard == Standard::kPal || standard == Standard::kSecam;
 }
 
 // VITS placement policy for a project. Governs where the project-wide VITS test
@@ -110,35 +128,6 @@ inline std::vector<int> LaserdiscVitsLines(Standard standard) {
   }
 }
 
-// Colour encoding applied on top of the video standard preset.
-//
-//   kStandard — the preset's own colour system (PAL, NTSC or PAL-M quadrature
-//               modulation with colour burst).
-//   kSecam    — 625-line SECAM frequency-modulated chroma (ITU-R BT.1700
-//               Annex 1 Part C). The CVBS file format has no SECAM video
-//               standard preset; SECAM shares the 625-line, 50 Hz line
-//               structure, levels and the 4fsc PAL sample lattice, so it is
-//               carried on the PAL preset and only the chrominance differs.
-enum class ChromaEncoding { kStandard, kSecam };
-
-inline ChromaEncoding ChromaEncodingFromString(const std::string& value,
-                                               bool* ok) {
-  if (value == "STANDARD") {
-    *ok = true;
-    return ChromaEncoding::kStandard;
-  }
-  if (value == "SECAM") {
-    *ok = true;
-    return ChromaEncoding::kSecam;
-  }
-  *ok = false;
-  return ChromaEncoding::kStandard;
-}
-
-inline std::string ChromaEncodingToString(ChromaEncoding encoding) {
-  return encoding == ChromaEncoding::kSecam ? "SECAM" : "STANDARD";
-}
-
 // Placeholder for project-level biphase configuration.
 // All disc-specific biphase parameters are specified per section and
 // per injection; this struct is reserved for any future global settings.
@@ -152,7 +141,6 @@ struct CvbsPresets {
   bool ntsc_laserdisc_vbi_burst = false;
   double ntsc_black_setup_ire = 7.5;
   bool ntsc_black_setup_ire_specified = false;
-  ChromaEncoding chroma_encoding = ChromaEncoding::kStandard;
   // SECAM only: emit the field identification signals on lines 7-15 and
   // 320-328 (ITU-R BT.1700 Annex 1 Part C Table 4 item 13). Line
   // identification on the back porch is always present.
@@ -197,8 +185,14 @@ inline std::string SampleRateModeFromEncodingPreset(const std::string& preset) {
   return "unknown";
 }
 
-inline bool IsLockedSignalStatePreset(const std::string& preset) {
-  return preset == "STANDARD_STABLE_LOCKED";
+// The signal state preset that generated output declares for `standard`.
+// Synthesised output is always time-base stable at the standard 4fsc rate.
+// It is phase locked for the quadrature standards, but SECAM defines no Sc/H
+// convention and must not be declared phase locked (CVBS File Format
+// Specification v1.7.0, Preset: SECAM, Subcarrier phase and phase locking).
+inline std::string GeneratedSignalStatePreset(Standard standard) {
+  return standard == Standard::kSecam ? "STANDARD_STABLE_UNLOCKED"
+                                      : "STANDARD_STABLE_LOCKED";
 }
 
 struct NoiseParameters {
@@ -581,7 +575,6 @@ inline bool operator==(const CvbsPresets& a, const CvbsPresets& b) {
          a.ntsc_laserdisc_vbi_burst == b.ntsc_laserdisc_vbi_burst &&
          a.ntsc_black_setup_ire == b.ntsc_black_setup_ire &&
          a.ntsc_black_setup_ire_specified == b.ntsc_black_setup_ire_specified &&
-         a.chroma_encoding == b.chroma_encoding &&
          a.secam_field_identification == b.secam_field_identification &&
          a.biphase_presets == b.biphase_presets;
 }

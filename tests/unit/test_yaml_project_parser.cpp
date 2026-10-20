@@ -194,15 +194,12 @@ TEST(YamlProjectParserTest, RejectsInvalidDurationFramesScalar) {
   EXPECT_FALSE(result.errors.empty());
 }
 
-std::string SecamPresetYaml(const std::string& extra_presets) {
+std::string PresetYaml(const std::string& presets) {
   return "project:\n"
-         "  name: SecamParse\n"
+         "  name: PresetParse\n"
          "  version: \"1.0\"\n"
-         "cvbs_presets:\n"
-         "  video_standard_preset: PAL\n"
-         "  sample_encoding_preset: CVBS_U10_4FSC\n"
-         "  signal_state_preset: STANDARD_STABLE_LOCKED\n" +
-         extra_presets +
+         "cvbs_presets:\n" +
+         presets +
          "output:\n"
          "  video_path: out.cvbs\n"
          "sections:\n"
@@ -212,32 +209,49 @@ std::string SecamPresetYaml(const std::string& extra_presets) {
          "    duration_frames: 2\n";
 }
 
-TEST(YamlProjectParserTest, ParsesSecamChromaEncoding) {
+TEST(YamlProjectParserTest, ParsesSecamPresetAndFieldIdentification) {
   YamlProjectParser parser;
   const ParseResult result = parser.ParseString(
-      SecamPresetYaml("  chroma_encoding: SECAM\n"
-                      "  secam_field_identification: false\n"));
+      PresetYaml("  video_standard_preset: SECAM\n"
+                 "  sample_encoding_preset: CVBS_U10_4FSC\n"
+                 "  signal_state_preset: STANDARD_STABLE_UNLOCKED\n"
+                 "  secam_field_identification: false\n"));
 
   ASSERT_TRUE(result.ok);
-  EXPECT_EQ(result.project.cvbs_presets.chroma_encoding,
-            ChromaEncoding::kSecam);
+  EXPECT_EQ(result.project.cvbs_presets.video_standard_preset,
+            Standard::kSecam);
+  EXPECT_EQ(result.project.cvbs_presets.signal_state_preset,
+            "STANDARD_STABLE_UNLOCKED");
   EXPECT_FALSE(result.project.cvbs_presets.secam_field_identification);
 }
 
-TEST(YamlProjectParserTest, ChromaEncodingDefaultsToStandard) {
+TEST(YamlProjectParserTest, OmittedSignalStateDefaultsPerStandard) {
   YamlProjectParser parser;
-  const ParseResult result = parser.ParseString(SecamPresetYaml(""));
+  const ParseResult secam = parser.ParseString(
+      PresetYaml("  video_standard_preset: SECAM\n"
+                 "  sample_encoding_preset: CVBS_U10_4FSC\n"));
+  ASSERT_TRUE(secam.ok);
+  EXPECT_EQ(secam.project.cvbs_presets.signal_state_preset,
+            "STANDARD_STABLE_UNLOCKED");
+  EXPECT_TRUE(secam.project.cvbs_presets.secam_field_identification);
 
-  ASSERT_TRUE(result.ok);
-  EXPECT_EQ(result.project.cvbs_presets.chroma_encoding,
-            ChromaEncoding::kStandard);
-  EXPECT_TRUE(result.project.cvbs_presets.secam_field_identification);
+  const ParseResult pal = parser.ParseString(
+      PresetYaml("  video_standard_preset: PAL\n"
+                 "  sample_encoding_preset: CVBS_U10_4FSC\n"));
+  ASSERT_TRUE(pal.ok);
+  EXPECT_EQ(pal.project.cvbs_presets.signal_state_preset,
+            "STANDARD_STABLE_LOCKED");
 }
 
-TEST(YamlProjectParserTest, RejectsUnknownChromaEncoding) {
+TEST(YamlProjectParserTest, RejectsChromaEncodingKey) {
+  // SECAM is a video standard preset (CVBS File Format Specification v1.7.0),
+  // not a colour-encoding option on PAL.
   YamlProjectParser parser;
-  const ParseResult result =
-      parser.ParseString(SecamPresetYaml("  chroma_encoding: MESECAM\n"));
+  const ParseResult result = parser.ParseString(
+      PresetYaml("  video_standard_preset: PAL\n"
+                 "  sample_encoding_preset: CVBS_U10_4FSC\n"
+                 "  signal_state_preset: STANDARD_STABLE_LOCKED\n"
+                 "  chroma_encoding: SECAM\n"));
 
   EXPECT_FALSE(result.ok);
   ASSERT_FALSE(result.errors.empty());

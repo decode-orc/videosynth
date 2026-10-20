@@ -239,6 +239,26 @@ TEST(SecamChromaEncoderTest, IdentificationLinesReachMaximumDeviation) {
               20.0e3);
 }
 
+TEST(SecamChromaEncoderTest, EmptyActiveLineEncodesUndeviatedSubcarrier) {
+  // A colourless line (no source pixels) is the undeviated subcarrier
+  // throughout the gate; the OSD renderer writes it under SECAM text. Used
+  // through the interface, as the generation stage does.
+  const SecamChromaEncoder concrete(kSampleRateHz);
+  const ISecamChromaEncoder& encoder = concrete;
+  std::vector<SampleFixed> empty_line;
+  std::vector<SampleFixed> neutral_line;
+  encoder.EncodeLine(SecamLineComponent::kDb, 0.0, {}, 0, kLineSamples,
+                     &empty_line);
+  encoder.EncodeLine(SecamLineComponent::kDb, 0.0, UniformActiveLine(512, 512),
+                     kActiveStart, kLineSamples, &neutral_line);
+
+  ASSERT_EQ(empty_line.size(), static_cast<std::size_t>(kLineSamples));
+  EXPECT_NEAR(MeasureFrequencyHz(empty_line, SecondsToSample(7.0e-6),
+                                 kLineSamples - SecondsToSample(3.0e-6)),
+              kFobHz, 2.0e3);
+  EXPECT_EQ(empty_line, neutral_line);
+}
+
 TEST(SecamChromaEncoderTest, RejectsNullOutput) {
   const SecamChromaEncoder encoder(kSampleRateHz);
   EXPECT_THROW(encoder.EncodeLine(SecamLineComponent::kDr, 0.0,

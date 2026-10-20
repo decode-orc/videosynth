@@ -52,6 +52,47 @@ double SecamInitialPhaseRadForLine(int line_number_1based, int frame_parity);
 // and lines 320 to 328 (fields 2 and 4).
 bool IsSecamFieldIdentificationLine(int line_number_1based);
 
+// Line-sequential SECAM chroma encoder.
+//
+// Unlike IChromaEncoder, which modulates only the active window onto a
+// continuous quadrature subcarrier, a SECAM encoder emits the complete
+// chrominance signal of one line from 0H, including the subcarrier blanking
+// gate and the back-porch line identification reference.
+//
+// Thread-safety: Implementations document their own guarantees.
+class ISecamChromaEncoder {
+ public:
+  virtual ~ISecamChromaEncoder() = default;
+
+  // Encodes one active-picture line.
+  //
+  // Args:
+  //   component:           D'R or D'B line (see SecamComponentForLine).
+  //   initial_phase_rad:   Subcarrier phase at 0H (see
+  //                        SecamInitialPhaseRadForLine).
+  //   active_pixels:       Source pixels of the active window, one per sample.
+  //                        An empty vector encodes a colourless line (the
+  //                        undeviated subcarrier throughout the gate).
+  //   active_start_sample: Offset of active_pixels[0] from 0H, in samples.
+  //   line_samples:        Number of samples in the line (0H to next 0H).
+  //   out_chroma_mv:       Receives line_samples chroma samples; caller-owned,
+  //                        must be non-null.
+  virtual void EncodeLine(SecamLineComponent component,
+                          double initial_phase_rad,
+                          const std::vector<YCbCr444Pixel>& active_pixels,
+                          int active_start_sample, int line_samples,
+                          std::vector<SampleFixed>* out_chroma_mv) const = 0;
+
+  // Encodes one field identification line.
+  //
+  // ITU-R BT.1700 Annex 1 Part C Table 4 item 13 and Figure 17: D'R* rises
+  // linearly over 15 µs from 0 to +1.25, D'B* falls linearly over 18 µs from 0
+  // to −1.52, then both stay constant to the end of the line.
+  virtual void EncodeIdentificationLine(
+      SecamLineComponent component, double initial_phase_rad, int line_samples,
+      std::vector<SampleFixed>* out_chroma_mv) const = 0;
+};
+
 // 625-line SECAM chroma encoder.
 //
 // Produces the complete chrominance subcarrier of one line, sampled from 0H,
@@ -80,37 +121,21 @@ bool IsSecamFieldIdentificationLine(int line_number_1based);
 //
 // Thread-safety: NOT thread-safe — the per-line workspaces are mutable
 // members. Serialise access or construct one encoder per worker thread.
-class SecamChromaEncoder {
+class SecamChromaEncoder final : public ISecamChromaEncoder {
  public:
   explicit SecamChromaEncoder(double sample_rate_hz);
 
-  // Encodes one active-picture line.
-  //
-  // Args:
-  //   component:           D'R or D'B line (see SecamComponentForLine).
-  //   initial_phase_rad:   Subcarrier phase at 0H (see
-  //                        SecamInitialPhaseRadForLine).
-  //   active_pixels:       Source pixels of the active window, one per sample.
-  //   active_start_sample: Offset of active_pixels[0] from 0H, in samples.
-  //   line_samples:        Number of samples in the line (0H to next 0H).
-  //   out_chroma_mv:       Receives line_samples chroma samples; caller-owned,
-  //                        must be non-null.
   void EncodeLine(SecamLineComponent component, double initial_phase_rad,
                   const std::vector<YCbCr444Pixel>& active_pixels,
                   int active_start_sample, int line_samples,
-                  std::vector<SampleFixed>* out_chroma_mv) const;
+                  std::vector<SampleFixed>* out_chroma_mv) const override;
 
-  // Encodes one field identification line.
-  //
-  // ITU-R BT.1700 Annex 1 Part C Table 4 item 13 and Figure 17: D'R* rises
-  // linearly over 15 µs from 0 to +1.25, D'B* falls linearly over 18 µs from 0
-  // to −1.52, then both stay constant to the end of the line. The ramp starts
-  // at the back edge of line blanking. The trapezoid is already the
-  // precorrected D* signal, so neither the low-pass nor the low-frequency
-  // precorrection is applied to it.
-  void EncodeIdentificationLine(SecamLineComponent component,
-                                double initial_phase_rad, int line_samples,
-                                std::vector<SampleFixed>* out_chroma_mv) const;
+  // The identification ramp starts at the back edge of line blanking. The
+  // trapezoid is already the precorrected D* signal, so neither the low-pass
+  // nor the low-frequency precorrection is applied to it.
+  void EncodeIdentificationLine(
+      SecamLineComponent component, double initial_phase_rad, int line_samples,
+      std::vector<SampleFixed>* out_chroma_mv) const override;
 
  private:
   // Modulates deviation_norm_ (D* per sample) onto the line's subcarrier,

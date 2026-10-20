@@ -38,7 +38,7 @@ inline bool BuildQuantizationProfile(Standard standard,
     return false;
   }
 
-  if (standard == Standard::kPal) {
+  if (Is625LineStandard(standard)) {
     *profile = QuantizationProfile{
         .millivolts_per_code = 1.1905,
         .blanking_code = 256,

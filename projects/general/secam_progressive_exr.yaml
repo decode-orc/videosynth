@@ -1,13 +1,12 @@
 project:
   name: SECAMProgressiveExrFixture
   version: "1.0"
-  description: SECAM chroma on the 625-line PAL preset, progressive EXR fixture
+  description: 625-line SECAM preset, progressive EXR fixture with an OSD overlay
 
 cvbs_presets:
-  video_standard_preset: PAL
+  video_standard_preset: SECAM
   sample_encoding_preset: CVBS_TPG21_4FSC
-  signal_state_preset: STANDARD_STABLE_LOCKED
-  chroma_encoding: SECAM
+  signal_state_preset: STANDARD_STABLE_UNLOCKED
 
 output:
   video_path: "{output}/videosynth_secam_progressive_exr.cvbs"
@@ -17,6 +16,14 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x576/100_BARS.exr"
     duration_frames: 4
+    osd:
+      overlays:
+        - text: "SECAM"
+          x: 300
+          y: 100
+          scale: 4
+          fg_luma: white
+          bg_luma: black
   - name: SecamExr75Bars
     type: progressive
     source: "{bundled}/exr/720x576/75_BARS.exr"

@@ -332,11 +332,12 @@ bool ValidateMkvProfileWithFfprobe(const std::string& source, Standard standard,
     return false;
   }
 
-  if (standard == Standard::kPal) {
+  if (Is625LineStandard(standard)) {
     if (width != 720 || height != 576) {
       if (error != nullptr) {
         *error =
-            "Progressive MKV raster must be 720x576 for PAL and 720x486 for "
+            "Progressive MKV raster must be 720x576 for PAL/SECAM and 720x486 "
+            "for "
             "NTSC or PAL-M.";
       }
       return false;
@@ -385,7 +386,8 @@ bool ValidateMkvProfileWithFfprobe(const std::string& source, Standard standard,
     if (width != 720 || height != 486) {
       if (error != nullptr) {
         *error =
-            "Progressive MKV raster must be 720x576 for PAL and 720x486 for "
+            "Progressive MKV raster must be 720x576 for PAL/SECAM and 720x486 "
+            "for "
             "NTSC or PAL-M.";
       }
       return false;
@@ -435,7 +437,8 @@ bool ValidateMkvProfileWithFfprobe(const std::string& source, Standard standard,
     if (width != 720 || height != 486) {
       if (error != nullptr) {
         *error =
-            "Progressive MKV raster must be 720x576 for PAL and 720x486 for "
+            "Progressive MKV raster must be 720x576 for PAL/SECAM and 720x486 "
+            "for "
             "NTSC or PAL-M.";
       }
       return false;
@@ -511,12 +514,13 @@ bool DecodeMkvFrames(
     return false;
   }
 
-  const bool is_pal = standard == Standard::kPal;
-  const int expected_height = is_pal ? kPalHeight : kNtscHeight;
+  const bool is_625_line = Is625LineStandard(standard);
+  const int expected_height = is_625_line ? kPalHeight : kNtscHeight;
   if (source_height != expected_height || source_width != 720) {
     if (error != nullptr) {
       *error =
-          "Progressive MKV raster must be 720x576 for PAL and 720x486 for "
+          "Progressive MKV raster must be 720x576 for PAL/SECAM and 720x486 "
+          "for "
           "NTSC or PAL-M.";
     }
     return false;
@@ -652,7 +656,7 @@ bool DecodeMkvFrames(
 }
 
 void SetFrameGeometryForStandard(Standard standard, FrameSourceImage* image) {
-  if (standard == Standard::kPal) {
+  if (Is625LineStandard(standard)) {
     image->width = kPalWidth;
     image->height = kPalHeight;
     image->active_x = kPalActiveX;
@@ -690,7 +694,7 @@ YCbCr444Pixel ConvertRgbFloatToBt601(std::float_t r, std::float_t g,
 
 bool ValidateExrMetadata(const Imf::Header& header, int width, int height,
                          Standard standard, std::string* error) {
-  if (standard != Standard::kPal && standard != Standard::kNtsc &&
+  if (!Is625LineStandard(standard) && standard != Standard::kNtsc &&
       standard != Standard::kPalM) {
     if (error != nullptr) {
       *error = "Unsupported video standard for progressive EXR source.";
@@ -741,7 +745,7 @@ bool ValidateExrMetadata(const Imf::Header& header, int width, int height,
   }
 
   const float expected_pixel_aspect =
-      standard == Standard::kPal ? (128.0F / 117.0F) : (108.0F / 119.0F);
+      Is625LineStandard(standard) ? (128.0F / 117.0F) : (108.0F / 119.0F);
   if (std::abs(header.pixelAspectRatio() - expected_pixel_aspect) > 2.0e-3F) {
     if (error != nullptr) {
       *error =
@@ -761,7 +765,7 @@ bool ValidateExrMetadata(const Imf::Header& header, int width, int height,
   }
 
   const auto fps_value = fps->value();
-  if ((standard == Standard::kPal &&
+  if ((Is625LineStandard(standard) &&
        !(fps_value.n == 25 && fps_value.d == 1)) ||
       ((standard == Standard::kNtsc || standard == Standard::kPalM) &&
        !(fps_value.n == 30000 && fps_value.d == 1001))) {
@@ -803,12 +807,13 @@ bool LoadExrFrame(const std::string& source, Standard standard,
     const int width = (data_window.max.x - data_window.min.x) + 1;
     const int height = (data_window.max.y - data_window.min.y) + 1;
 
-    const bool is_pal = standard == Standard::kPal;
-    const int expected_height = is_pal ? kPalHeight : kNtscHeight;
+    const bool is_625_line = Is625LineStandard(standard);
+    const int expected_height = is_625_line ? kPalHeight : kNtscHeight;
     if (height != expected_height || width != 720) {
       if (error != nullptr) {
         *error =
-            "Progressive EXR raster must be 720x576 for PAL and 720x486 for "
+            "Progressive EXR raster must be 720x576 for PAL/SECAM and 720x486 "
+            "for "
             "NTSC or PAL-M.";
       }
       return false;

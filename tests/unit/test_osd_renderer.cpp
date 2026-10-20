@@ -118,6 +118,39 @@ TEST(OsdRendererTest, WritesCorrectGlyphAtOriginScale1) {
   EXPECT_EQ(SampleAt(buf, 3, 7), blank);  // bit 0 clear
 }
 
+// OsdRenderer_WritesNeutralChroma_WhenLinesSupplied
+// With a neutral-chroma line table (SECAM), OSD pixels take the line's neutral
+// chroma; lines without an entry fall back to zero chroma.
+TEST(OsdRendererTest, WritesNeutralChromaWhenLinesSupplied) {
+  OsdRenderer renderer;
+  auto buf = MakeBuffer(SampleFixed{0});
+  auto cbuf = MakeBuffer(MillivoltsToSampleFixed(50.0));
+  const auto offsets = MakeLineOffsets();
+  const auto cfg =
+      MakeSingleOverlay("A", 0, 0, 1, OsdFgLevel::kWhite, OsdBgLevel::kBlack);
+
+  std::vector<SampleFixed> neutral(static_cast<std::size_t>(kSamplesPerLine));
+  for (int i = 0; i < kSamplesPerLine; ++i) {
+    neutral[static_cast<std::size_t>(i)] = MillivoltsToSampleFixed(i);
+  }
+  std::vector<const SampleFixed*> neutral_lines(
+      static_cast<std::size_t>(kLines), neutral.data());
+  neutral_lines[5] = nullptr;
+
+  renderer.Render(cfg, {cfg.overlays[0].text}, &buf, &cbuf, 0, offsets,
+                  kActiveLineStart, kActiveLineEnd, kActiveSampleStart,
+                  kActiveSampleEnd, PalLevels(), &neutral_lines);
+
+  // Row 3 (foreground and background cells) takes the neutral line samples.
+  for (int col = 0; col < 8; ++col) {
+    EXPECT_EQ(SampleAt(cbuf, 3, col), MillivoltsToSampleFixed(col)) << col;
+  }
+  // Row 5 has no neutral entry, so chroma is zeroed as before.
+  EXPECT_EQ(SampleAt(cbuf, 5, 2), SampleFixed{0});
+  // Outside the glyph cell the picture chroma is untouched.
+  EXPECT_EQ(SampleAt(cbuf, 3, 8), MillivoltsToSampleFixed(50.0));
+}
+
 // OsdRenderer_MapsFgLevels_ToDiscreteLuma
 // Each of the four supported foreground levels must render at its defined
 // E_Y' luma step: white=1.0, light_grey=0.75, dark_grey=0.25, black=0.0.
