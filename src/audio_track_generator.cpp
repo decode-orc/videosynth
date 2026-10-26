@@ -11,8 +11,11 @@
 #include "videosynth/audio_track_generator.h"
 
 #include <algorithm>
+#include <cmath>
+#include <utility>
 
 #include "videosynth/audio_sample_conversion.h"
+#include "videosynth/progressive_frame_source_probe.h"
 #include "videosynth/timing_constants.h"
 
 namespace videosynth {
@@ -35,11 +38,40 @@ const AudioChannelPair* FindPair(const Section* section, int pair) {
 
 }  // namespace
 
-AudioTrackGenerator::AudioTrackGenerator(ILogger* logger) : logger_(logger) {}
+AudioTrackGenerator::AudioTrackGenerator(
+    ILogger* logger, std::shared_ptr<IProgressiveFrameSourceProbe> probe,
+    AudioSampleSourceFactory sample_source_factory)
+    : logger_(logger),
+      probe_(std::move(probe)),
+      sample_source_factory_(std::move(sample_source_factory)) {
+  if (probe_ == nullptr) {
+    probe_ = std::make_shared<ProgressiveFrameSourceProbe>();
+  }
+  if (!sample_source_factory_) {
+    sample_source_factory_ = [] {
+      return std::make_unique<FfmpegAudioSampleSource>();
+    };
+  }
+}
 
 bool AudioTrackGenerator::Begin(
     const Project& project,
     const std::vector<const Section*>& output_frame_sections,
+    std::vector<std::string>* errors) {
+  std::vector<AudioOutputFrame> frames;
+  frames.reserve(output_frame_sections.size());
+  int position_in_run = 0;
+  for (std::size_t k = 0; k < output_frame_sections.size(); ++k) {
+    if (k > 0 && output_frame_sections[k] != output_frame_sections[k - 1]) {
+      position_in_run = 0;
+    }
+    frames.push_back({output_frame_sections[k], position_in_run++});
+  }
+  return Begin(project, frames, errors);
+}
+
+bool AudioTrackGenerator::Begin(
+    const Project& project, const std::vector<AudioOutputFrame>& output_frames,
     std::vector<std::string>* errors) {
   if (errors == nullptr) {
     return false;
@@ -48,6 +80,7 @@ bool AudioTrackGenerator::Begin(
   pairs_.clear();
   pair_numbers_.clear();
   frame_sections_.clear();
+  frame_source_indices_.clear();
   frame_sample_counts_.clear();
   is_run_start_.clear();
   run_total_samples_.clear();
@@ -68,8 +101,13 @@ bool AudioTrackGenerator::Begin(
   }
 
   standard_ = project.cvbs_presets.video_standard_preset;
-  const std::size_t frame_count = output_frame_sections.size();
-  frame_sections_ = output_frame_sections;
+  const std::size_t frame_count = output_frames.size();
+  frame_sections_.reserve(frame_count);
+  frame_source_indices_.reserve(frame_count);
+  for (const AudioOutputFrame& frame : output_frames) {
+    frame_sections_.push_back(frame.section);
+    frame_source_indices_.push_back(frame.source_frame_index);
+  }
 
   // Per-frame sample counts follow output position (SMPTE 272M §14.3).
   frame_sample_counts_.resize(frame_count);
@@ -140,11 +178,15 @@ bool AudioTrackGenerator::Begin(
     state.writer = std::make_unique<AudioWavWriter>(logger_);
     state.left = std::make_unique<AudioSynthesizer>(sample_rate_hz);
     state.right = std::make_unique<AudioSynthesizer>(sample_rate_hz);
+    state.media = std::make_unique<AudioMediaReader>(
+        sample_source_factory_, static_cast<int>(sample_rate_hz));
     if (efm_active_ && pair == efm_pair_) {
       state.efm_left =
           std::make_unique<AudioSynthesizer>(EfmAudioSampleRateHz());
       state.efm_right =
           std::make_unique<AudioSynthesizer>(EfmAudioSampleRateHz());
+      state.efm_media = std::make_unique<AudioMediaReader>(
+          sample_source_factory_, static_cast<int>(EfmAudioSampleRateHz()));
     }
     if (!state.writer->BeginWrite(project, pair, errors)) {
       // Abort any writers already opened before failing.
@@ -188,11 +230,54 @@ bool AudioTrackGenerator::Begin(
   return true;
 }
 
-void AudioTrackGenerator::BeginRun(std::size_t output_index) {
+bool AudioTrackGenerator::BeginRun(std::size_t output_index,
+                                   std::vector<std::string>* errors) {
   const Section* section = frame_sections_[output_index];
   const std::int64_t total = run_total_samples_[output_index];
   for (PairState& state : pairs_) {
     const AudioChannelPair* cp = FindPair(section, state.pair);
+    state.media_run = cp != nullptr && cp->content != AudioPairContent::kTones;
+    if (state.media_run) {
+      if (cp->content == AudioPairContent::kFile) {
+        state.media->BeginFileRun(cp->file);
+        if (state.efm_media != nullptr) {
+          state.efm_media->BeginFileRun(cp->file);
+        }
+        continue;
+      }
+
+      // Video soundtrack: place it against the pictures from the probe.
+      ProgressiveFrameSourceProfile profile;
+      std::string probe_error;
+      if (!probe_->Probe(*section, &profile, &probe_error)) {
+        errors->push_back(
+            "Audio: section '" + section->name +
+            "' video soundtrack could not be probed: " + probe_error);
+        return false;
+      }
+      const int stream = cp->video_audio.stream;
+      if (stream < 0 ||
+          stream >= static_cast<int>(profile.audio_streams.size())) {
+        errors->push_back("Audio: section '" + section->name +
+                          "' source has no audio stream " +
+                          std::to_string(stream) + ".");
+        return false;
+      }
+      // The validator holds the source to the standard's exact frame rate.
+      VideoAudioTiming timing;
+      timing.frame_rate_hz = GetTimingConstants(standard_).frame_rate_hz;
+      timing.video_start_offset_seconds = profile.video_start_time_seconds -
+                                          profile.container_start_time_seconds;
+      timing.audio_start_offset_seconds =
+          profile.audio_streams[static_cast<std::size_t>(stream)]
+              .start_time_seconds -
+          profile.container_start_time_seconds;
+      state.media->BeginVideoRun(section->source, stream, timing);
+      if (state.efm_media != nullptr) {
+        state.efm_media->BeginVideoRun(section->source, stream, timing);
+      }
+      continue;
+    }
     // Absent pair or absent channel → a disabled AudioParameters, which the
     // synthesiser renders as silence.
     const AudioParameters left = cp != nullptr ? cp->left : AudioParameters{};
@@ -207,6 +292,25 @@ void AudioTrackGenerator::BeginRun(std::size_t output_index) {
       state.efm_right->BeginSection(right, efm_total);
     }
   }
+  return true;
+}
+
+bool AudioTrackGenerator::ReadMediaFrame(AudioMediaReader* reader,
+                                         int sample_count,
+                                         std::size_t output_index,
+                                         std::vector<std::int32_t>* left,
+                                         std::vector<std::int32_t>* right,
+                                         std::vector<std::string>* errors) {
+  std::string error;
+  if (!reader->ReadFrame(sample_count, frame_source_indices_[output_index],
+                         left, right, &error)) {
+    const Section* section = frame_sections_[output_index];
+    errors->push_back("Audio: section '" +
+                      (section != nullptr ? section->name : std::string()) +
+                      "': " + error);
+    return false;
+  }
+  return true;
 }
 
 int AudioTrackGenerator::efm_samples_for_frame(std::size_t output_index) const {
@@ -230,25 +334,40 @@ bool AudioTrackGenerator::EmitFrame(std::size_t output_index,
     return false;
   }
 
-  if (is_run_start_[output_index] != 0) {
-    BeginRun(output_index);
+  if (is_run_start_[output_index] != 0 && !BeginRun(output_index, errors)) {
+    return false;
   }
 
   const int sample_count = frame_sample_counts_[output_index];
   for (PairState& state : pairs_) {
-    const std::vector<std::int32_t> left = state.left->Synthesize(sample_count);
-    const std::vector<std::int32_t> right =
-        state.right->Synthesize(sample_count);
+    std::vector<std::int32_t> left;
+    std::vector<std::int32_t> right;
+    if (state.media_run) {
+      if (!ReadMediaFrame(state.media.get(), sample_count, output_index, &left,
+                          &right, errors)) {
+        return false;
+      }
+    } else {
+      left = state.left->Synthesize(sample_count);
+      right = state.right->Synthesize(sample_count);
+    }
     if (!state.writer->AppendFrameAudio(left, right, errors)) {
       return false;
     }
 
     if (state.efm_left != nullptr) {
       const int efm_sample_count = efm_frame_sample_counts_[output_index];
-      std::vector<std::int32_t> efm_left =
-          state.efm_left->Synthesize(efm_sample_count);
-      std::vector<std::int32_t> efm_right =
-          state.efm_right->Synthesize(efm_sample_count);
+      std::vector<std::int32_t> efm_left;
+      std::vector<std::int32_t> efm_right;
+      if (state.media_run) {
+        if (!ReadMediaFrame(state.efm_media.get(), efm_sample_count,
+                            output_index, &efm_left, &efm_right, errors)) {
+          return false;
+        }
+      } else {
+        efm_left = state.efm_left->Synthesize(efm_sample_count);
+        efm_right = state.efm_right->Synthesize(efm_sample_count);
+      }
       MuteTrackOnePause(&efm_left, &efm_right);
 
       // IEC 60908-1999 clause 12: compact-disc audio is 16-bit, so the

@@ -2,8 +2,9 @@
  * File:        test_audio_track_generator.cpp
  * Module:      audio_track_generator_tests
  * Purpose:     Validates the multi-pair AudioTrackGenerator: per-pair file
- *              emission, output-position sample counts, and per-section silence
- *              for undeclared pairs / channels.
+ *              emission, output-position sample counts, per-section silence
+ *              for undeclared pairs / channels, and file / video-soundtrack
+ *              content read through a fake sample source.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -15,9 +16,12 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <vector>
 
+#include "fake_audio_sample_source.h"
+#include "videosynth/audio_sample_conversion.h"
 #include "videosynth/audio_track_generator.h"
 #include "videosynth/audio_wav_writer.h"
 #include "videosynth/model.h"
@@ -408,6 +412,199 @@ TEST(AudioTrackGeneratorTest,
   }
 
   std::filesystem::remove(audio0);
+}
+
+// Replays one profile for every section, as the real probe would for a video
+// with the given audio streams.
+class FakeVideoProbe final : public IProgressiveFrameSourceProbe {
+ public:
+  ProgressiveFrameSourceProfile profile;
+  bool Probe(const Section&, ProgressiveFrameSourceProfile* out_profile,
+             std::string*) override {
+    *out_profile = profile;
+    return true;
+  }
+};
+
+std::shared_ptr<FakeVideoProbe> MakeVideoProbeWithAudio() {
+  auto probe = std::make_shared<FakeVideoProbe>();
+  ProgressiveAudioStreamProfile audio;
+  audio.channels = 2;
+  audio.sample_rate_hz = 48000;
+  probe->profile.audio_streams.push_back(audio);
+  return probe;
+}
+
+AudioChannelPair MakeMediaPair(int pair, AudioPairContent content) {
+  AudioChannelPair channel_pair;
+  channel_pair.pair = pair;
+  channel_pair.pair_specified = true;
+  channel_pair.content = content;
+  channel_pair.file.path = "narration.wav";
+  return channel_pair;
+}
+
+// 24-bit left/right samples of a written channel-pair file.
+void ReadWavSamples(const std::filesystem::path& path,
+                    std::vector<std::int32_t>* left,
+                    std::vector<std::int32_t>* right) {
+  const std::vector<char> bytes = ReadFileBytes(path);
+  left->clear();
+  right->clear();
+  for (std::size_t offset = 44U; offset + kStereoBytes <= bytes.size();
+       offset += kStereoBytes) {
+    left->push_back(ReadLe24Signed(bytes, offset));
+    right->push_back(ReadLe24Signed(bytes, offset + 3U));
+  }
+}
+
+TEST(AudioTrackGeneratorTest, FilePairFollowsTheNtscFiveFrameSequence) {
+  const std::filesystem::path video_path =
+      TempPath("videosynth_atg_file_ntsc.cvbs");
+  const std::filesystem::path audio0 =
+      TempPath("videosynth_atg_file_ntsc_audio_0.wav");
+  testing::FakeAudioLibrary library;
+  library.media["narration.wav"] = {0.0, 10.0};
+
+  Project project = MakeProject(video_path);
+  project.cvbs_presets.video_standard_preset = Standard::kNtsc;
+  Section section;
+  section.name = "Narrated";
+  section.audio_channel_pairs = {MakeMediaPair(0, AudioPairContent::kFile)};
+  project.sections = {section};
+  const std::vector<const Section*> frames(5, &project.sections[0]);
+
+  AudioTrackGenerator generator(nullptr, nullptr,
+                                testing::MakeFakeAudioFactory(&library));
+  std::vector<std::string> errors;
+  ASSERT_TRUE(generator.Begin(project, frames, &errors));
+  for (std::size_t k = 0; k < frames.size(); ++k) {
+    ASSERT_TRUE(generator.EmitFrame(k, &errors)) << errors.back();
+  }
+  ASSERT_TRUE(generator.Finalize(&errors));
+
+  // SMPTE 272M-1994 §14.3: five NTSC frames carry 8008 samples, read from the
+  // file without gaps or repeats.
+  std::vector<std::int32_t> left;
+  std::vector<std::int32_t> right;
+  ReadWavSamples(audio0, &left, &right);
+  ASSERT_EQ(left.size(), 8008U);
+  for (std::size_t i = 0; i < left.size(); ++i) {
+    ASSERT_EQ(left[i], static_cast<std::int32_t>(i + 1)) << "sample " << i;
+    ASSERT_EQ(right[i], -static_cast<std::int32_t>(i + 1)) << "sample " << i;
+  }
+  EXPECT_EQ(library.opens.size(), 1U);
+  std::filesystem::remove(audio0);
+}
+
+TEST(AudioTrackGeneratorTest, VideoPairFollowsTheScheduledSourceFrames) {
+  const std::filesystem::path video_path =
+      TempPath("videosynth_atg_video_loop.cvbs");
+  const std::filesystem::path audio0 =
+      TempPath("videosynth_atg_video_loop_audio_0.wav");
+  testing::FakeAudioLibrary library;
+  library.media["clip.mp4"] = {0.0, 60.0};
+
+  Project project = MakeProject(video_path);
+  Section section;
+  section.name = "Clip";
+  section.source = "clip.mp4";
+  section.audio_channel_pairs = {MakeMediaPair(0, AudioPairContent::kVideo)};
+  project.sections = {section};
+  // A range starting at source frame 10 that loops after three frames.
+  const Section* clip = &project.sections[0];
+  const std::vector<AudioOutputFrame> frames = {
+      {clip, 10}, {clip, 11}, {clip, 12}, {clip, 10}};
+
+  AudioTrackGenerator generator(nullptr, MakeVideoProbeWithAudio(),
+                                testing::MakeFakeAudioFactory(&library));
+  std::vector<std::string> errors;
+  ASSERT_TRUE(generator.Begin(project, frames, &errors));
+  for (std::size_t k = 0; k < frames.size(); ++k) {
+    ASSERT_TRUE(generator.EmitFrame(k, &errors)) << errors.back();
+  }
+  ASSERT_TRUE(generator.Finalize(&errors));
+
+  std::vector<std::int32_t> left;
+  std::vector<std::int32_t> right;
+  ReadWavSamples(audio0, &left, &right);
+  ASSERT_EQ(left.size(), 4U * kPalSamplesPerFrame);
+  for (std::size_t k = 0; k < frames.size(); ++k) {
+    const double seconds = frames[k].source_frame_index / 25.0;
+    EXPECT_EQ(left[k * kPalSamplesPerFrame],
+              testing::FakeSampleAt(seconds, 48000))
+        << "output frame " << k;
+  }
+  ASSERT_EQ(library.opens.size(), 2U);
+  EXPECT_DOUBLE_EQ(library.opens[0].start_seconds, 0.4);
+  EXPECT_DOUBLE_EQ(library.opens[1].start_seconds, 0.4);
+  std::filesystem::remove(audio0);
+}
+
+TEST(AudioTrackGeneratorTest, EfmPairReadsItsMediaAgainAt44100Hz) {
+  const std::filesystem::path video_path =
+      TempPath("videosynth_atg_media_efm.cvbs");
+  const std::filesystem::path audio0 =
+      TempPath("videosynth_atg_media_efm_audio_0.wav");
+  const std::filesystem::path efm0 = TempPath("videosynth_atg_media_efm.efm");
+  testing::FakeAudioLibrary library;
+  library.media["clip.mp4"] = {0.0, 60.0};
+
+  Project project = MakeProject(video_path);
+  project.output.efm_audio.enabled = true;
+  project.output.efm_audio.pair = 0;
+  // Lead-in audio is not muted by the track-1 pause.
+  Section section;
+  section.name = "Clip";
+  section.source = "clip.mp4";
+  section.section_type = SectionType::kLeadIn;
+  section.audio_channel_pairs = {MakeMediaPair(0, AudioPairContent::kVideo)};
+  project.sections = {section};
+  const std::vector<AudioOutputFrame> frames = {{&project.sections[0], 50}};
+
+  AudioTrackGenerator generator(nullptr, MakeVideoProbeWithAudio(),
+                                testing::MakeFakeAudioFactory(&library));
+  std::vector<std::string> errors;
+  ASSERT_TRUE(generator.Begin(project, frames, &errors));
+  ASSERT_TRUE(generator.efm_active());
+  ASSERT_TRUE(generator.EmitFrame(0, &errors)) << errors.back();
+
+  ASSERT_EQ(library.opens.size(), 2U);
+  EXPECT_EQ(library.opens[0].sample_rate_hz, 48000);
+  EXPECT_EQ(library.opens[1].sample_rate_hz, 44100);
+  EXPECT_DOUBLE_EQ(library.opens[1].start_seconds, 2.0);
+  // The EFM path carries the 44.1 kHz read, converted to 16 bits.
+  ASSERT_EQ(generator.efm_frame_left().size(), 1764U);
+  EXPECT_EQ(generator.efm_frame_left().back(),
+            ConvertSample24To16(testing::FakeSampleAt(2.0, 44100, 1763)));
+  generator.Abort();
+  std::filesystem::remove(audio0);
+  std::filesystem::remove(efm0);
+}
+
+TEST(AudioTrackGeneratorTest, VideoPairWithoutTheAudioStreamFails) {
+  const std::filesystem::path video_path =
+      TempPath("videosynth_atg_video_nostream.cvbs");
+  testing::FakeAudioLibrary library;
+  Project project = MakeProject(video_path);
+  Section section;
+  section.name = "Clip";
+  section.source = "clip.mp4";
+  AudioChannelPair channel_pair = MakeMediaPair(0, AudioPairContent::kVideo);
+  channel_pair.video_audio.stream = 1;  // The probe reports one stream.
+  section.audio_channel_pairs = {channel_pair};
+  project.sections = {section};
+  const std::vector<const Section*> frames = {&project.sections[0]};
+
+  AudioTrackGenerator generator(nullptr, MakeVideoProbeWithAudio(),
+                                testing::MakeFakeAudioFactory(&library));
+  std::vector<std::string> errors;
+  ASSERT_TRUE(generator.Begin(project, frames, &errors));
+  EXPECT_FALSE(generator.EmitFrame(0, &errors));
+  ASSERT_FALSE(errors.empty());
+  EXPECT_NE(errors.back().find("no audio stream 1"), std::string::npos)
+      << errors.back();
+  generator.Abort();
 }
 
 }  // namespace

@@ -183,8 +183,9 @@ int RunCli(int argc, char** argv) {
 
   videosynth::YamlProjectParser parser(&logger);
   videosynth::ProgressiveFrameSourceProbe progressive_frame_source_probe;
+  videosynth::FfprobeAudioFileProbe audio_file_probe;
   videosynth::ProjectValidator validator(&progressive_frame_source_probe,
-                                         &logger);
+                                         &logger, &audio_file_probe);
   videosynth::GenerationStage generation(&logger);
   generation.SetTemplateCacheCapacityBytes(template_cache_bytes);
   videosynth::NoiseInjectionStage noise_injection(&logger);

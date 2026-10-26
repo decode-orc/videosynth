@@ -162,6 +162,59 @@ int NextFreeAudioChannelPair(const std::vector<AudioChannelPair>& pairs) {
   return -1;
 }
 
+void SetAudioPairContent(AudioChannelPair* channel_pair,
+                         AudioPairContent content) {
+  if (channel_pair == nullptr || channel_pair->content == content) {
+    return;
+  }
+  channel_pair->content = content;
+  channel_pair->left = AudioParameters{};
+  channel_pair->right = AudioParameters{};
+  channel_pair->file = AudioFileInput{};
+  channel_pair->video_audio = VideoAudioInput{};
+  if (content == AudioPairContent::kTones) {
+    channel_pair->left = MakeDefaultAudioChannel();
+    channel_pair->right = channel_pair->left;
+  }
+}
+
+VideoSoundtrackEditorState VideoSoundtrackEditorStateFor(
+    const std::string& source, bool probe_ok,
+    const ProgressiveFrameSourceProfile& profile, int stored_stream) {
+  VideoSoundtrackEditorState state;
+  if (!IsProgressiveVideoSource(source)) {
+    return state;
+  }
+  const int stored = std::max(0, stored_stream);
+  if (!probe_ok) {
+    // Length unknown: offer the stored stream and those before it.
+    state.selectable = true;
+    for (int stream = 0; stream <= stored; ++stream) {
+      state.stream_labels.push_back("Stream " + std::to_string(stream));
+    }
+    return state;
+  }
+  for (std::size_t i = 0; i < profile.audio_streams.size(); ++i) {
+    const ProgressiveAudioStreamProfile& audio = profile.audio_streams[i];
+    std::string label = "Stream " + std::to_string(i);
+    if (!audio.codec.empty()) {
+      label += ": " + audio.codec + ",";
+    } else {
+      label += ":";
+    }
+    label += " " + std::to_string(audio.channels) + " ch, " +
+             std::to_string(audio.sample_rate_hz) + " Hz";
+    state.stream_labels.push_back(label);
+  }
+  state.selectable = !state.stream_labels.empty();
+  for (int stream = static_cast<int>(state.stream_labels.size());
+       state.selectable && stream <= stored; ++stream) {
+    state.stream_labels.push_back("Stream " + std::to_string(stream) +
+                                  " (not in source)");
+  }
+  return state;
+}
+
 bool OsdBlockEnabled(const Section& section) {
   return !section.osd.overlays.empty();
 }

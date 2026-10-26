@@ -188,25 +188,24 @@ bool VideoSynthPipeline::RunProject(const Project& project,
 
   // -------------------------------------------------------------------
   // Optional frame-locked audio tracks. Active when an audio generator is
-  // supplied and at least one section declares an audio channel pair. Audio is
-  // a pure function of output position: the generator is driven with the
-  // output-order section sequence so every stored frame carries the correct
-  // per-frame sample count and each channel pair stays sample-accurately
-  // frame-locked to the output stream.
+  // supplied and at least one section declares an audio channel pair. The
+  // generator is driven with the output-order frame sequence so every stored
+  // frame carries the correct per-frame sample count and each channel pair
+  // stays sample-accurately frame-locked to the output stream.
   // -------------------------------------------------------------------
   const bool audio_enabled =
       audio_generator_ != nullptr && ProjectEnablesAudio(project);
   if (audio_enabled) {
-    // The section shown by each stored output frame, in output order.
-    std::vector<const Section*> output_frame_sections;
-    output_frame_sections.reserve(total_disc_frames);
+    // The section and source frame of each stored output frame, in output
+    // order; video-soundtrack pairs follow the source frames.
+    std::vector<AudioOutputFrame> output_frames;
+    output_frames.reserve(total_disc_frames);
     for (const IGenerationStage::FrameScheduleItem& item : schedule) {
-      output_frame_sections.push_back(item.section);
+      output_frames.push_back({item.section, item.source_frame_index});
     }
 
     std::vector<std::string> audio_errors;
-    if (!audio_generator_->Begin(project, output_frame_sections,
-                                 &audio_errors)) {
+    if (!audio_generator_->Begin(project, output_frames, &audio_errors)) {
       for (const std::string& error : audio_errors) {
         logger_->Error(error);
       }

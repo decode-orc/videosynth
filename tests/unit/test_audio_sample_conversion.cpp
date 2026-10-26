@@ -2,7 +2,7 @@
  * File:        test_audio_sample_conversion.cpp
  * Module:      audio_sample_conversion_tests
  * Purpose:     Validates 24-bit to 16-bit PCM conversion used by the EFM
- *              digital audio path.
+ *              digital audio path, and 32-bit to 24-bit media conversion.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -66,6 +66,22 @@ TEST(AudioSampleConversionTest, ConvertsBlocksPreservingOrder) {
   ASSERT_EQ(converted.size(), input.size());
   const std::vector<std::int16_t> expected = {0, 1, -1, 1, -1, 32767};
   EXPECT_EQ(converted, expected);
+}
+
+TEST(AudioSampleConversionTest, WidenedSixteenAndTwentyFourBitSamplesAreExact) {
+  // ffmpeg widens s16 by << 16 and 24-bit by << 8 when producing s32le.
+  EXPECT_EQ(ConvertSample32To24(1234 * 65536), 1234 * 256);
+  EXPECT_EQ(ConvertSample32To24(-1234 * 65536), -1234 * 256);
+  EXPECT_EQ(ConvertSample32To24(8388607 * 256), 8388607);
+  EXPECT_EQ(ConvertSample32To24(-8388608 * 256), -8388608);
+}
+
+TEST(AudioSampleConversionTest, ThirtyTwoBitRoundsAndSaturates) {
+  EXPECT_EQ(ConvertSample32To24(127), 0);
+  EXPECT_EQ(ConvertSample32To24(128), 1);
+  EXPECT_EQ(ConvertSample32To24(-128), -1);
+  EXPECT_EQ(ConvertSample32To24(2147483647), 8388607);
+  EXPECT_EQ(ConvertSample32To24(-2147483647 - 1), -8388608);
 }
 
 }  // namespace

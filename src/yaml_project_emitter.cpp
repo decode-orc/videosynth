@@ -307,8 +307,26 @@ void EmitAudio(YAML::Emitter& out, const Section& section) {
       out << YAML::Key << "description" << YAML::Value
           << channel_pair.description;
     }
-    EmitAudioChannel(out, "left", channel_pair.left);
-    EmitAudioChannel(out, "right", channel_pair.right);
+    switch (channel_pair.content) {
+      case AudioPairContent::kTones:
+        EmitAudioChannel(out, "left", channel_pair.left);
+        EmitAudioChannel(out, "right", channel_pair.right);
+        break;
+      case AudioPairContent::kFile:
+        out << YAML::Key << "file" << YAML::Value << YAML::BeginMap;
+        out << YAML::Key << "path" << YAML::Value << channel_pair.file.path;
+        if (channel_pair.file.repeat) {
+          out << YAML::Key << "repeat" << YAML::Value << true;
+        }
+        out << YAML::EndMap;
+        break;
+      case AudioPairContent::kVideo:
+        out << YAML::Key << "video_audio" << YAML::Value << YAML::BeginMap;
+        out << YAML::Key << "stream" << YAML::Value
+            << channel_pair.video_audio.stream;
+        out << YAML::EndMap;
+        break;
+    }
     out << YAML::EndMap;
   }
   out << YAML::EndSeq;

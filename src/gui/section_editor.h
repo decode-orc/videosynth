@@ -121,6 +121,9 @@ class SectionEditor : public QWidget {
   // repeat multiplier, or the loop note for a fixed duration longer than the
   // range.
   void UpdateDurationSummary();
+  // Hands the audio editor the section source and the latest probe report,
+  // which decide the video soundtrack streams it offers.
+  void UpdateAudioSourceContext();
   // Applies SourceRangeEditorStateFor to the source-range widgets: enabled for
   // video sources only, capped at the probed frame count.
   void UpdateSourceRangeWidgets();

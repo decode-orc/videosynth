@@ -199,6 +199,34 @@ A warning. The scratch will not complete its triangular envelope before the sect
 
 ## Audio
 
+### `must use only one of 'left'/'right' tones, 'file' or 'video_audio'`
+
+A channel pair carries one kind of content. Split tones and a file (or a soundtrack) across two pairs with different `pair` numbers.
+
+### `file.path must name a .wav or .flac file`
+
+Only WAV and FLAC audio files are accepted. Convert other formats first, for example `ffmpeg -i music.mp3 music.flac`.
+
+### `audio file '…' could not be read: the file does not exist.`
+
+The path did not resolve to a file. Relative paths and `{project}/…` resolve against the project file's directory; check the spelling and the [asset roots](../reference/asset-roots.md). The same message ends *the file has no audio stream.* for a file with no audio in it.
+
+### `audio file '…' has N channels; only mono and stereo files are supported.`
+
+Mix the file down to stereo first, for example `ffmpeg -i surround.wav -ac 2 stereo.wav`. Video soundtracks, by contrast, are downmixed automatically.
+
+### `audio file '…' lasts … s but the section runs … s`
+
+A warning: the file ends before the section does, so the rest of the section is silent. Set `repeat: true` to loop the file, or shorten the section.
+
+### `video_audio needs a video source (MKV or MP4)`
+
+A soundtrack comes from the section's own video, so an EXR still has none. Use a `file:` pair, or tones, instead.
+
+### `the section source has N audio stream(s), so video_audio.stream S does not exist.`
+
+`stream` counts the video's audio streams from 0. List them with `ffprobe -v error -select_streams a -show_entries stream=index,codec_name,channels <file>`, or look at the stream list in the section editor.
+
 ### No `.efm` file is written
 
 A warning will say that no section declares the pair named in `output.efm_audio`. Add an `audio:` block declaring that pair to at least one section.

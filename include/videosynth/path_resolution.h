@@ -77,8 +77,8 @@ std::string DeriveMetadataPath(const std::string& video_path);
 std::string ResolvePathAgainstBase(const std::string& base_dir,
                                    const std::string& path);
 
-// Returns a copy of `project` with every section source and both output
-// targets resolved via ResolveAssetPath.
+// Returns a copy of `project` with every section source, every audio-file
+// channel-pair path, and both output targets resolved via ResolveAssetPath.
 //
 // `anchor_unset` distinguishes the callers: the GUI passes true so a saved
 // project's plain-relative paths anchor to its file's directory (probe,

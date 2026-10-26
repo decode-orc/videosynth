@@ -33,14 +33,15 @@ The project ships two front ends built from the same pipeline:
 - **Composite or Y/C output** (`output.signal_type: composite | yc`).
 - **Frame content** from validated progressive source profiles (EXR stills and
   MKV/MP4 video in any FFmpeg-decodable codec, colour-normalised to BT.601).
-- **Line injections** for VBI content: VITS test signals, laserdisc biphase and
-  FM codes (IEC 60856/60857), and VITC timecode (SMPTE 12M).
+- **Line injections** for VBI content: VITS test signals, and laserdisc
+  biphase and FM codes (IEC 60856/60857).
 - **Laserdisc disc simulation**: CAV/CLV picture numbers, chapters, programme
-  status codes, lead-in/out, picture stop, PAL pilot burst, NTSC VBI burst.
+  status codes, lead-in/out, picture stop, PAL pilot burst.
 - **Per-section impairments**: two-component Gaussian noise (floor plus
   proportional) and dropout injection (random surface dropouts and persistent
   scratches) with a SQLite dropout sidecar.
 - **Multi-track audio**: up to eight stereo channel pairs at 48 kHz/24-bit,
+  each carrying test tones, a WAV/FLAC file or the source video's soundtrack,
   plus EFM audio for laserdisc projects.
 - **On-screen display** text with substitution tokens (picture number, CLV
   timecode, frame number).

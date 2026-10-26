@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "videosynth/interfaces.h"
 #include "videosynth/model.h"
 
 namespace videosynth::gui {
@@ -72,6 +73,30 @@ void SetAudioChannelWaveform(AudioParameters* channel,
 // The lowest channel-pair number 0–7 not already used by `pairs`, or -1 when
 // all eight are taken.
 int NextFreeAudioChannelPair(const std::vector<AudioChannelPair>& pairs);
+
+// Switches a channel pair to carry `content`, keeping only that kind's fields
+// so the stored YAML names exactly one kind and round-trips unchanged. Tones
+// start from the default tone on both channels; a file starts with no path
+// and no repeat; a video soundtrack starts on stream 0. Choosing the kind the
+// pair already carries changes nothing.
+void SetAudioPairContent(AudioChannelPair* channel_pair,
+                         AudioPairContent content);
+
+// How the channel-pair editor's video-soundtrack choice presents for a
+// section.
+struct VideoSoundtrackEditorState {
+  // Only a video source with (as far as is known) an audio stream offers its
+  // soundtrack; an EXR still, or a probed video without audio, does not.
+  bool selectable = false;
+  // One entry per selectable stream index, in index order, e.g.
+  // "Stream 0: aac, 2 ch, 48000 Hz". Before a successful probe the entries
+  // are bare "Stream N" names up to the stored stream, and a stored stream
+  // the probe did not find is still listed so it is never silently replaced.
+  std::vector<std::string> stream_labels;
+};
+VideoSoundtrackEditorState VideoSoundtrackEditorStateFor(
+    const std::string& source, bool probe_ok,
+    const ProgressiveFrameSourceProfile& profile, int stored_stream);
 
 // The OSD block exists exactly when the overlay list is non-empty.
 bool OsdBlockEnabled(const Section& section);

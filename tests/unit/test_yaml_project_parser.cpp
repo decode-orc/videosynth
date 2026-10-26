@@ -1006,6 +1006,82 @@ TEST(YamlProjectParserTest, ParsesMultipleChannelPairs) {
   EXPECT_FALSE(result.project.sections[0].audio_channel_pairs[1].right.enabled);
 }
 
+TEST(YamlProjectParserTest, ParsesFileAndVideoAudioChannelPairs) {
+  YamlProjectParser parser;
+  const ParseResult result = parser.ParseString(MakeVideoSectionYaml(
+      "    audio:\n"
+      "      channel_pairs:\n"
+      "        - pair: 0\n"
+      "          video_audio: { stream: 1 }\n"
+      "        - pair: 1\n"
+      "          file: { path: \"{project}/narration.flac\", repeat: true }\n"
+      "        - pair: 2\n"
+      "          file: { path: music.wav }\n"
+      "        - pair: 3\n"
+      "          video_audio: {}\n"));
+
+  ASSERT_TRUE(result.ok) << (result.errors.empty() ? "" : result.errors[0]);
+  const std::vector<AudioChannelPair>& pairs =
+      result.project.sections[0].audio_channel_pairs;
+  ASSERT_EQ(pairs.size(), 4U);
+  EXPECT_EQ(pairs[0].content, AudioPairContent::kVideo);
+  EXPECT_EQ(pairs[0].video_audio.stream, 1);
+  EXPECT_EQ(pairs[1].content, AudioPairContent::kFile);
+  EXPECT_EQ(pairs[1].file.path, "{project}/narration.flac");
+  EXPECT_TRUE(pairs[1].file.repeat);
+  EXPECT_EQ(pairs[2].content, AudioPairContent::kFile);
+  EXPECT_FALSE(pairs[2].file.repeat);
+  EXPECT_EQ(pairs[3].content, AudioPairContent::kVideo);
+  EXPECT_EQ(pairs[3].video_audio.stream, 0);
+  EXPECT_FALSE(pairs[0].left.enabled);
+}
+
+TEST(YamlProjectParserTest, RejectsMixingTonesWithFileOrVideoAudio) {
+  YamlProjectParser parser;
+  for (const std::string& pair_body :
+       {std::string("          file: { path: a.wav }\n"
+                    "          left: { waveform: sine }\n"),
+        std::string("          video_audio: {}\n"
+                    "          right: { waveform: sine }\n"),
+        std::string("          video_audio: {}\n"
+                    "          file: { path: a.wav }\n")}) {
+    const ParseResult result =
+        parser.ParseString(MakeVideoSectionYaml("    audio:\n"
+                                                "      channel_pairs:\n"
+                                                "        - pair: 0\n" +
+                                                pair_body));
+    EXPECT_FALSE(result.ok) << pair_body;
+    ASSERT_FALSE(result.errors.empty());
+    EXPECT_NE(result.errors[0].find("only one of"), std::string::npos)
+        << result.errors[0];
+  }
+}
+
+TEST(YamlProjectParserTest, RejectsMalformedFileAudio) {
+  YamlProjectParser parser;
+  for (const std::string& file_value :
+       {std::string("narration.wav"), std::string("{ repeat: true }"),
+        std::string("{ path: a.wav, loop: true }")}) {
+    const ParseResult result =
+        parser.ParseString(MakeVideoSectionYaml("    audio:\n"
+                                                "      channel_pairs:\n"
+                                                "        - pair: 0\n"
+                                                "          file: " +
+                                                file_value + "\n"));
+    EXPECT_FALSE(result.ok) << file_value;
+  }
+}
+
+TEST(YamlProjectParserTest, RejectsUnknownVideoAudioKey) {
+  YamlProjectParser parser;
+  const ParseResult result = parser.ParseString(
+      MakeVideoSectionYaml("    audio:\n"
+                           "      channel_pairs:\n"
+                           "        - pair: 0\n"
+                           "          video_audio: { track: 1 }\n"));
+  EXPECT_FALSE(result.ok);
+}
+
 TEST(YamlProjectParserTest, RejectsUnknownAudioKey) {
   const std::string yaml =
       "cvbs_presets:\n"

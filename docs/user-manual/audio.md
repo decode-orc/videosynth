@@ -1,8 +1,8 @@
 # Audio
 
-videosynth synthesises frame-locked audio test tones alongside the video. A project may carry up to **eight stereo channel pairs** (0–7, i.e. up to sixteen SMPTE 272M channels), each written as its own WAV track, and one of those pairs may additionally be encoded as laserdisc EFM digital audio.
+videosynth writes frame-locked audio alongside the video. A project may carry up to **eight stereo channel pairs** (0–7, i.e. up to sixteen SMPTE 272M channels), each written as its own WAV track, and one of those pairs may additionally be encoded as laserdisc EFM digital audio.
 
-Audio is a pure function of output position, so every track stays sample-accurately locked to the video regardless of what the sections are doing.
+Each pair carries synthetic test tones, an audio file, or the soundtrack of the section's video. Whatever it carries, every output frame gets exactly its standard's number of samples, so every track stays sample-accurately locked to the video regardless of what the sections are doing.
 
 ## Channel pairs
 
@@ -30,8 +30,9 @@ The rules:
 
 - **One WAV file per pair.** The set of files written is the union of the pair numbers declared anywhere in the project. Every pair file spans the whole output.
 - **A section that omits a pair emits silence for its frames**, still frame-locked. There are no gaps in a track.
-- **Left and right are independent.** Either may be omitted and stored as silence; at least one must be present.
-- **Oscillator phase resets per section run.** Each contiguous run of frames sharing one section restarts its oscillators at phase 0.
+- **One kind of content per pair.** Tones (`left`/`right`), [an audio file](#audio-files) (`file`) or [the video's soundtrack](#video-soundtracks) (`video_audio`); combining them is an error.
+- **Left and right tones are independent.** Either may be omitted and stored as silence; at least one must be present.
+- **Each section run starts afresh.** Each contiguous run of frames sharing one section restarts tone oscillators at phase 0 and plays an audio file from its start.
 
 ## Frame lock
 
@@ -80,6 +81,41 @@ Instantaneous frequency drives a phase accumulator, so swept tones stay phase-co
 
 A `ramp:` block and a fixed `frequency` are mutually exclusive.
 
+## Audio files
+
+A pair can play a WAV or FLAC file instead of tones:
+
+```yaml
+        - pair: 1
+          description: Narration
+          file: { path: "{project}/narration.flac", repeat: true }
+```
+
+The path resolves through the [asset roots](../reference/asset-roots.md) like a section `source`. The file plays from its start at the beginning of each section run. If it is shorter than the run, the rest of the run is silent; validation warns about this. With `repeat: true` the file starts again each time it ends.
+
+Mono and stereo files are accepted; a mono file plays on both channels. Files at a sample rate other than 48 kHz are resampled, which validation notes in the log.
+
+## Video soundtracks
+
+A section whose source is a video can pass its soundtrack through:
+
+```yaml
+  - name: Programme
+    type: progressive
+    source: "{project}/capture.mp4"
+    start_frame: 1500
+    end_frame: 2999
+    audio:
+      channel_pairs:
+        - pair: 0
+          description: Programme audio
+          video_audio: { stream: 0 }     # first audio stream; {} means the same
+```
+
+The sound follows the picture: each output frame carries the soundtrack from the moment its source frame was shown. Starting at `start_frame` starts the sound there too. When a fixed duration loops the range, or `duration_repeat` replays it, the sound jumps back with the picture. Where the soundtrack starts after the first picture or ends before the last, those frames are silent.
+
+`stream` counts the video's audio streams from 0; the section editor lists them once the source has been probed. Mono soundtracks play on both channels, and soundtracks with more than two channels (5.1, for example) are downmixed to stereo. Both, and any resampling, are noted in the log.
+
 ## Output files
 
 Each declared pair is written beside the video as:
@@ -101,7 +137,7 @@ output:
     pair: 0
 ```
 
-The presence of the `efm_audio:` block is what enables it. That pair is synthesised a second time at exactly 44 100 Hz — the laserdisc digital audio rate (IEC 60856/60857 Amd 2 clause 13.2), with no resampling — and encoded as an IEC 60908 EFM channel stream. Its 48 kHz WAV track and every other pair are untouched; the tone parameters are shared and declared only in the per-section `audio:` blocks.
+The presence of the `efm_audio:` block is what enables it. That pair is produced a second time at exactly 44 100 Hz — the laserdisc digital audio rate (IEC 60856/60857 Amd 2 clause 13.2) — and encoded as an IEC 60908 EFM channel stream. Tones are synthesised directly at 44 100 Hz with no resampling; audio files and video soundtracks are read again and resampled to that rate. Its 48 kHz WAV track and every other pair are untouched; the pair's content is declared only once, in the per-section `audio:` blocks.
 
 ### What gets written
 

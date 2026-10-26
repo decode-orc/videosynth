@@ -453,21 +453,45 @@ struct AudioParameters {
 // Specification (Audio Data): up to 16 SMPTE 272M channels in 8 channel pairs.
 inline constexpr int kMaxAudioChannelPairs = 8;
 
+// What a channel pair carries for a section: synthetic test tones
+// (`left`/`right`), samples read from an audio file, or the soundtrack of the
+// section's video source.
+enum class AudioPairContent { kTones, kFile, kVideo };
+
+// Audio file feeding a channel pair (YAML `file:`). The file plays from its
+// start at the beginning of each section run; at its end the rest of the run
+// is silent, or the file restarts when `repeat` is true.
+struct AudioFileInput {
+  std::string path;
+  bool repeat = false;
+};
+
+// Section video soundtrack feeding a channel pair (YAML `video_audio:`).
+// `stream` is the 0-based index among the video file's audio streams.
+struct VideoAudioInput {
+  int stream = 0;
+};
+
 // Thread-safety: AudioChannelPair is a plain data container with no mutable
 // state. It may be read concurrently from multiple threads.
 //
-// One stereo channel pair (SMPTE 272M §3.11) synthesised for a section. `pair`
-// is the channel-pair number 0–7 that names the emitted `_audio_<pair>.wav`
-// file and the `audio_channel_pair` metadata row. `left` and `right` describe
-// the two interleaved channels independently; a channel with `enabled == false`
-// is stored as all-zero silence per SMPTE 272M §6.4. `description` is an
-// optional human-readable label recorded in the metadata (may be empty → NULL).
+// One stereo channel pair (SMPTE 272M §3.11) for a section. `pair` is the
+// channel-pair number 0–7 that names the emitted `_audio_<pair>.wav` file and
+// the `audio_channel_pair` metadata row. `content` selects what the pair
+// carries. For tones, `left` and `right` describe the two interleaved channels
+// independently; a channel with `enabled == false` is stored as all-zero
+// silence per SMPTE 272M §6.4. `file` and `video_audio` are meaningful only for
+// their own content kind. `description` is an optional human-readable label
+// recorded in the metadata (may be empty → NULL).
 struct AudioChannelPair {
   int pair = 0;
   bool pair_specified = false;
   std::string description;
+  AudioPairContent content = AudioPairContent::kTones;
   AudioParameters left = {};
   AudioParameters right = {};
+  AudioFileInput file = {};
+  VideoAudioInput video_audio = {};
 };
 
 struct Section {
@@ -632,10 +656,19 @@ inline bool operator==(const AudioParameters& a, const AudioParameters& b) {
          a.amplitude == b.amplitude;
 }
 
+inline bool operator==(const AudioFileInput& a, const AudioFileInput& b) {
+  return a.path == b.path && a.repeat == b.repeat;
+}
+
+inline bool operator==(const VideoAudioInput& a, const VideoAudioInput& b) {
+  return a.stream == b.stream;
+}
+
 inline bool operator==(const AudioChannelPair& a, const AudioChannelPair& b) {
   return a.pair == b.pair && a.pair_specified == b.pair_specified &&
-         a.description == b.description && a.left == b.left &&
-         a.right == b.right;
+         a.description == b.description && a.content == b.content &&
+         a.left == b.left && a.right == b.right && a.file == b.file &&
+         a.video_audio == b.video_audio;
 }
 
 inline bool operator==(const Section::LineInjectionCode& a,
@@ -696,8 +729,12 @@ inline bool operator==(const Project& a, const Project& b) {
 
 inline bool operator!=(const Project& a, const Project& b) { return !(a == b); }
 
-// True if a channel pair carries any active (non-silent) channel.
+// True if a channel pair carries any active (non-silent) channel. File and
+// video content always count as active.
 inline bool AudioChannelPairIsActive(const AudioChannelPair& pair) {
+  if (pair.content != AudioPairContent::kTones) {
+    return true;
+  }
   return pair.left.enabled || pair.right.enabled;
 }
 

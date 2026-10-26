@@ -758,6 +758,8 @@ void SectionEditor::LoadFromDocument() {
 
   // Audio (block present exactly when it carries channel pairs).
   audio_group_->setChecked(!section.audio_channel_pairs.empty());
+  audio_editor_->SetProjectBaseDir(ProjectBaseDir());
+  UpdateAudioSourceContext();
   audio_editor_->SetChannelPairs(section.audio_channel_pairs);
 
   // Noise.
@@ -1088,6 +1090,20 @@ void SectionEditor::UpdateProbeDisplay() {
   }
   UpdateDurationSummary();
   UpdateFrameRangeDisplay();
+  UpdateAudioSourceContext();
+}
+
+void SectionEditor::UpdateAudioSourceContext() {
+  if (section_index_ < 0 || section_index_ >= document_->section_count()) {
+    return;
+  }
+  const Section& section =
+      document_->project().sections[static_cast<std::size_t>(section_index_)];
+  const bool probe_ok =
+      probe_controller_->has_report() && probe_controller_->report().probe_ok;
+  audio_editor_->SetSourceContext(section.source, probe_ok,
+                                  probe_ok ? probe_controller_->report().profile
+                                           : ProgressiveFrameSourceProfile{});
 }
 
 void SectionEditor::UpdateDurationSummary() {

@@ -183,6 +183,12 @@ Project ResolveProjectPaths(Project project, const AssetRootMap& roots,
   for (Section& section : project.sections) {
     section.source =
         ResolveAssetPath(section.source, roots, project_dir, anchor_unset);
+    for (AudioChannelPair& channel_pair : section.audio_channel_pairs) {
+      if (channel_pair.content == AudioPairContent::kFile) {
+        channel_pair.file.path = ResolveAssetPath(channel_pair.file.path, roots,
+                                                  project_dir, anchor_unset);
+      }
+    }
   }
   project.output.video_path = ResolveAssetPath(project.output.video_path, roots,
                                                project_dir, anchor_unset);

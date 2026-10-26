@@ -86,10 +86,15 @@ Unknown keys are rejected outright, at every level, naming the offending key and
 
 ### Audio and EFM
 
-- Channel pair numbers 0–7, unique within a section; at least one of `left`/`right` present.
-- Frequencies within 0–22 000 Hz; amplitude 0.0–1.0.
+- Channel pair numbers 0–7, unique within a section; each pair carries one kind of content — tones, `file` or `video_audio` (mixing them is a parse error).
+- Tone pairs: at least one of `left`/`right` present; frequencies within 0–22 000 Hz; amplitude 0.0–1.0. These rules are skipped for file and soundtrack pairs.
+- `file`: `path` set, ending in `.wav` or `.flac`; the file exists, can be read, and has one or two channels.
+- `video_audio`: `stream` ≥ 0; the section source is a video, not an EXR still, and has an audio stream at that index.
 - EFM requires PAL or NTSC, at most 79 programme-area sections.
-- *Warnings*: EFM pair not declared by any section; a programme track under 4 s (6 s for the first); no lead-in, so no table of contents.
+- *Warnings*: a non-repeating audio file shorter than its section (the rest is silent); EFM pair not declared by any section; a programme track under 4 s (6 s for the first); no lead-in, so no table of contents.
+- *Log notes* (information, not warnings): an audio file or soundtrack that is resampled to 48 kHz, and a soundtrack with more than two channels that is downmixed to stereo.
+
+Checks that read audio files or soundtrack streams run with the CLI, `--validate`, and generation in the GUI. The GUI's background validation checks only the structure, as it does for picture sources.
 
 ### On-screen display
 

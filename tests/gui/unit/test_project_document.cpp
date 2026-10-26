@@ -314,6 +314,30 @@ TEST_F(ProjectDocumentTest, SourceRangeEditUndoesAndRedoes) {
   EXPECT_TRUE(redone.end_frame_specified);
 }
 
+TEST_F(ProjectDocumentTest, AudioPairContentEditUndoesAndRedoes) {
+  Section edited = document_.project().sections[0];
+  AudioChannelPair tones;
+  tones.pair = 0;
+  tones.pair_specified = true;
+  tones.left.enabled = true;
+  edited.audio_channel_pairs = {tones};
+  ASSERT_TRUE(document_.SetSection(0, edited));
+
+  AudioChannelPair narration = tones;
+  narration.content = AudioPairContent::kFile;
+  narration.left = AudioParameters{};
+  narration.file = {"{project}/narration.flac", true};
+  edited.audio_channel_pairs = {narration};
+  ASSERT_TRUE(document_.SetSection(0, edited));
+
+  ASSERT_TRUE(document_.Undo());
+  ASSERT_EQ(document_.project().sections[0].audio_channel_pairs.size(), 1U);
+  EXPECT_EQ(document_.project().sections[0].audio_channel_pairs[0], tones);
+
+  ASSERT_TRUE(document_.Redo());
+  EXPECT_EQ(document_.project().sections[0].audio_channel_pairs[0], narration);
+}
+
 TEST_F(ProjectDocumentTest, EndFrameOnlyEditIsAChange) {
   Section edited = document_.project().sections[0];
   edited.end_frame_specified = true;

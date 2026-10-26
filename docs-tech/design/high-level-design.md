@@ -169,9 +169,9 @@ VideoSynth currently follows a **four-stage sampled-domain architecture**:
 3. **Dropout Injection Stage** (`DropoutInjectionStage`): Applies optional per-section random and scratch dropout events to the fixed-point mV Y/C buffers after noise, and writes a conformant SQLite dropout sidecar (`<basename>.dropouts.meta`).
 4. **[Output Stage](#output-stage)**: Validates frame-span alignment, combines Y and C, quantises to the active digital interface code space, and formats the final CVBS output files.
 
-Alongside these four stages, an optional **Audio Track Generator** (`AudioTrackGenerator`) runs when at least one section declares an `audio:` channel pair. It synthesises per-channel test-tone waveforms (`AudioSynthesizer`) frame-locked to the video and streams one stereo 24-bit PCM RIFF/WAVE track per declared channel pair (0–7) to `<basename>_audio_<pair>.wav` (each via an `AudioWavWriter`). Audio is a pure function of output position, so the generator is driven with the output-order section sequence and stays sample-accurately aligned to the stored video frames. See [Section 7 `audio:`](#audio-sub-key-optional-per-section).
+Alongside these four stages, an optional **Audio Track Generator** (`AudioTrackGenerator`) runs when at least one section declares an `audio:` channel pair. Per pair and section it either synthesises test-tone waveforms (`AudioSynthesizer`) or reads an audio file or the section video's soundtrack (`AudioMediaReader` over an `IAudioSampleSource`, implemented by `FfmpegAudioSampleSource`), frame-locked to the video, and streams one stereo 24-bit PCM RIFF/WAVE track per declared channel pair (0–7) to `<basename>_audio_<pair>.wav` (each via an `AudioWavWriter`). The generator is driven with the output-order frame sequence (each frame's section and source frame index from the schedule), so per-frame sample counts follow output position and every track stays sample-accurately aligned to the stored video frames. See [Section 7 `audio:`](#audio-sub-key-optional-per-section).
 
-When `output.efm_audio` selects one of those channel pairs, the same generator additionally synthesises that pair at 44 100 Hz and streams it through the `videosynth_efm` module (`AudioEfmWriter`) as a LaserDisc digital audio EFM channel stream written to `<basename>.efm` with its own `<basename>.efm.meta` sidecar. The pair's 48 kHz WAV track is unaffected. See [LaserDisc Digital Audio (EFM) Output](#laserdisc-digital-audio-efm-output).
+When `output.efm_audio` selects one of those channel pairs, the same generator additionally produces that pair at 44 100 Hz (tones synthesised directly, file and video audio read a second time at that rate) and streams it through the `videosynth_efm` module (`AudioEfmWriter`) as a LaserDisc digital audio EFM channel stream written to `<basename>.efm` with its own `<basename>.efm.meta` sidecar. The pair's 48 kHz WAV track is unaffected. See [LaserDisc Digital Audio (EFM) Output](#laserdisc-digital-audio-efm-output).
 
 ### **Key Principles**
 
@@ -834,7 +834,7 @@ The current parser, validator, and runtime implement only a subset of the YAML s
 - `output.efm_audio` is parsed, emitted, and validated: its presence enables LaserDisc digital audio (EFM) output for the single channel pair named by `pair`. See [`efm_audio:`](#efm_audio-sub-key-optional-project-level).
 - The `project:` block fields `name`, `version`, and `description` are parsed and retained on the in-memory `Project` model, so they survive load/save round-trips.
 - A YAML project **emitter** (`YamlProjectEmitter` in `videosynth_core`) serialises an in-memory `Project` back to this schema. It writes fields in the canonical order shown below and emits only explicitly-set optional blocks (the project-level `line_injections:`, and the per-section `noise:`, `dropouts:`, `osd:`, `audio:`, `line_injections:`), so emitted files stay minimal and diffable. Emit → parse is lossless: a saved file parses back to an equal `Project`, which is the contract that keeps GUI-saved projects loadable by the CLI and vice versa.
-- Implemented section fields: `name`, `type`, `source`, `start_frame`, `end_frame`, `duration_frames`, `duration_repeat`, and the optional per-section `noise:`, `dropouts:`, `osd:`, and `audio:` blocks.
+- Implemented section fields: `name`, `type`, `source`, `start_frame`, `end_frame`, `duration_frames`, `duration_repeat`, and the optional per-section `noise:`, `dropouts:`, `osd:`, and `audio:` blocks (channel pairs carrying tones, `file:` audio or `video_audio:`).
 - The `line_injections` schema is split across two levels of the data model. A **project-level** `line_injections:` block (a sibling of `output:` and `sections:`) is parsed into a `ProjectLineInjections` value on `Project` holding the project-wide `disc_type` (`CAV`/`CLV`), the optional `placement` policy (`standard` default / `laserdisc` / `custom`, governing how VITS `target_lines` are constrained — see [VITS](#vits-vertical-interval-test-signals)), and the `vits` set (each entry a `vits_type` plus `target_lines`) applied to every frame of every section. Each **section-level** `line_injections:` list holds only `Section::LineInjection` entries (`type` plus, per type, `target_lines`/`codes`) — the per-section biphase `codes` (picture_number, chapter_number, lead_in/out, etc.) that legitimately differ between lead-in, programme, and lead-out. Both levels receive validator-level schema/compatibility checks for injection type, `target_lines`, and standard-dependent VITS constraints.
 - VITS line injections have a generation-stage orchestration path and are applied only on their targeted frame lines within the owning section span.
 - Built-in VITS catalog entries now carry full waveform-definition primitive/composite trees for every supported `vits_type`, so the default runtime path can render all supported PAL and NTSC VITS patterns.
@@ -887,10 +887,13 @@ sections:
     noise:                     # Optional noise injection for this section
       noise_db: 48.0           # Floor noise level; sets Black PSNR target [20.0–61.0 dB]
       noise_spread_db: 4.0     # White is 4 dB noisier than black; White SNR = noise_db - noise_spread_db
-    audio:                     # Optional frame-locked audio test tone for this section
-      waveform: sine           # sine, square, sawtooth, or triangle
-      frequency: 1000.0        # Fixed-tone frequency in Hz [0, 22000]
-      amplitude: 0.5           # Peak amplitude as a fraction of full scale [0.0, 1.0]
+    audio:                     # Optional frame-locked audio channel pairs for this section
+      channel_pairs:
+        - pair: 0              # Channel pair 0-7
+          left:                # Test tone; or file: {...} / video_audio: {...}
+            waveform: sine     # sine, square, sawtooth, or triangle
+            frequency: 1000.0  # Fixed-tone frequency in Hz [0, 22000]
+            amplitude: 0.5     # Peak amplitude as a fraction of full scale [0.0, 1.0]
     line_injections:           # Per-section laserdisc codes / VITC for this section
       - type: laserdisc
         # No disc_type or target_lines — disc_type is project-wide; line
@@ -1012,12 +1015,13 @@ sections:
 
 #### **`audio:` Sub-Key (Optional, Per-Section)**
 
-The `audio:` block declares a list of **audio channel pairs** for a section, each synthesising an independent stereo test tone for the exact duration (in frames) of that section. Following the CVBS File Format Specification (Audio Data / SMPTE 272M-1994), a project may carry up to **8 channel pairs** (0–7, i.e. up to 16 SMPTE 272M channels). Each declared channel pair is written as its own frame-locked stereo WAV track alongside the CVBS/Y-C output as `<basename>_audio_<pair>.wav` (the basename is derived from `output.video_path` by stripping a trailing `.cvbs` or `.cvbsy` suffix).
+The `audio:` block declares a list of **audio channel pairs** for a section, each carrying one kind of stereo content for the exact duration (in frames) of that section: synthetic test tones, an audio file, or the soundtrack of the section's video. Following the CVBS File Format Specification (Audio Data / SMPTE 272M-1994), a project may carry up to **8 channel pairs** (0–7, i.e. up to 16 SMPTE 272M channels). Each declared channel pair is written as its own frame-locked stereo WAV track alongside the CVBS/Y-C output as `<basename>_audio_<pair>.wav` (the basename is derived from `output.video_path` by stripping a trailing `.cvbs` or `.cvbsy` suffix).
 
 Design decisions:
 - **One WAV file per channel pair** — the set of emitted pairs is the union of the pair numbers declared across all sections. Every pair file spans the whole output; a section that omits a pair emits silence for its frames, and an omitted `left`/`right` channel is stored as all-zero silence (SMPTE 272M §6.4).
-- **Independent left/right channels** — each pair has separate `left:` and `right:` tone descriptors, so the two interleaved channels (odd = left, even = right) can differ or one can be silent.
-- **Phase reset per section run** — each contiguous run of output frames sharing one section restarts the oscillators at phase 0; audio is a pure function of output position, so no per-frame caching is needed.
+- **One content kind per pair** — tones (`left:`/`right:`), `file:` or `video_audio:`; combining kinds is a parse error, and the tone rules (waveform, ramp, amplitude) apply only to tone pairs.
+- **Independent left/right channels** — each tone pair has separate `left:` and `right:` tone descriptors, so the two interleaved channels (odd = left, even = right) can differ or one can be silent.
+- **Fresh start per section run** — each contiguous run of output frames sharing one section restarts tone oscillators at phase 0 and plays an audio file from its start. A video soundtrack is placed by source frame instead (below).
 
 **Frame lock** — every track is stereo, 24-bit signed little-endian PCM (RIFF/WAVE, format tag `0x0001`) at 48000 Hz, synchronous with video (SMPTE 272M §1.2). The per-frame sample count follows output position:
 
@@ -1042,8 +1046,10 @@ Design decisions:
 | `description` | string | No | — | Human-readable label recorded in the `audio_channel_pair` metadata (e.g. `Analogue stereo`, `Commentary`). |
 | `left` | map | No\* | tone descriptor (below) | The odd (first) interleaved channel. Omitted → silent. |
 | `right` | map | No\* | tone descriptor (below) | The even (second) interleaved channel. Omitted → silent. |
+| `file` | map | No\* | `path` (string, required), `repeat` (bool, default `false`) | WAV or FLAC file; `path` resolves through the asset roots like `source`. |
+| `video_audio` | map | No\* | `stream` (int ≥ 0, default `0`) | Audio stream of the section's video source, counted among its audio streams. |
 
-\* At least one of `left`/`right` must be present (a pair with no active channel is rejected by validation).
+\* A pair names exactly one kind: tones (at least one of `left`/`right`; a tone pair with no active channel is rejected), `file`, or `video_audio`.
 
 **Channel tone descriptor** (`left:` / `right:`):
 
@@ -1065,7 +1071,9 @@ Design decisions:
 
 Frequency semantics: instantaneous frequency drives a phase accumulator (`phase += 2π·f(t)/fs`) so swept tones stay continuous within a section run. All frequencies (fixed and ramp `start`/`end`) must lie in `[0, 22000]` Hz — safely below the 24 kHz Nyquist limit of the 48 kHz sampling rate.
 
-**Output-stream alignment**: audio follows the **output** frame stream. The generator is driven with the output-order section sequence, preserving each track's sample-count alignment. Sections with no `audio:` block emit silence for their frame span across every pair. When at least one pair is declared, one `audio_channel_pair` row per pair (with its optional `description`) is written to the `.meta` database.
+**File and video content**: samples are decoded by an external `ffmpeg` process (`ffmpeg [-ss t] -i <src> -map 0:a:<n> -ac 2 -ar <rate> -f s32le -`), so mono is duplicated to both channels, more than two channels are downmixed, any input rate is resampled, and the 32-bit samples are rounded to 24 bits (`ConvertSample32To24`). A file plays from its first sample at each section-run start; at its end the rest of the run is silent, or the file reopens from the start when `repeat` is true. A video soundtrack follows the picture: output frame *k* takes the samples at the source time of its source frame index, `index / frame rate` after the first video frame (an input seek from the container start, offset by the probed video start time). While source indices advance by one the stream is read continuously; any other step (a looping fixed duration, a `duration_repeat` pass) reopens it at the new frame's time. Frames before the soundtrack's first sample, or after its last, are silent. Validation (with the CLI/generation probes) checks that a file exists, has a `.wav`/`.flac` extension and one or two channels, that a `video_audio` section source is a video with that audio stream, and warns when a non-repeating file is shorter than its section; resampling and downmixing are logged at info level.
+
+**Output-stream alignment**: per-frame sample counts follow the **output** frame stream whatever a pair carries. The generator is driven with the output-order frame sequence, preserving each track's sample-count alignment. Sections with no `audio:` block emit silence for their frame span across every pair. When at least one pair is declared, one `audio_channel_pair` row per pair (with its optional `description`) is written to the `.meta` database.
 
 Example YAML:
 
@@ -1100,13 +1108,25 @@ sections:
             waveform: sawtooth
             amplitude: 0.5
             ramp: { start: 200.0, end: 4000.0, mode: up }
+  - name: "Programme"
+    type: progressive
+    source: "{project}/capture.mp4"
+    start_frame: 250         # Picture and soundtrack both start at frame 250
+    audio:
+      channel_pairs:
+        - pair: 0
+          description: Programme audio
+          video_audio: { stream: 0 }
+        - pair: 1
+          description: Narration
+          file: { path: "{project}/narration.flac", repeat: true }
 ```
 
 ---
 
 #### **`efm_audio:` Sub-Key (Optional, Project-Level)**
 
-The `output.efm_audio:` block selects **one** audio channel pair to be additionally encoded as a LaserDisc digital audio (EFM) channel stream, written as `<basename>.efm` with a `<basename>.efm.meta` frame-index sidecar beside that pair's WAV track. The pair's WAV output and every other pair are unaffected; audio parameters (waveform, frequency, amplitude, ramps) are shared between the two paths and declared only in the per-section [`audio:`](#audio-sub-key-optional-per-section) blocks. The encoding is described in [LaserDisc Digital Audio (EFM) Output](#laserdisc-digital-audio-efm-output).
+The `output.efm_audio:` block selects **one** audio channel pair to be additionally encoded as a LaserDisc digital audio (EFM) channel stream, written as `<basename>.efm` with a `<basename>.efm.meta` frame-index sidecar beside that pair's WAV track. The pair's WAV output and every other pair are unaffected; the pair's content (tones, file or video soundtrack) is shared between the two paths and declared only in the per-section [`audio:`](#audio-sub-key-optional-per-section) blocks. Tones are synthesised directly at 44 100 Hz; file and video audio are read a second time, resampled to 44 100 Hz. The encoding is described in [LaserDisc Digital Audio (EFM) Output](#laserdisc-digital-audio-efm-output).
 
 | Key | Type | Required | Range / Values | Description |
 |-----|------|----------|----------------|-------------|

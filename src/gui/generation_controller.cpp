@@ -159,7 +159,8 @@ void GenerationController::RunDefaultPipeline(const Project& project,
 
   YamlProjectParser parser(&logger);
   ProgressiveFrameSourceProbe probe;
-  ProjectValidator validator(&probe, &logger);
+  FfprobeAudioFileProbe audio_file_probe;
+  ProjectValidator validator(&probe, &logger, &audio_file_probe);
   GenerationStage generation(&logger);
   NoiseInjectionStage noise_injection(&logger);
   DropoutInjectionStage dropout_injection(&logger);

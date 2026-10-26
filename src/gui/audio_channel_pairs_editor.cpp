@@ -2,7 +2,8 @@
  * File:        audio_channel_pairs_editor.cpp
  * Module:      gui
  * Purpose:     Editor for a section's audio channel pairs (up to eight stereo
- *              pairs, each with one shared or two independent test tones)
+ *              pairs, each carrying test tones, an audio file or the section
+ *              video's soundtrack)
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -10,8 +11,12 @@
 
 #include "audio_channel_pairs_editor.h"
 
+#include <QCheckBox>
 #include <QComboBox>
+#include <QDir>
 #include <QDoubleSpinBox>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -19,12 +24,20 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QSpinBox>
+#include <QStackedWidget>
+#include <QStandardItemModel>
 #include <QVBoxLayout>
+#include <algorithm>
 #include <utility>
 
+#include "asset_roots.h"
 #include "form_field_width.h"
 #include "section_block_presenters.h"
+#include "source_path_model.h"
+#include "videosynth/path_resolution.h"
+#include "videosynth/progressive_frame_source.h"
 
 namespace videosynth::gui {
 
@@ -33,6 +46,33 @@ namespace {
 // Indices of the channel-mode combo box entries.
 constexpr int kChannelModeLinked = 0;       // One tone on both channels.
 constexpr int kChannelModeIndependent = 1;  // Separate left/right tones.
+
+// Content combo rows and content-stack pages, in AudioPairContent order.
+constexpr int kContentTones = 0;
+constexpr int kContentFile = 1;
+constexpr int kContentVideo = 2;
+
+int ContentRow(AudioPairContent content) {
+  switch (content) {
+    case AudioPairContent::kFile:
+      return kContentFile;
+    case AudioPairContent::kVideo:
+      return kContentVideo;
+    case AudioPairContent::kTones:
+      break;
+  }
+  return kContentTones;
+}
+
+AudioPairContent ContentForRow(int row) {
+  if (row == kContentFile) {
+    return AudioPairContent::kFile;
+  }
+  if (row == kContentVideo) {
+    return AudioPairContent::kVideo;
+  }
+  return AudioPairContent::kTones;
+}
 
 }  // namespace
 
@@ -74,19 +114,78 @@ AudioChannelPairsEditor::AudioChannelPairsEditor(QWidget* parent)
   // form layout may otherwise keep the field at its narrow size hint.
   description_edit_->setMinimumWidth(description_edit_->sizeHint().width() * 2);
   header_form->addRow(tr("Description:"), description_edit_);
-  channel_mode_ = new QComboBox(form_panel_);
+  content_combo_ = new QComboBox(form_panel_);
+  content_combo_->addItem(tr("Test tones"));
+  content_combo_->addItem(tr("Audio file"));
+  content_combo_->addItem(tr("Video soundtrack"));
+  content_combo_->setToolTip(
+      tr("Test tones are synthesised; an audio file (WAV or FLAC) plays from "
+         "its start in each section run; the video soundtrack follows the "
+         "source frames the section shows."));
+  CapFieldWidthAtSizeHint(content_combo_);
+  header_form->addRow(tr("Content:"), content_combo_);
+  form_layout->addLayout(header_form);
+
+  content_stack_ = new QStackedWidget(form_panel_);
+
+  // Page: test tones.
+  auto* tones_page = new QWidget(content_stack_);
+  auto* tones_layout = new QVBoxLayout(tones_page);
+  tones_layout->setContentsMargins(0, 0, 0, 0);
+  auto* mode_form = new QFormLayout();
+  channel_mode_ = new QComboBox(tones_page);
   channel_mode_->addItem(tr("Same tone on both channels"));
   channel_mode_->addItem(tr("Independent left and right"));
   channel_mode_->setToolTip(
       tr("With one tone the left settings apply to both channels; independent "
          "mode edits the left and right tones separately."));
-  header_form->addRow(tr("Channels:"), channel_mode_);
-  form_layout->addLayout(header_form);
-
-  form_layout->addWidget(
+  mode_form->addRow(tr("Channels:"), channel_mode_);
+  tones_layout->addLayout(mode_form);
+  tones_layout->addWidget(
       BuildChannelEditor(tr("Tone (both channels)"), &left_));
-  form_layout->addWidget(BuildChannelEditor(tr("Right channel"), &right_));
+  tones_layout->addWidget(BuildChannelEditor(tr("Right channel"), &right_));
   right_.group->setVisible(false);
+  tones_layout->addStretch();
+  content_stack_->addWidget(tones_page);
+
+  // Page: audio file.
+  auto* file_page = new QWidget(content_stack_);
+  auto* file_form = new QFormLayout(file_page);
+  file_form->setContentsMargins(0, 0, 0, 0);
+  auto* path_row = new QHBoxLayout();
+  file_path_edit_ = new QLineEdit(file_page);
+  file_path_edit_->setPlaceholderText(tr("e.g. narration.flac"));
+  auto* browse = new QPushButton(tr("Browse…"), file_page);
+  path_row->addWidget(file_path_edit_, 1);
+  path_row->addWidget(browse);
+  file_form->addRow(tr("File:"), path_row);
+  file_relative_check_ = new QCheckBox(tr("Relative to project"), file_page);
+  file_relative_check_->setToolTip(
+      tr("Store the path relative to the project file so the project stays "
+         "portable."));
+  file_form->addRow(QString(), file_relative_check_);
+  file_repeat_check_ = new QCheckBox(tr("Repeat"), file_page);
+  file_repeat_check_->setToolTip(
+      tr("Restart the file when it ends; otherwise the rest of the section is "
+         "silent."));
+  file_form->addRow(QString(), file_repeat_check_);
+  content_stack_->addWidget(file_page);
+
+  // Page: video soundtrack.
+  auto* video_page = new QWidget(content_stack_);
+  auto* video_form = new QFormLayout(video_page);
+  video_form->setContentsMargins(0, 0, 0, 0);
+  video_stream_combo_ = new QComboBox(video_page);
+  video_stream_combo_->setToolTip(
+      tr("Audio stream of the section's video. Mono plays on both channels; "
+         "more than two channels are downmixed to stereo."));
+  video_form->addRow(tr("Stream:"), video_stream_combo_);
+  video_stream_note_ = new QLabel(video_page);
+  video_stream_note_->setWordWrap(true);
+  video_form->addRow(video_stream_note_);
+  content_stack_->addWidget(video_page);
+
+  form_layout->addWidget(content_stack_);
   form_layout->addStretch();
   layout->addWidget(form_panel_, 2);
 
@@ -104,6 +203,17 @@ AudioChannelPairsEditor::AudioChannelPairsEditor(QWidget* parent)
   // not re-enter the mode switch.
   connect(channel_mode_, &QComboBox::activated, this,
           &AudioChannelPairsEditor::OnChannelModeChanged);
+  connect(content_combo_, &QComboBox::activated, this,
+          &AudioChannelPairsEditor::OnContentChanged);
+  connect(file_path_edit_, &QLineEdit::editingFinished, this, commit);
+  connect(file_relative_check_, &QCheckBox::toggled, this,
+          [commit](bool) { commit(); });
+  connect(file_repeat_check_, &QCheckBox::toggled, this,
+          [commit](bool) { commit(); });
+  connect(browse, &QPushButton::clicked, this,
+          &AudioChannelPairsEditor::OnBrowseAudioFile);
+  connect(video_stream_combo_, &QComboBox::activated, this,
+          [commit](int) { commit(); });
 
   LoadForm();
 }
@@ -295,6 +405,22 @@ void AudioChannelPairsEditor::LoadForm() {
 
   pair_spin_->setValue(channel_pair->pair);
   description_edit_->setText(QString::fromStdString(channel_pair->description));
+  content_combo_->setCurrentIndex(ContentRow(channel_pair->content));
+
+  // A {bundled}/… path is not a "my own file" spelling, so it shows verbatim.
+  SourceSelection file_selection =
+      ParseSourceSelection(channel_pair->file.path);
+  if (file_selection.builtin) {
+    file_selection.relative = false;
+    file_selection.text = channel_pair->file.path;
+  }
+  loaded_file_path_ = channel_pair->file.path;
+  loaded_file_text_ = QString::fromStdString(file_selection.text);
+  loaded_file_relative_ = file_selection.relative;
+  file_path_edit_->setText(loaded_file_text_);
+  file_relative_check_->setChecked(loaded_file_relative_);
+  file_repeat_check_->setChecked(channel_pair->file.repeat);
+  UpdateContentWidgets(channel_pair);
   // Linked mode is inferred, not stored: identical left/right descriptors edit
   // as one tone; any difference (including one silent channel) edits as
   // independent channels.
@@ -344,10 +470,25 @@ void AudioChannelPairsEditor::CommitForm() {
   channel_pair->pair = pair_spin_->value();
   channel_pair->pair_specified = true;
   channel_pair->description = description_edit_->text().toStdString();
-  channel_pair->left = ChannelFromWidgets(left_);
-  channel_pair->right = channel_mode_->currentIndex() == kChannelModeIndependent
-                            ? ChannelFromWidgets(right_)
-                            : channel_pair->left;
+  // Only the shown kind's fields are read back; the others stay as
+  // SetAudioPairContent left them.
+  switch (channel_pair->content) {
+    case AudioPairContent::kTones:
+      channel_pair->left = ChannelFromWidgets(left_);
+      channel_pair->right =
+          channel_mode_->currentIndex() == kChannelModeIndependent
+              ? ChannelFromWidgets(right_)
+              : channel_pair->left;
+      break;
+    case AudioPairContent::kFile:
+      channel_pair->file.path = FilePathFromWidgets();
+      channel_pair->file.repeat = file_repeat_check_->isChecked();
+      break;
+    case AudioPairContent::kVideo:
+      channel_pair->video_audio.stream =
+          std::max(0, video_stream_combo_->currentIndex());
+      break;
+  }
 
   if (QListWidgetItem* item = pair_list_->currentItem()) {
     item->setText(PairSummary(*channel_pair));
@@ -375,12 +516,157 @@ void AudioChannelPairsEditor::OnRemove() {
   emit ChannelPairsEdited();
 }
 
+void AudioChannelPairsEditor::SetProjectBaseDir(const QString& base_dir) {
+  base_dir_ = base_dir;
+}
+
+void AudioChannelPairsEditor::SetSourceContext(
+    const std::string& source, bool probe_ok,
+    const ProgressiveFrameSourceProfile& profile) {
+  source_ = source;
+  probe_ok_ = probe_ok;
+  profile_ = profile;
+  const bool was_updating = updating_;
+  updating_ = true;
+  UpdateContentWidgets(Current());
+  updating_ = was_updating;
+}
+
+void AudioChannelPairsEditor::UpdateContentWidgets(
+    const AudioChannelPair* channel_pair) {
+  const AudioPairContent content = channel_pair != nullptr
+                                       ? channel_pair->content
+                                       : AudioPairContent::kTones;
+  content_stack_->setCurrentIndex(ContentRow(content));
+
+  const int stored_stream =
+      channel_pair != nullptr ? channel_pair->video_audio.stream : 0;
+  const VideoSoundtrackEditorState state = VideoSoundtrackEditorStateFor(
+      source_, probe_ok_, profile_, stored_stream);
+  // A pair already on the soundtrack keeps showing it, so the validator can
+  // explain what is wrong instead of the choice silently vanishing.
+  if (auto* model =
+          qobject_cast<QStandardItemModel*>(content_combo_->model())) {
+    if (QStandardItem* item = model->item(kContentVideo)) {
+      item->setEnabled(state.selectable || content == AudioPairContent::kVideo);
+    }
+  }
+
+  video_stream_combo_->clear();
+  for (const std::string& label : state.stream_labels) {
+    video_stream_combo_->addItem(QString::fromStdString(label));
+  }
+  video_stream_combo_->setCurrentIndex(
+      qMin(stored_stream, video_stream_combo_->count() - 1));
+  video_stream_combo_->setEnabled(state.selectable);
+
+  QString note;
+  if (!IsProgressiveVideoSource(source_)) {
+    note = tr("The section source is not a video, so it has no soundtrack.");
+  } else if (!probe_ok_) {
+    note =
+        tr("The source's audio streams are listed once it has been "
+           "probed.");
+  } else if (!state.selectable) {
+    note = tr("The section's video has no audio streams.");
+  }
+  video_stream_note_->setText(note);
+  video_stream_note_->setVisible(!note.isEmpty());
+}
+
+std::string AudioChannelPairsEditor::FilePathFromWidgets() const {
+  QString text = file_path_edit_->text().trimmed();
+  bool relative = file_relative_check_->isChecked();
+  if (text == loaded_file_text_ && relative == loaded_file_relative_) {
+    return loaded_file_path_;
+  }
+  if (relative && QDir::isAbsolutePath(text)) {
+    // A typed absolute path is stored relative only when it lies under the
+    // project directory.
+    const QString under_project = QDir(base_dir_).relativeFilePath(text);
+    if (under_project.startsWith(QStringLiteral(".."))) {
+      relative = false;
+    } else {
+      text = under_project;
+    }
+  }
+  SourceSelection selection;
+  selection.relative = relative;
+  selection.text = text.toStdString();
+  return ComposeSource(selection, std::string());
+}
+
+void AudioChannelPairsEditor::OnContentChanged(int index) {
+  AudioChannelPair* channel_pair = Current();
+  if (updating_ || channel_pair == nullptr) {
+    return;
+  }
+  SetAudioPairContent(channel_pair, ContentForRow(index));
+  LoadForm();
+  if (QListWidgetItem* item = pair_list_->currentItem()) {
+    item->setText(PairSummary(*channel_pair));
+  }
+  emit ChannelPairsEdited();
+}
+
+void AudioChannelPairsEditor::OnBrowseAudioFile() {
+  AudioChannelPair* channel_pair = Current();
+  if (channel_pair == nullptr) {
+    return;
+  }
+  QString start;
+  if (!channel_pair->file.path.empty()) {
+    start = QFileInfo(QString::fromStdString(videosynth::ResolveAssetPath(
+                          channel_pair->file.path, GuiAssetRoots(),
+                          base_dir_.toStdString(), /*anchor_unset=*/true)))
+                .absolutePath();
+  }
+  if (start.isEmpty()) {
+    start = base_dir_;
+  }
+  const QString path = QFileDialog::getOpenFileName(
+      this, tr("Audio File"), start,
+      tr("Audio files (*.wav *.flac *.WAV *.FLAC);;All files (*)"));
+  if (path.isEmpty()) {
+    return;
+  }
+
+  // Keep the path project-relative when requested and the file sits under
+  // the project directory; otherwise store it absolute and untick the box so
+  // the stored form matches what the user sees.
+  updating_ = true;
+  if (file_relative_check_->isChecked()) {
+    const QString relative = QDir(base_dir_).relativeFilePath(path);
+    if (!relative.startsWith(QStringLiteral(".."))) {
+      file_path_edit_->setText(relative);
+    } else {
+      file_path_edit_->setText(path);
+      file_relative_check_->setChecked(false);
+    }
+  } else {
+    file_path_edit_->setText(path);
+  }
+  updating_ = false;
+  CommitForm();
+}
+
 QString AudioChannelPairsEditor::PairSummary(
     const AudioChannelPair& channel_pair) const {
   QString summary = tr("Pair %1").arg(channel_pair.pair);
   if (!channel_pair.description.empty()) {
     summary += QStringLiteral(" — %1").arg(
         QString::fromStdString(channel_pair.description));
+  }
+  if (channel_pair.content == AudioPairContent::kFile) {
+    const QString name =
+        QFileInfo(QString::fromStdString(channel_pair.file.path)).fileName();
+    return summary +
+           QStringLiteral(" [%1]").arg(name.isEmpty() ? tr("no file") : name);
+  }
+  if (channel_pair.content == AudioPairContent::kVideo) {
+    return summary +
+           QStringLiteral(" [%1]").arg(
+               tr("soundtrack %1").arg(channel_pair.video_audio.stream));
   }
   QString channels;
   if (channel_pair.left.enabled) {

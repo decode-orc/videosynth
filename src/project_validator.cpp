@@ -14,7 +14,10 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <iomanip>
+#include <optional>
 #include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -24,6 +27,7 @@
 #include "videosynth/path_resolution.h"
 #include "videosynth/progressive_frame_source.h"
 #include "videosynth/source_colour_conversion.h"
+#include "videosynth/source_frame_range.h"
 #include "videosynth/timing_constants.h"
 #include "videosynth/vits_definition_provider.h"
 
@@ -1355,6 +1359,175 @@ void ValidateAudioChannel(const videosynth::AudioParameters& audio,
   }
 }
 
+// Seconds to one decimal place, for messages.
+std::string FormatSeconds(double seconds) {
+  std::ostringstream text;
+  text << std::fixed << std::setprecision(1) << seconds;
+  return text.str();
+}
+
+// True when `path` ends in `extension` (lower-case, with the dot), ignoring
+// case.
+bool HasExtensionIgnoringCase(const std::string& path,
+                              const std::string& extension) {
+  if (path.size() < extension.size()) {
+    return false;
+  }
+  for (std::size_t i = 0; i < extension.size(); ++i) {
+    const char c = path[path.size() - extension.size() + i];
+    if (std::tolower(static_cast<unsigned char>(c)) != extension[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Structural rules for an audio-file pair: a path with a known root token and
+// a WAV or FLAC extension.
+void ValidateAudioFileContent(const videosynth::AudioChannelPair& channel_pair,
+                              const std::string& pair_label,
+                              videosynth::ValidationResult* result) {
+  const std::string& path = channel_pair.file.path;
+  if (path.empty()) {
+    result->is_valid = false;
+    result->errors.push_back(pair_label + ": file.path must be set.");
+    return;
+  }
+  std::string root_error;
+  if (!ValidateAssetRootToken(path, pair_label, "file.path", &root_error)) {
+    result->is_valid = false;
+    result->errors.push_back(root_error);
+    return;
+  }
+  if (!HasExtensionIgnoringCase(path, ".wav") &&
+      !HasExtensionIgnoringCase(path, ".flac")) {
+    result->is_valid = false;
+    result->errors.push_back(pair_label +
+                             ": file.path must name a .wav or .flac file; "
+                             "got '" +
+                             path + "'.");
+  }
+}
+
+// Structural rules for a video-soundtrack pair: a non-negative stream index
+// and a section source that is a video rather than an EXR still.
+void ValidateVideoAudioContent(const videosynth::Section& section,
+                               const videosynth::AudioChannelPair& channel_pair,
+                               const std::string& pair_label,
+                               videosynth::ValidationResult* result) {
+  if (channel_pair.video_audio.stream < 0) {
+    result->is_valid = false;
+    result->errors.push_back(
+        pair_label + ": video_audio.stream must be >= 0; got " +
+        std::to_string(channel_pair.video_audio.stream) + ".");
+    return;
+  }
+  if (!section.source.empty() &&
+      !videosynth::IsProgressiveVideoSource(section.source)) {
+    result->is_valid = false;
+    result->errors.push_back(
+        pair_label +
+        ": video_audio needs a video source (MKV or MP4); the section source "
+        "is an EXR still.");
+  }
+}
+
+// Probe-backed rules for every file and video-soundtrack pair of a section.
+// `video_profile` is the probed section source, or null when the source was
+// not probed (or is a still); `source_frame_count` is its frame count or
+// kUnknownSourceFrameCount. File checks run only with an audio file probe.
+void ValidateMediaAudioSources(
+    const videosynth::Section& section, videosynth::Standard standard,
+    const videosynth::ProgressiveFrameSourceProfile* video_profile,
+    int source_frame_count, videosynth::IAudioFileProbe* audio_file_probe,
+    videosynth::ILogger* logger, videosynth::ValidationResult* result) {
+  const double target_rate_hz = videosynth::AudioSampleRateHz(standard);
+  for (const videosynth::AudioChannelPair& channel_pair :
+       section.audio_channel_pairs) {
+    const std::string pair_label = "Audio validation error in section '" +
+                                   section.name + "' channel pair " +
+                                   std::to_string(channel_pair.pair);
+    const std::string info_label = "Audio: section '" + section.name +
+                                   "' channel pair " +
+                                   std::to_string(channel_pair.pair);
+
+    if (channel_pair.content == videosynth::AudioPairContent::kVideo &&
+        video_profile != nullptr) {
+      const int stream = channel_pair.video_audio.stream;
+      const int stream_count =
+          static_cast<int>(video_profile->audio_streams.size());
+      if (stream >= stream_count) {
+        result->is_valid = false;
+        result->errors.push_back(pair_label + ": the section source has " +
+                                 std::to_string(stream_count) +
+                                 " audio stream(s), so video_audio.stream " +
+                                 std::to_string(stream) + " does not exist.");
+        continue;
+      }
+      const videosynth::ProgressiveAudioStreamProfile& audio =
+          video_profile->audio_streams[static_cast<std::size_t>(stream)];
+      if (logger != nullptr && audio.channels > 2) {
+        logger->Info(info_label + ": the soundtrack's " +
+                     std::to_string(audio.channels) +
+                     " channels are downmixed to stereo.");
+      }
+      if (logger != nullptr && audio.sample_rate_hz > 0 &&
+          audio.sample_rate_hz != static_cast<int>(target_rate_hz)) {
+        logger->Info(info_label + ": the soundtrack is resampled from " +
+                     std::to_string(audio.sample_rate_hz) + " Hz to " +
+                     std::to_string(static_cast<int>(target_rate_hz)) + " Hz.");
+      }
+      continue;
+    }
+
+    if (channel_pair.content != videosynth::AudioPairContent::kFile ||
+        audio_file_probe == nullptr) {
+      continue;
+    }
+    const std::string& path = channel_pair.file.path;
+    videosynth::AudioFileProfile profile;
+    std::string probe_error;
+    if (!audio_file_probe->Probe(path, &profile, &probe_error)) {
+      result->is_valid = false;
+      result->errors.push_back(pair_label + ": audio file '" + path +
+                               "' could not be read: " + probe_error);
+      continue;
+    }
+    if (profile.channels < 1 || profile.channels > 2) {
+      result->is_valid = false;
+      result->errors.push_back(
+          pair_label + ": audio file '" + path + "' has " +
+          std::to_string(profile.channels) +
+          " channels; only mono and stereo files are supported.");
+      continue;
+    }
+    if (logger != nullptr && profile.sample_rate_hz > 0 &&
+        profile.sample_rate_hz != static_cast<int>(target_rate_hz)) {
+      logger->Info(info_label + ": '" + path + "' is resampled from " +
+                   std::to_string(profile.sample_rate_hz) + " Hz to " +
+                   std::to_string(static_cast<int>(target_rate_hz)) + " Hz.");
+    }
+
+    const std::int64_t run_frames =
+        videosynth::KnownSectionOutputFrameCount(section, source_frame_count);
+    if (!channel_pair.file.repeat && run_frames > 0 &&
+        profile.duration_seconds > 0.0) {
+      const double run_seconds =
+          static_cast<double>(run_frames) /
+          videosynth::GetTimingConstants(standard).frame_rate_hz;
+      if (profile.duration_seconds < run_seconds) {
+        result->warnings.push_back(
+            "Section '" + section.name + "' channel pair " +
+            std::to_string(channel_pair.pair) + ": audio file '" + path +
+            "' lasts " + FormatSeconds(profile.duration_seconds) +
+            " s but the section runs " + FormatSeconds(run_seconds) +
+            " s; the rest of the section is silent (set repeat: true to "
+            "loop it).");
+      }
+    }
+  }
+}
+
 void ValidateAudioParameters(const videosynth::Section& section,
                              videosynth::Standard standard,
                              videosynth::ValidationResult* result) {
@@ -1396,7 +1569,16 @@ void ValidateAudioParameters(const videosynth::Section& section,
       continue;
     }
 
-    // A declared pair must carry at least one active channel.
+    if (channel_pair.content == videosynth::AudioPairContent::kFile) {
+      ValidateAudioFileContent(channel_pair, pair_label, result);
+      continue;
+    }
+    if (channel_pair.content == videosynth::AudioPairContent::kVideo) {
+      ValidateVideoAudioContent(section, channel_pair, pair_label, result);
+      continue;
+    }
+
+    // A declared tone pair must carry at least one active channel.
     if (!videosynth::AudioChannelPairIsActive(channel_pair)) {
       result->is_valid = false;
       result->errors.push_back(
@@ -1635,9 +1817,10 @@ namespace videosynth {
 
 ProjectValidator::ProjectValidator(
     IProgressiveFrameSourceProbe* progressive_frame_source_probe,
-    ILogger* logger)
+    ILogger* logger, IAudioFileProbe* audio_file_probe)
     : progressive_frame_source_probe_(progressive_frame_source_probe),
-      logger_(logger) {}
+      logger_(logger),
+      audio_file_probe_(audio_file_probe) {}
 
 ValidationResult ProjectValidator::Validate(const Project& project) {
   ValidationResult result;
@@ -1862,6 +2045,9 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
         break;
       }
 
+      // Set once a video source has been probed, for the media audio rules.
+      std::optional<ProgressiveFrameSourceProfile> video_profile;
+      int source_frame_count = kUnknownSourceFrameCount;
       if (progressive_frame_source_probe_ != nullptr) {
         ProgressiveFrameSourceProfile profile;
         std::string probe_error;
@@ -1906,6 +2092,8 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
                                               &result)) {
             break;
           }
+          video_profile = profile;
+          source_frame_count = profile.frame_count;
         } else {
           std::string profile_error;
           if (!ValidateProfileBySourceFamily(
@@ -1919,6 +2107,14 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
             break;
           }
         }
+      }
+
+      ValidateMediaAudioSources(
+          section, project.cvbs_presets.video_standard_preset,
+          video_profile.has_value() ? &*video_profile : nullptr,
+          source_frame_count, audio_file_probe_, logger_, &result);
+      if (!result.is_valid) {
+        break;
       }
 
       continue;

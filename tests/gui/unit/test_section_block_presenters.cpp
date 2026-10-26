@@ -17,6 +17,7 @@
 #include "videosynth/model.h"
 #include "videosynth/project_validator.h"
 #include "videosynth/yaml_project_emitter.h"
+#include "videosynth/yaml_project_parser.h"
 
 namespace videosynth::gui {
 namespace {
@@ -313,6 +314,121 @@ TEST(SectionBlockPresenterTest, UnchangedSourceNeverRewritesTheDuration) {
   const Section original = section;
   ApplySourceSelectionDefaults("assets/capture.mp4", 125, &section);
   EXPECT_EQ(section, original);
+}
+
+// Emits and re-parses `project`, as saving and reopening it would.
+Project SaveAndReload(const Project& project) {
+  YamlProjectParser parser;
+  const ParseResult parsed = parser.ParseString(EmitYaml(project));
+  EXPECT_TRUE(parsed.ok) << (parsed.errors.empty() ? "" : parsed.errors[0]);
+  return parsed.project;
+}
+
+TEST(SectionBlockPresenterTest, SwitchingPairContentKeepsOnlyThatKind) {
+  AudioChannelPair channel_pair = MakeDefaultAudioChannelPair(2);
+  channel_pair.description = "Narration";
+
+  SetAudioPairContent(&channel_pair, AudioPairContent::kFile);
+  EXPECT_EQ(channel_pair.content, AudioPairContent::kFile);
+  EXPECT_FALSE(channel_pair.left.enabled);
+  EXPECT_FALSE(channel_pair.right.enabled);
+  EXPECT_TRUE(channel_pair.file.path.empty());
+  EXPECT_EQ(channel_pair.pair, 2);
+  EXPECT_EQ(channel_pair.description, "Narration");
+
+  channel_pair.file = {"{project}/narration.flac", true};
+  SetAudioPairContent(&channel_pair, AudioPairContent::kVideo);
+  EXPECT_EQ(channel_pair.content, AudioPairContent::kVideo);
+  EXPECT_EQ(channel_pair.file, AudioFileInput{});
+  EXPECT_EQ(channel_pair.video_audio.stream, 0);
+
+  channel_pair.video_audio.stream = 1;
+  SetAudioPairContent(&channel_pair, AudioPairContent::kTones);
+  EXPECT_EQ(channel_pair.video_audio, VideoAudioInput{});
+  EXPECT_EQ(channel_pair.left, MakeDefaultAudioChannel());
+  EXPECT_EQ(channel_pair.right, channel_pair.left);
+}
+
+TEST(SectionBlockPresenterTest, ReselectingTheSameContentChangesNothing) {
+  AudioChannelPair channel_pair;
+  channel_pair.content = AudioPairContent::kFile;
+  channel_pair.file = {"music.wav", true};
+  const AudioChannelPair original = channel_pair;
+  SetAudioPairContent(&channel_pair, AudioPairContent::kFile);
+  EXPECT_EQ(channel_pair, original);
+}
+
+TEST(SectionBlockPresenterTest, EveryPairContentRoundTripsThroughTheSection) {
+  Project project = MakeValidProject();
+  project.sections[0].source = "{project}/capture.mp4";
+  project.sections[0].duration_frames_all = true;
+  for (const AudioPairContent content :
+       {AudioPairContent::kTones, AudioPairContent::kFile,
+        AudioPairContent::kVideo}) {
+    AudioChannelPair channel_pair = MakeDefaultAudioChannelPair(0);
+    SetAudioPairContent(&channel_pair, content);
+    if (content == AudioPairContent::kFile) {
+      channel_pair.file = {"{project}/narration.flac", true};
+    } else if (content == AudioPairContent::kVideo) {
+      channel_pair.video_audio.stream = 1;
+    }
+    project.sections[0].audio_channel_pairs = {channel_pair};
+    EXPECT_EQ(SaveAndReload(project).sections[0].audio_channel_pairs,
+              project.sections[0].audio_channel_pairs)
+        << "content " << static_cast<int>(content);
+  }
+}
+
+TEST(SectionBlockPresenterTest, SoundtrackIsNotOfferedForStills) {
+  const VideoSoundtrackEditorState state = VideoSoundtrackEditorStateFor(
+      "assets/bars.exr", true, ProgressiveFrameSourceProfile{}, 0);
+  EXPECT_FALSE(state.selectable);
+  EXPECT_TRUE(state.stream_labels.empty());
+}
+
+TEST(SectionBlockPresenterTest, SoundtrackListsTheProbedStreams) {
+  ProgressiveFrameSourceProfile profile;
+  ProgressiveAudioStreamProfile stereo;
+  stereo.codec = "aac";
+  stereo.channels = 2;
+  stereo.sample_rate_hz = 48000;
+  ProgressiveAudioStreamProfile surround;
+  surround.codec = "ac3";
+  surround.channels = 6;
+  surround.sample_rate_hz = 44100;
+  profile.audio_streams = {stereo, surround};
+
+  const VideoSoundtrackEditorState state =
+      VideoSoundtrackEditorStateFor("capture.MP4", true, profile, 0);
+  EXPECT_TRUE(state.selectable);
+  EXPECT_EQ(state.stream_labels,
+            (std::vector<std::string>{"Stream 0: aac, 2 ch, 48000 Hz",
+                                      "Stream 1: ac3, 6 ch, 44100 Hz"}));
+}
+
+TEST(SectionBlockPresenterTest, SoundtrackIsDisabledForAVideoWithoutAudio) {
+  const VideoSoundtrackEditorState state = VideoSoundtrackEditorStateFor(
+      "capture.mkv", true, ProgressiveFrameSourceProfile{}, 0);
+  EXPECT_FALSE(state.selectable);
+}
+
+TEST(SectionBlockPresenterTest, SoundtrackNeverDropsTheStoredStream) {
+  // Before a probe the stored stream is offered by number.
+  const VideoSoundtrackEditorState pending = VideoSoundtrackEditorStateFor(
+      "capture.mkv", false, ProgressiveFrameSourceProfile{}, 2);
+  EXPECT_TRUE(pending.selectable);
+  EXPECT_EQ(pending.stream_labels,
+            (std::vector<std::string>{"Stream 0", "Stream 1", "Stream 2"}));
+
+  // A stored stream the probe did not find stays listed, marked as missing.
+  ProgressiveFrameSourceProfile profile;
+  profile.audio_streams.resize(1);
+  profile.audio_streams[0].channels = 2;
+  profile.audio_streams[0].sample_rate_hz = 48000;
+  const VideoSoundtrackEditorState probed =
+      VideoSoundtrackEditorStateFor("capture.mkv", true, profile, 1);
+  ASSERT_EQ(probed.stream_labels.size(), 2U);
+  EXPECT_EQ(probed.stream_labels[1], "Stream 1 (not in source)");
 }
 
 TEST(SectionBlockPresenterTest, RangeWidgetsAreDisabledForStills) {

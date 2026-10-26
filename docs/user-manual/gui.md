@@ -115,7 +115,13 @@ The centre pane is a set of collapsible groups covering everything a section hol
 
 **On-screen display** — the overlay list, with text, position, scale and foreground/background luma per overlay. The available substitution tokens are listed beneath the text field.
 
-**Audio channel pairs** — one entry per stereo pair, with a description and either one tone for both channels or independent left/right tones, each optionally a frequency ramp.
+**Audio channel pairs** — one entry per stereo pair, with a description and a *Content* choice:
+
+- *Test tones* — either one tone for both channels or independent left/right tones, each optionally a frequency ramp.
+- *Audio file* — a WAV or FLAC file chosen with *Browse…*, stored relative to the project when *Relative to project* is ticked and the file lies under the project directory. *Repeat* restarts the file when it ends; otherwise the rest of the section is silent.
+- *Video soundtrack* — one of the section video's audio streams, listed (codec, channels, sample rate) once the source has been probed. The choice is unavailable for EXR stills and for videos without audio.
+
+Switching the content replaces the pair's settings with the new kind's defaults; undo restores them.
 
 Every editor is a view onto the project document, so every change is undoable and every change marks the project dirty.
 

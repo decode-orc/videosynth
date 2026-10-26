@@ -153,7 +153,7 @@ A few combinations are validation errors:
 
 ## Source probing
 
-Validation probes each source file: it opens it, checks it against the profile rules and reads its frame count. A source that does not exist, or does not match a profile, is a validation error naming the reason. For a video, the probe also reads the average frame rate (to detect variable-rate files), the start times and the audio streams. The frame count comes from the container (`nb_frames` in MP4, the duration in Matroska), so probing never decodes the clip.
+Validation probes each source file: it opens it, checks it against the profile rules and reads its frame count. A source that does not exist, or does not match a profile, is a validation error naming the reason. For a video, the probe also reads the average frame rate (to detect variable-rate files), the start times and the audio streams (which a [video soundtrack](audio.md#video-soundtracks) channel pair plays). The frame count comes from the container (`nb_frames` in MP4, the duration in Matroska), so probing never decodes the clip.
 
 The colour conversions a video will receive are logged at `info` level during validation, for example:
 

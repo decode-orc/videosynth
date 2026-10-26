@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include "videosynth/audio_sample_source.h"
 #include "videosynth/interfaces.h"
 
 namespace videosynth {
@@ -23,10 +24,13 @@ class ProjectValidator final : public IProjectValidator {
   //
   // Args:
   //   progressive_frame_source_probe: Optional probe for validating frame
-  //   sources. logger: Optional logger for error reporting.
+  //   sources (and the audio streams of video soundtracks).
+  //   logger: Optional logger for error reporting and resample/downmix notes.
+  //   audio_file_probe: Optional probe for validating audio-file channel
+  //   pairs; without it only their structure is checked.
   explicit ProjectValidator(
       IProgressiveFrameSourceProbe* progressive_frame_source_probe = nullptr,
-      ILogger* logger = nullptr);
+      ILogger* logger = nullptr, IAudioFileProbe* audio_file_probe = nullptr);
 
   // Validates a project configuration for supported generation profiles.
   //
@@ -40,6 +44,7 @@ class ProjectValidator final : public IProjectValidator {
  private:
   IProgressiveFrameSourceProbe* progressive_frame_source_probe_;
   ILogger* logger_;
+  IAudioFileProbe* audio_file_probe_;
 };
 
 }  // namespace videosynth

@@ -99,6 +99,25 @@ TEST(PathResolutionTest, ResolveProjectPathsAppliesToSourcesAndOutput) {
   EXPECT_EQ(resolved.output.metadata_path, "/proj/out.meta");  // plain relative
 }
 
+TEST(PathResolutionTest, ResolveProjectPathsAppliesToAudioFilePairs) {
+  Project project;
+  Section section;
+  section.source = "{project}/capture.mp4";
+  AudioChannelPair narration;
+  narration.content = AudioPairContent::kFile;
+  narration.file.path = "{project}/narration.flac";
+  AudioChannelPair soundtrack;
+  soundtrack.content = AudioPairContent::kVideo;
+  section.audio_channel_pairs = {narration, soundtrack};
+  project.sections.push_back(section);
+
+  const Project resolved =
+      ResolveProjectPaths(project, {}, "/proj", /*anchor_unset=*/true);
+  EXPECT_EQ(resolved.sections[0].audio_channel_pairs[0].file.path,
+            "/proj/narration.flac");
+  EXPECT_TRUE(resolved.sections[0].audio_channel_pairs[1].file.path.empty());
+}
+
 // --- built-in names --------------------------------------------------------
 
 TEST(PathResolutionTest, BuiltinRootNames) {

@@ -357,6 +357,65 @@ bool ParseAudioChannel(const YAML::Node& node, const std::string& context,
   return true;
 }
 
+// Reads which content kind a channel pair carries. `file` and `video_audio`
+// each replace the `left`/`right` tones, so a pair may name at most one of the
+// three. Appends to errors and returns false on a structural error.
+bool ParseAudioPairContent(const YAML::Node& pair_node, AudioChannelPair* out,
+                           std::vector<std::string>* errors) {
+  const bool has_tones = pair_node["left"] || pair_node["right"];
+  const bool has_file = static_cast<bool>(pair_node["file"]);
+  const bool has_video = static_cast<bool>(pair_node["video_audio"]);
+  if (static_cast<int>(has_tones) + static_cast<int>(has_file) +
+          static_cast<int>(has_video) >
+      1) {
+    errors->push_back(
+        "section.audio.channel_pairs[] must use only one of 'left'/'right' "
+        "tones, 'file' or 'video_audio'.");
+    return false;
+  }
+
+  if (has_file) {
+    const YAML::Node file_node = pair_node["file"];
+    const std::string context = "section.audio.channel_pairs[].file";
+    if (!file_node.IsMap()) {
+      errors->push_back(context + " must be a map/object.");
+      return false;
+    }
+    ValidateAllowedKeys(file_node, {"path", "repeat"}, context, errors);
+    if (!errors->empty()) {
+      return false;
+    }
+    if (!file_node["path"]) {
+      errors->push_back(context + " is missing required field: 'path'.");
+      return false;
+    }
+    out->content = AudioPairContent::kFile;
+    out->file.path = file_node["path"].as<std::string>("");
+    if (file_node["repeat"]) {
+      out->file.repeat = file_node["repeat"].as<bool>();
+    }
+    return true;
+  }
+
+  if (has_video) {
+    const YAML::Node video_node = pair_node["video_audio"];
+    const std::string context = "section.audio.channel_pairs[].video_audio";
+    if (!video_node.IsMap()) {
+      errors->push_back(context + " must be a map/object.");
+      return false;
+    }
+    ValidateAllowedKeys(video_node, {"stream"}, context, errors);
+    if (!errors->empty()) {
+      return false;
+    }
+    out->content = AudioPairContent::kVideo;
+    if (video_node["stream"]) {
+      out->video_audio.stream = video_node["stream"].as<int>();
+    }
+  }
+  return true;
+}
+
 // Helper function to parse a YAML node into a Project structure.
 // This is shared between ParseFile and ParseString.
 ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
@@ -720,8 +779,8 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
                 "section.audio.channel_pairs[] must be a map/object.");
             return result;
           }
-          const std::set<std::string> pair_keys = {"pair", "description",
-                                                   "left", "right"};
+          const std::set<std::string> pair_keys = {
+              "pair", "description", "left", "right", "file", "video_audio"};
           ValidateAllowedKeys(pair_node, pair_keys,
                               "section.audio.channel_pairs[]", &result.errors);
           if (!result.errors.empty()) {
@@ -736,6 +795,10 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
           if (pair_node["description"]) {
             channel_pair.description =
                 pair_node["description"].as<std::string>("");
+          }
+          if (!ParseAudioPairContent(pair_node, &channel_pair,
+                                     &result.errors)) {
+            return result;
           }
           if (pair_node["left"] &&
               !ParseAudioChannel(pair_node["left"],

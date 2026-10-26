@@ -16,6 +16,8 @@
 #include <vector>
 
 #include "videosynth/audio_efm_writer.h"
+#include "videosynth/audio_media_reader.h"
+#include "videosynth/audio_sample_source.h"
 #include "videosynth/audio_synthesizer.h"
 #include "videosynth/audio_wav_writer.h"
 #include "videosynth/efm_track_layout.h"
@@ -23,6 +25,13 @@
 #include "videosynth/model.h"
 
 namespace videosynth {
+
+// One stored output frame as the audio tracks see it: the section it belongs
+// to and the source frame it shows (FrameScheduleItem::source_frame_index).
+struct AudioOutputFrame {
+  const Section* section = nullptr;
+  int source_frame_index = 0;
+};
 
 // Generates every audio channel pair declared by a project and streams each as
 // a separate stereo 24-bit RIFF/WAVE file (`_audio_<pair>.wav`) frame-locked to
@@ -40,13 +49,14 @@ namespace videosynth {
 // channel with `enabled == false` within a declared pair emits all-zero silence
 // (SMPTE 272M §6.4).
 //
-// Audio is a pure function of output position: frame k carries
-// AudioSamplesForFrame(standard, k) samples per channel (SMPTE 272M §14.3), and
-// each contiguous run of output frames sharing one section resets oscillator
-// phase at the run start. This keeps the track correct without caching: the
-// caller emits output frames strictly in output order.
+// Frame k carries AudioSamplesForFrame(standard, k) samples per channel
+// (SMPTE 272M §14.3) whatever its content. Each contiguous run of output frames
+// sharing one section starts afresh: tone oscillators reset their phase, an
+// audio-file pair plays its file from the start, and a video-soundtrack pair
+// follows the source frames shown (AudioMediaReader). The caller emits output
+// frames strictly in output order.
 //
-// Usage: Begin(project, output_frame_sections) opens the writers and computes
+// Usage: Begin(project, output_frames) opens the writers and computes
 // the per-frame plan; EmitFrame(k) must then be called for k = 0, 1, ... in
 // increasing output order; Finalize() closes the files. Abort() discards a
 // partially-written set (e.g. on cancellation).
@@ -55,14 +65,27 @@ namespace videosynth {
 // by EmitFrame; it must not be called concurrently from multiple threads.
 class AudioTrackGenerator {
  public:
-  explicit AudioTrackGenerator(ILogger* logger = nullptr);
+  // The probe supplies a video's soundtrack timing and the factory reads
+  // file and video audio; either may be null to use the ffprobe/ffmpeg
+  // implementations. Neither is used by a tone-only project.
+  explicit AudioTrackGenerator(
+      ILogger* logger = nullptr,
+      std::shared_ptr<IProgressiveFrameSourceProbe> probe = nullptr,
+      AudioSampleSourceFactory sample_source_factory = nullptr);
 
   // Prepares the plan and opens one WAV writer per declared channel pair.
-  // output_frame_sections lists, in output order, the section shown by each
-  // stored output frame (its size is the total output frame count). Returns
-  // false and appends messages to errors on any failure; on failure any opened
-  // writers are aborted. When the project declares no audio, Begin() succeeds,
-  // active() stays false, and EmitFrame/Finalize are no-ops.
+  // output_frames lists, in output order, the section and source frame of
+  // each stored output frame (its size is the total output frame count).
+  // Returns false and appends messages to errors on any failure; on failure
+  // any opened writers are aborted. When the project declares no audio,
+  // Begin() succeeds, active() stays false, and EmitFrame/Finalize are
+  // no-ops.
+  bool Begin(const Project& project,
+             const std::vector<AudioOutputFrame>& output_frames,
+             std::vector<std::string>* errors);
+
+  // As above for callers without a schedule: each section run is taken to
+  // show source frames 0, 1, 2, ... in order.
   bool Begin(const Project& project,
              const std::vector<const Section*>& output_frame_sections,
              std::vector<std::string>* errors);
@@ -115,22 +138,33 @@ class AudioTrackGenerator {
   }
 
  private:
-  // Per channel pair: its number, WAV writer, and the two channel
-  // synthesisers. The EFM-selected pair additionally owns a second pair of
-  // synthesisers running on the 44.1 kHz grid; they are null for every other
-  // pair.
+  // Per channel pair: its number, WAV writer, the two channel synthesisers
+  // and the media reader. The EFM-selected pair additionally owns a second
+  // set running on the 44.1 kHz grid; they are null for every other pair.
   struct PairState {
     int pair = 0;
     std::unique_ptr<AudioWavWriter> writer;
     std::unique_ptr<AudioSynthesizer> left;
     std::unique_ptr<AudioSynthesizer> right;
+    std::unique_ptr<AudioMediaReader> media;
     std::unique_ptr<AudioSynthesizer> efm_left;
     std::unique_ptr<AudioSynthesizer> efm_right;
+    std::unique_ptr<AudioMediaReader> efm_media;
+    // True while the current run reads file or video audio rather than
+    // synthesising tones.
+    bool media_run = false;
   };
 
-  // Reconfigures every pair's channel synthesisers for the section run that
-  // starts at output frame `output_index`.
-  void BeginRun(std::size_t output_index);
+  // Reconfigures every pair for the section run that starts at output frame
+  // `output_index`. Returns false and appends to errors when a video
+  // soundtrack cannot be located.
+  bool BeginRun(std::size_t output_index, std::vector<std::string>* errors);
+
+  // Reads one frame of a pair's media audio into left/right.
+  bool ReadMediaFrame(AudioMediaReader* reader, int sample_count,
+                      std::size_t output_index, std::vector<std::int32_t>* left,
+                      std::vector<std::int32_t>* right,
+                      std::vector<std::string>* errors);
 
   // Zeroes the samples of one output frame that fall in the mandatory pause
   // preceding track 1 (IEC 60908-1999, 17.5.1). The buffers hold the samples
@@ -139,6 +173,8 @@ class AudioTrackGenerator {
                          std::vector<std::int32_t>* right);
 
   ILogger* logger_;
+  std::shared_ptr<IProgressiveFrameSourceProbe> probe_;
+  AudioSampleSourceFactory sample_source_factory_;
   bool active_ = false;
   Standard standard_ = Standard::kUnknown;
   std::vector<int> pair_numbers_;
@@ -146,6 +182,7 @@ class AudioTrackGenerator {
 
   // Per-output-frame plan (indexed by output frame).
   std::vector<const Section*> frame_sections_;
+  std::vector<int> frame_source_indices_;
   std::vector<int> frame_sample_counts_;
   std::vector<char> is_run_start_;
   std::vector<std::int64_t> run_total_samples_;

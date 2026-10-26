@@ -609,6 +609,33 @@ sections:
 )");
 }
 
+TEST(YamlProjectEmitterTest, AudioChannelPairsRoundTripFileAndVideoAudio) {
+  ExpectRoundTrip(R"(
+cvbs_presets:
+  video_standard_preset: PAL
+output:
+  video_path: out/video.cvbs
+sections:
+  - name: Programme
+    type: progressive
+    source: "{project}/capture.mp4"
+    audio:
+      channel_pairs:
+        - pair: 0
+          description: Programme audio
+          video_audio:
+            stream: 1
+        - pair: 1
+          description: Narration
+          file:
+            path: "{project}/narration.flac"
+            repeat: true
+        - pair: 2
+          file:
+            path: music.wav
+)");
+}
+
 TEST(YamlProjectEmitterTest, EmittedProjectValidatesCleanly) {
   YamlProjectParser parser;
   const ParseResult parsed = parser.ParseString(R"(

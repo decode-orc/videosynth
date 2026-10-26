@@ -144,6 +144,8 @@ endforeach()
 
 add_library(videosynth_core
     src/audio_efm_writer.cpp
+    src/audio_media_reader.cpp
+    src/audio_sample_source.cpp
     src/audio_synthesizer.cpp
     src/audio_track_generator.cpp
     src/audio_wav_writer.cpp

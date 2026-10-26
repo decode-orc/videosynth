@@ -2,7 +2,8 @@
  * File:        audio_sample_conversion.h
  * Module:      audio_sample_conversion
  * Purpose:     Converts 24-bit synthesised PCM samples to the 16-bit sample
- *              domain used by LaserDisc digital audio (EFM).
+ *              domain used by LaserDisc digital audio (EFM), and 32-bit
+ *              decoded media samples to the 24-bit track domain.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -55,6 +56,30 @@ inline std::vector<std::int16_t> ConvertSamples24To16(
     converted.push_back(ConvertSample24To16(sample));
   }
   return converted;
+}
+
+// Decoded media audio arrives as 32-bit signed PCM (ffmpeg `s32le`); the
+// audio tracks carry 24-bit samples, so the low 8 bits are rounded away.
+inline constexpr int kAudio32To24ShiftBits = 8;
+inline constexpr std::int64_t kAudio32To24Divisor = std::int64_t{1}
+                                                    << kAudio32To24ShiftBits;
+
+// Converts one 32-bit sample to 24-bit, rounding to nearest (ties away from
+// zero) and saturating at the 24-bit end points -8388608 and 8388607. A
+// 16-bit or 24-bit source widened to 32 bits by the decoder converts exactly.
+inline std::int32_t ConvertSample32To24(std::int32_t sample_32bit) {
+  const std::int64_t value = sample_32bit;
+  const std::int64_t magnitude = value < 0 ? -value : value;
+  const std::int64_t rounded =
+      (magnitude + kAudio32To24Divisor / 2) / kAudio32To24Divisor;
+  const std::int64_t signed_value = value < 0 ? -rounded : rounded;
+  if (signed_value > 8388607) {
+    return 8388607;
+  }
+  if (signed_value < -8388608) {
+    return -8388608;
+  }
+  return static_cast<std::int32_t>(signed_value);
 }
 
 }  // namespace videosynth

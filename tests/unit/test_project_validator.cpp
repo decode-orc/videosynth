@@ -1893,6 +1893,227 @@ Project MakeEfmProject() {
   return project;
 }
 
+class MockAudioFileProbe final : public IAudioFileProbe {
+ public:
+  bool should_succeed = true;
+  AudioFileProfile profile{
+      .channels = 2, .sample_rate_hz = 48000, .duration_seconds = 60.0};
+  std::vector<std::string> probed_paths;
+
+  bool Probe(const std::string& path, AudioFileProfile* out_profile,
+             std::string* error) override {
+    probed_paths.push_back(path);
+    if (!should_succeed) {
+      if (error != nullptr) {
+        *error = "the file does not exist.";
+      }
+      return false;
+    }
+    *out_profile = profile;
+    return true;
+  }
+};
+
+AudioChannelPair MakeFilePair(const std::string& path, bool repeat = false) {
+  AudioChannelPair channel_pair;
+  channel_pair.pair = 1;
+  channel_pair.pair_specified = true;
+  channel_pair.content = AudioPairContent::kFile;
+  channel_pair.file = {path, repeat};
+  return channel_pair;
+}
+
+AudioChannelPair MakeVideoAudioPair(int stream = 0) {
+  AudioChannelPair channel_pair;
+  channel_pair.pair = 0;
+  channel_pair.pair_specified = true;
+  channel_pair.content = AudioPairContent::kVideo;
+  channel_pair.video_audio.stream = stream;
+  return channel_pair;
+}
+
+// A 4-second (100-frame) still section carrying `channel_pair`.
+Project MakeStillAudioProject(const AudioChannelPair& channel_pair) {
+  Project project = MakeValidProject();
+  project.sections[0].duration_frames = 100;
+  project.sections[0].audio_channel_pairs = {channel_pair};
+  return project;
+}
+
+// A whole-clip video section carrying `channel_pair`.
+Project MakeVideoAudioProject(const AudioChannelPair& channel_pair) {
+  Project project = MakeRangedVideoProject(0, 0, false);
+  project.sections[0].audio_channel_pairs = {channel_pair};
+  return project;
+}
+
+ProgressiveFrameSourceProfile MakeVideoProfileWithAudio(int channels,
+                                                        int sample_rate_hz) {
+  ProgressiveFrameSourceProfile profile =
+      MakeConformantVideoProfile(Standard::kPal);
+  ProgressiveAudioStreamProfile audio;
+  audio.stream_index = 1;
+  audio.codec = "aac";
+  audio.channels = channels;
+  audio.sample_rate_hz = sample_rate_hz;
+  profile.audio_streams.push_back(audio);
+  return profile;
+}
+
+TEST(ProjectValidatorTest, AcceptsAudioFilePairWithoutTones) {
+  MockAudioFileProbe audio_probe;
+  ProjectValidator validator(nullptr, nullptr, &audio_probe);
+  const ValidationResult result = validator.Validate(
+      MakeStillAudioProject(MakeFilePair("/media/narration.FLAC")));
+  EXPECT_TRUE(result.is_valid)
+      << (result.errors.empty() ? "" : result.errors[0]);
+  EXPECT_TRUE(result.warnings.empty());
+  EXPECT_EQ(audio_probe.probed_paths,
+            std::vector<std::string>{"/media/narration.FLAC"});
+}
+
+TEST(ProjectValidatorTest, ChecksAudioFileStructureWithoutAProbe) {
+  ProjectValidator validator;
+  EXPECT_TRUE(validator.Validate(MakeStillAudioProject(MakeFilePair("a.wav")))
+                  .is_valid);
+
+  const ValidationResult empty =
+      validator.Validate(MakeStillAudioProject(MakeFilePair("")));
+  EXPECT_FALSE(empty.is_valid);
+  EXPECT_TRUE(ContainsMessage(empty.errors, "file.path must be set"));
+
+  const ValidationResult mp3 =
+      validator.Validate(MakeStillAudioProject(MakeFilePair("music.mp3")));
+  EXPECT_FALSE(mp3.is_valid);
+  EXPECT_TRUE(ContainsMessage(mp3.errors, "must name a .wav or .flac file"));
+}
+
+TEST(ProjectValidatorTest, RejectsAudioFileTheProbeCannotRead) {
+  MockAudioFileProbe audio_probe;
+  audio_probe.should_succeed = false;
+  ProjectValidator validator(nullptr, nullptr, &audio_probe);
+  const ValidationResult result =
+      validator.Validate(MakeStillAudioProject(MakeFilePair("gone.wav")));
+  EXPECT_FALSE(result.is_valid);
+  EXPECT_TRUE(ContainsMessage(result.errors,
+                              "audio file 'gone.wav' could not "
+                              "be read: the file does not "
+                              "exist."));
+}
+
+TEST(ProjectValidatorTest, RejectsAudioFileWithMoreThanTwoChannels) {
+  MockAudioFileProbe audio_probe;
+  audio_probe.profile.channels = 6;
+  ProjectValidator validator(nullptr, nullptr, &audio_probe);
+  const ValidationResult result =
+      validator.Validate(MakeStillAudioProject(MakeFilePair("surround.wav")));
+  EXPECT_FALSE(result.is_valid);
+  EXPECT_TRUE(ContainsMessage(result.errors, "has 6 channels"));
+}
+
+TEST(ProjectValidatorTest, WarnsWhenANonRepeatingFileEndsBeforeTheSection) {
+  MockAudioFileProbe audio_probe;
+  audio_probe.profile.duration_seconds = 2.5;  // The section runs 4 s.
+  ProjectValidator validator(nullptr, nullptr, &audio_probe);
+
+  const ValidationResult once =
+      validator.Validate(MakeStillAudioProject(MakeFilePair("short.wav")));
+  EXPECT_TRUE(once.is_valid);
+  EXPECT_TRUE(ContainsMessage(once.warnings,
+                              "lasts 2.5 s but the section "
+                              "runs 4.0 s"));
+
+  const ValidationResult repeating = validator.Validate(
+      MakeStillAudioProject(MakeFilePair("short.wav", /*repeat=*/true)));
+  EXPECT_TRUE(repeating.is_valid);
+  EXPECT_TRUE(repeating.warnings.empty());
+}
+
+TEST(ProjectValidatorTest, NotesResamplingOfAnAudioFile) {
+  MockAudioFileProbe audio_probe;
+  audio_probe.profile.sample_rate_hz = 44100;
+  audio_probe.profile.channels = 1;
+  RecordingLogger logger;
+  ProjectValidator validator(nullptr, &logger, &audio_probe);
+  const ValidationResult result =
+      validator.Validate(MakeStillAudioProject(MakeFilePair("mono.wav")));
+  EXPECT_TRUE(result.is_valid);
+  EXPECT_TRUE(
+      ContainsMessage(logger.info, "resampled from 44100 Hz to 48000 Hz"));
+}
+
+TEST(ProjectValidatorTest, FilePairsSkipToneRules) {
+  // Tone fields left at nonsense values are ignored for a file pair.
+  AudioChannelPair channel_pair = MakeFilePair("a.wav");
+  channel_pair.left.amplitude = 5.0;
+  channel_pair.left.waveform = AudioWaveform::kUnknown;
+  ProjectValidator validator;
+  EXPECT_TRUE(validator.Validate(MakeStillAudioProject(channel_pair)).is_valid);
+}
+
+TEST(ProjectValidatorTest, RejectsVideoAudioOnAnExrStill) {
+  ProjectValidator validator;
+  const ValidationResult result =
+      validator.Validate(MakeStillAudioProject(MakeVideoAudioPair()));
+  EXPECT_FALSE(result.is_valid);
+  EXPECT_TRUE(ContainsMessage(result.errors,
+                              "video_audio needs a video "
+                              "source"));
+}
+
+TEST(ProjectValidatorTest, RejectsNegativeVideoAudioStream) {
+  ProjectValidator validator;
+  const ValidationResult result =
+      validator.Validate(MakeVideoAudioProject(MakeVideoAudioPair(-1)));
+  EXPECT_FALSE(result.is_valid);
+  EXPECT_TRUE(ContainsMessage(result.errors,
+                              "video_audio.stream must be >= "
+                              "0"));
+}
+
+TEST(ProjectValidatorTest, AcceptsVideoAudioWhenTheStreamExists) {
+  MockProgressiveFrameSourceProbe probe;
+  probe.profile = MakeVideoProfileWithAudio(2, 48000);
+  RecordingLogger logger;
+  ProjectValidator validator(&probe, &logger);
+  const ValidationResult result =
+      validator.Validate(MakeVideoAudioProject(MakeVideoAudioPair(0)));
+  EXPECT_TRUE(result.is_valid)
+      << (result.errors.empty() ? "" : result.errors[0]);
+  EXPECT_FALSE(ContainsMessage(logger.info, "resampled"));
+  EXPECT_FALSE(ContainsMessage(logger.info, "downmixed"));
+}
+
+TEST(ProjectValidatorTest, RejectsVideoAudioStreamTheSourceLacks) {
+  MockProgressiveFrameSourceProbe probe;
+  probe.profile = MakeConformantVideoProfile(Standard::kPal);  // No audio.
+  ProjectValidator validator(&probe);
+  const ValidationResult none =
+      validator.Validate(MakeVideoAudioProject(MakeVideoAudioPair(0)));
+  EXPECT_FALSE(none.is_valid);
+  EXPECT_TRUE(ContainsMessage(none.errors, "has 0 audio stream(s)"));
+
+  probe.profile = MakeVideoProfileWithAudio(2, 48000);
+  const ValidationResult second =
+      validator.Validate(MakeVideoAudioProject(MakeVideoAudioPair(1)));
+  EXPECT_FALSE(second.is_valid);
+  EXPECT_TRUE(
+      ContainsMessage(second.errors, "video_audio.stream 1 does not exist"));
+}
+
+TEST(ProjectValidatorTest, NotesDownmixAndResampleOfAVideoSoundtrack) {
+  MockProgressiveFrameSourceProbe probe;
+  probe.profile = MakeVideoProfileWithAudio(6, 44100);
+  RecordingLogger logger;
+  ProjectValidator validator(&probe, &logger);
+  const ValidationResult result =
+      validator.Validate(MakeVideoAudioProject(MakeVideoAudioPair(0)));
+  EXPECT_TRUE(result.is_valid);
+  EXPECT_TRUE(ContainsMessage(logger.info, "6 channels are downmixed"));
+  EXPECT_TRUE(
+      ContainsMessage(logger.info, "resampled from 44100 Hz to 48000 Hz"));
+}
+
 TEST(ProjectValidatorTest, AcceptsEfmAudioWithDeclaredPairAndLeadIn) {
   ProjectValidator validator;
   const ValidationResult result = validator.Validate(MakeEfmProject());
