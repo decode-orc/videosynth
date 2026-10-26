@@ -711,9 +711,9 @@ void DropoutInjectionStage::ComputeFrameDropouts(
 
   const std::size_t section_index = FindSectionIndex(project, section);
   const int64_t frame_id = static_cast<int64_t>(global_frame);
-  // The section frame index for the scratch envelope is the position within
-  // the section, which corresponds to source_frame_index in the schedule.
-  const int frame_index_in_section = schedule[global_frame].source_frame_index;
+  // The scratch envelope runs over the frame's position within the section,
+  // not the (possibly offset or looping) source frame it shows.
+  const int frame_index_in_section = schedule[global_frame].section_frame_index;
 
   // 1. Process scratch dropouts first; collect their covered intervals.
   // Scratch events are recomputed deterministically per frame so this method

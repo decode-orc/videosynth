@@ -494,13 +494,22 @@ struct Section {
   SectionType section_type = SectionType::kUnknown;
   std::vector<LineInjection> line_injections = {};
   std::string source = {};
+  // True when the section plays its selected source range (see
+  // ResolveSourceFrameRange); YAML `duration_frames: all` or an omitted
+  // duration_frames.
   bool duration_frames_all = false;
   int duration_frames = 0;
-  // Number of times the resolved source is replayed when duration_frames_all is
-  // true (total output frames = source frame count * duration_frames_repeat).
+  // Number of times the selected range is replayed when duration_frames_all
+  // is true (total output frames = range length * duration_frames_repeat).
   // Ignored when duration_frames_all is false. Always >= 1.
   int duration_frames_repeat = 1;
+  // First source frame of the selected range, 0-based.
   int start_frame = 0;
+  // Last source frame of the selected range, inclusive and 0-based. Only
+  // meaningful when end_frame_specified; otherwise the range runs to the
+  // source's last frame.
+  int end_frame = 0;
+  bool end_frame_specified = false;
   NoiseParameters noise = {};
   DropoutParameters dropouts = {};
   OsdConfig osd = {};
@@ -663,7 +672,8 @@ inline bool operator==(const Section& a, const Section& b) {
          a.duration_frames_all == b.duration_frames_all &&
          a.duration_frames == b.duration_frames &&
          a.duration_frames_repeat == b.duration_frames_repeat &&
-         a.start_frame == b.start_frame && a.noise == b.noise &&
+         a.start_frame == b.start_frame && a.end_frame == b.end_frame &&
+         a.end_frame_specified == b.end_frame_specified && a.noise == b.noise &&
          a.dropouts == b.dropouts && a.osd == b.osd &&
          a.audio_channel_pairs == b.audio_channel_pairs;
 }

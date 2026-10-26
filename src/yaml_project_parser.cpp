@@ -51,19 +51,17 @@ bool ParseDurationFrames(const YAML::Node& section_node, Section* section,
     return false;
   }
 
-  if (!section_node["duration_frames"]) {
-    errors->push_back("section is missing required field: 'duration_frames'.");
-    return false;
-  }
-
   const YAML::Node duration_node = section_node["duration_frames"];
-  if (!duration_node.IsScalar()) {
+  if (duration_node && !duration_node.IsScalar()) {
     errors->push_back(
         "section field 'duration_frames' must be a scalar integer or 'all'.");
     return false;
   }
 
-  const std::string scalar = duration_node.as<std::string>("");
+  // An omitted duration_frames plays the selected source range, exactly as
+  // 'all' does.
+  const std::string scalar =
+      duration_node ? duration_node.as<std::string>("") : "all";
   if (scalar == "all") {
     section->duration_frames_all = true;
     section->duration_frames = 0;
@@ -506,6 +504,7 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
                                                   "line_injections",
                                                   "source",
                                                   "start_frame",
+                                                  "end_frame",
                                                   "noise",
                                                   "dropouts",
                                                   "osd",
@@ -534,6 +533,16 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
         }
       }
       section.start_frame = section_node["start_frame"].as<int>(0);
+      if (section_node["end_frame"]) {
+        try {
+          section.end_frame = section_node["end_frame"].as<int>();
+        } catch (const YAML::Exception&) {
+          result.errors.push_back(
+              "section field 'end_frame' must be an integer frame index.");
+          return result;
+        }
+        section.end_frame_specified = true;
+      }
       if (!ParseLineInjections(section_node, &section, &result.errors)) {
         return result;
       }

@@ -290,6 +290,50 @@ TEST(ProgressiveFrameSourceWindowTest, PrefetchDecodesHalfAWindowAhead) {
   EXPECT_EQ(fixture.log->read_count(), 4);
 }
 
+TEST(ProgressiveFrameSourceWindowTest, PrefetchStopsAtTheRangeEnd) {
+  Fixture fixture(16);
+  fixture.section.start_frame = 3;
+  fixture.section.end_frame = 5;
+  fixture.section.end_frame_specified = true;
+  fixture.source->PrefetchSection(fixture.section, 3, Standard::kPal);
+  ASSERT_TRUE(fixture.log->WaitForReads(3));
+  // Joining the prefetch thread settles the count: frames 6.. lie outside
+  // the range and are never decoded.
+  fixture.source.reset();
+  EXPECT_EQ(fixture.log->read_count(), 3);
+}
+
+TEST(ProgressiveFrameSourceWindowTest, LoopingRangeIsServedFromOneOpen) {
+  Fixture fixture(32);
+  fixture.section.start_frame = 10;
+  fixture.section.end_frame = 19;
+  fixture.section.end_frame_specified = true;
+  for (int pass = 0; pass < 3; ++pass) {
+    for (int i = 10; i <= 19; ++i) {
+      ASSERT_EQ(fixture.Fetch(i), i) << "pass " << pass;
+    }
+  }
+  // The whole range fits the window, so later passes are window hits.
+  EXPECT_EQ(fixture.log->open_count(), 1);
+  EXPECT_EQ(fixture.log->opens[0].first_frame, 10);
+  EXPECT_EQ(fixture.log->read_count(), 10);
+}
+
+TEST(ProgressiveFrameSourceWindowTest, LoopWrapReopensAtTheRangeStart) {
+  Fixture fixture(4);
+  fixture.section.start_frame = 10;
+  fixture.section.end_frame = 19;
+  fixture.section.end_frame_specified = true;
+  // Workers straddling the wrap from the range end back to its start.
+  for (int request : {18, 10, 19, 11, 12}) {
+    EXPECT_EQ(fixture.Fetch(request), request);
+  }
+  ASSERT_EQ(fixture.log->open_count(), 2);
+  EXPECT_EQ(fixture.log->opens[0].first_frame, 16);
+  // The wrap opens at the range start, not half a window before it.
+  EXPECT_EQ(fixture.log->opens[1].first_frame, 10);
+}
+
 TEST(ProgressiveFrameSourceWindowTest, FrameCountComesFromProbeWithoutDecode) {
   Fixture fixture(8, 42);
   int frame_count = 0;

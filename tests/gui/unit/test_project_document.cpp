@@ -292,6 +292,36 @@ TEST_F(ProjectDocumentTest, UndoRevertsLastEditAndEmitsGranularSignal) {
   EXPECT_EQ(document_.RedoDescription(), QStringLiteral("Edit section"));
 }
 
+TEST_F(ProjectDocumentTest, SourceRangeEditUndoesAndRedoes) {
+  Section edited = document_.project().sections[0];
+  edited.source = "assets/capture.mp4";
+  edited.duration_frames_all = true;
+  edited.start_frame = 10;
+  edited.end_frame = 19;
+  edited.end_frame_specified = true;
+  ASSERT_TRUE(document_.SetSection(0, edited));
+
+  ASSERT_TRUE(document_.Undo());
+  const Section& undone = document_.project().sections[0];
+  EXPECT_EQ(undone.start_frame, 0);
+  EXPECT_FALSE(undone.end_frame_specified);
+  EXPECT_FALSE(undone.duration_frames_all);
+
+  ASSERT_TRUE(document_.Redo());
+  const Section& redone = document_.project().sections[0];
+  EXPECT_EQ(redone.start_frame, 10);
+  EXPECT_EQ(redone.end_frame, 19);
+  EXPECT_TRUE(redone.end_frame_specified);
+}
+
+TEST_F(ProjectDocumentTest, EndFrameOnlyEditIsAChange) {
+  Section edited = document_.project().sections[0];
+  edited.end_frame_specified = true;
+  EXPECT_TRUE(document_.SetSection(0, edited));
+  ASSERT_TRUE(document_.Undo());
+  EXPECT_FALSE(document_.project().sections[0].end_frame_specified);
+}
+
 TEST_F(ProjectDocumentTest, RedoReappliesUndoneEdit) {
   ASSERT_TRUE(document_.MoveSection(0, 1));
   ASSERT_TRUE(document_.Undo());

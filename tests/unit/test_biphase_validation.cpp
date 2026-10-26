@@ -722,6 +722,7 @@ TEST(BiphaseValidationTest, AcceptsLeadInWithDurationAll) {
   // "all" semantics skip the frame-count check.
   Project p = MakeBasePalProject();
   Section s = MakeSection(SectionType::kLeadIn, 0);
+  s.source = "fixture.mkv";
   s.duration_frames_all = true;
   p.line_injections.disc_type = "CAV";
   auto inj = MakeLaserdiscInjection();

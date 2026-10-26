@@ -24,10 +24,11 @@ sections:
 | `name` | string | Yes | — | — |
 | `type` | string | Yes | `progressive` | — |
 | `source` | string | Yes | Path, optionally with an [asset root token](asset-roots.md) | — |
-| `duration_frames` | int or string | No | Positive integer, or `"all"` | — |
+| `duration_frames` | int or string | No | Positive integer, or `"all"` | `"all"` |
 | `duration_repeat` | int | No | Positive integer | `1` |
 | `section_type` | string | No | `lead_in`, `programme_area`, `lead_out` | absent |
-| `start_frame` | int | No | ≥ 0 | `0` |
+| `start_frame` | int | No | ≥ 0, inside the video source | `0` |
+| `end_frame` | int | No | ≥ `start_frame`, inside the video source | last source frame |
 | `line_injections` | list | No | [section line injections](section-line-injections.md) | absent |
 | `noise` | map | No | [noise](section-noise.md) | absent |
 | `dropouts` | map | No | [dropouts](section-dropouts.md) | absent |
@@ -59,12 +60,14 @@ Use `{bundled}/…` for shipped assets and `{project}/…` for files beside the 
 
 How many output frames the section produces.
 
-- **A positive integer** — exactly that many. A still is repeated. A clip must hold at least `start_frame` + the count frames; looping a shorter clip is not implemented yet, and generation fails when it runs out.
-- **`"all"`** — the source's own frame count, discovered by probing.
+- **A positive integer** — exactly that many. A still is repeated. A clip plays from `start_frame`; a count longer than the rest of the clip loops it, restarting at `start_frame` after the last frame.
+- **`"all"`** — the selected range once: [`start_frame`, `end_frame`], or [`start_frame`, last frame] without an `end_frame`. The clip's length is discovered by probing.
+
+Omitting `duration_frames` means `"all"`. The emitter always writes the key out, so a saved project shows `duration_frames: all`. An EXR still needs an integer: it has no length of its own.
 
 ## `duration_repeat`
 
-With `duration_frames: "all"`, replays the whole source this many times. Total output frames = source length × `duration_repeat`; each replay restarts the source at frame 0.
+With `duration_frames: "all"`, plays the selected range this many times. Total output frames = range length × `duration_repeat`; each replay restarts at `start_frame`.
 
 Ignored with a fixed integer `duration_frames`, and a warning is emitted if you set it there.
 
@@ -94,7 +97,21 @@ Violations are errors, not warnings: out-of-order sections would break monotonic
 
 ## `start_frame`
 
-The first source frame to use, 0-based. Useful for taking a passage from the middle of a clip with a fixed `duration_frames`. Combining it with `duration_frames: "all"` is not supported yet: the section would run past the end of the source and generation fails.
+The first source frame of the selected range, 0-based. Video sources only; it must be below the clip's frame count.
+
+## `end_frame`
+
+The last source frame of the selected range, 0-based and inclusive. Video sources only; it must be at least `start_frame` and below the clip's frame count. Omit it to run to the end of the clip.
+
+```yaml
+- name: Excerpt
+  type: progressive
+  source: "{project}/capture.mp4"
+  start_frame: 1500
+  end_frame: 2999        # 1 500 frames; duration derived
+```
+
+`end_frame` sets the section's length, so it cannot be combined with an integer `duration_frames`; leave `duration_frames` out (or set it to `"all"`), and use `duration_repeat` to play the range more than once. Emitted only when set.
 
 ## Section sub-blocks
 
@@ -115,5 +132,7 @@ All are optional, and only blocks that are explicitly set are written back out b
 - `type` must be `progressive`.
 - `source` must exist and match a supported profile, at the standard's raster and constant frame rate; a video's container must match its extension and carry no crop metadata.
 - `duration_frames` must be a positive integer or `"all"`.
+- `start_frame` ≥ 0 and `end_frame` ≥ `start_frame`, both inside the video source; `end_frame` never with an integer `duration_frames`.
+- An EXR still takes neither `start_frame` nor `end_frame`, and needs an integer `duration_frames`.
 - The disc-structure ordering rules above.
 - CAV lead-in and lead-out minimum durations.

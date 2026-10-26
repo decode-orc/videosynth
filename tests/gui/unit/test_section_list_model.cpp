@@ -70,6 +70,36 @@ TEST(SectionListModelTest, AllDurationRowWithRepeatShowsMultiplier) {
   EXPECT_EQ(rows[1].DurationText(), QStringLiteral("all frames x4"));
 }
 
+TEST(SectionListModelTest, ClosedRangeRowCountsRangeTimesRepeat) {
+  Project project = MakeProject();
+  Section& section = project.sections[1];
+  section.source = "assets/capture.mp4";
+  section.duration_frames_all = true;
+  section.duration_frames = 0;
+  section.start_frame = 10;
+  section.end_frame = 19;
+  section.end_frame_specified = true;
+  section.duration_frames_repeat = 3;
+  const std::vector<SectionListRow> rows = BuildSectionListRows(project);
+  EXPECT_EQ(rows[1].output_frames, 30);
+  EXPECT_EQ(rows[1].DurationText(), QStringLiteral("all 10 frames x3"));
+  // The following section starts after the 30 resolved frames.
+  EXPECT_EQ(rows[2].start_frame, 130);
+}
+
+TEST(SectionListModelTest, OpenEndedAllRowStaysUnknown) {
+  Project project = MakeProject();
+  Section& section = project.sections[1];
+  section.source = "assets/capture.mp4";
+  section.duration_frames_all = true;
+  section.duration_frames = 0;
+  section.start_frame = 10;
+  const std::vector<SectionListRow> rows = BuildSectionListRows(project);
+  EXPECT_EQ(rows[1].output_frames, -1);
+  EXPECT_EQ(rows[1].DurationText(), QStringLiteral("all frames"));
+  EXPECT_EQ(rows[2].start_frame, 100);
+}
+
 TEST(SectionListModelTest, FrameRangeTextFormatsKnownAndUnknownEnd) {
   EXPECT_EQ(FrameRangeText(0, 249), QStringLiteral("0 – 249"));
   EXPECT_EQ(FrameRangeText(100, 100), QStringLiteral("100 – 100"));

@@ -388,7 +388,7 @@ Per-frame synthesis is split into a **clean frame template** and a set of **per-
 - The PAL/PAL-M burst-blanking meander and V-switch have period 2 frames, which divides 4.
 - The PAL LaserDisc pilot burst is period 1 (17,734,475 pilot cycles = 25 × 709,379 samples).
 
-Hence **P = 4 frames for PAL and PAL-M, and P = 2 frames for NTSC**; a still section contains only P distinct clean frames, and a video `duration_repeat` section contains at most P × clip_length. Synthesis reduces `disc_frame_index` to this residue (`sequence_phase`) before deriving any phase, which is exact — every use of the index inside clean synthesis depends only on the residue — so the split does not change output bits.
+Hence **P = 4 frames for PAL and PAL-M, and P = 2 frames for NTSC**; a still section contains only P distinct clean frames, and a video section that replays or loops its range contains at most P × range length. Synthesis reduces `disc_frame_index` to this residue (`sequence_phase`) before deriving any phase, which is exact — every use of the index inside clean synthesis depends only on the residue — so the split does not change output bits.
 
 **Cache.** `GenerationStage` shares clean templates between worker threads through a bounded `TemplateCache`:
 
@@ -425,8 +425,8 @@ decoders (`IVideoFrameDecoder`, `src/video_frame_decoder.cpp`):
   Matroska timestamp rounding.
 - Each entry keeps up to two decode cursors. A request inside the window is a
   hit; one less than a window ahead of a cursor reads forward; anything else
-  (a loop back to the start, a far jump) reopens the least recently used
-  cursor half a window before the request, never before the section's
+  (a loop back to the range start, a far jump) reopens the least recently
+  used cursor half a window before the request, never before the section's
   `start_frame`, so workers that reach a section start or a jump out of order
   are served by the same decoder. Two cursors keep a loop boundary — workers
   straddling the end of one pass and the start of the next — from reopening on
@@ -446,7 +446,8 @@ records, for each section, the source the next section will read; when
 synthesis reaches the first frame of a section run, it asks the frame source to
 decode the start of the next section's source on a background thread
 (`ProgressiveFrameSource::PrefetchSection`): an EXR convert, or half a window of
-video frames, one frame per entry-lock acquisition so a worker that arrives
+video frames (never past the section's `end_frame`), one frame per entry-lock
+acquisition so a worker that arrives
 early is served as soon as its frame exists. A section-start decode otherwise
 stalls every worker at the boundary. Prefetch failures are ignored: the frame
 request that follows repeats the decode and reports the error, so the prefetch
@@ -833,7 +834,7 @@ The current parser, validator, and runtime implement only a subset of the YAML s
 - `output.efm_audio` is parsed, emitted, and validated: its presence enables LaserDisc digital audio (EFM) output for the single channel pair named by `pair`. See [`efm_audio:`](#efm_audio-sub-key-optional-project-level).
 - The `project:` block fields `name`, `version`, and `description` are parsed and retained on the in-memory `Project` model, so they survive load/save round-trips.
 - A YAML project **emitter** (`YamlProjectEmitter` in `videosynth_core`) serialises an in-memory `Project` back to this schema. It writes fields in the canonical order shown below and emits only explicitly-set optional blocks (the project-level `line_injections:`, and the per-section `noise:`, `dropouts:`, `osd:`, `audio:`, `line_injections:`), so emitted files stay minimal and diffable. Emit → parse is lossless: a saved file parses back to an equal `Project`, which is the contract that keeps GUI-saved projects loadable by the CLI and vice versa.
-- Implemented section fields: `name`, `type`, `source`, `start_frame`, `duration_frames`, and the optional per-section `noise:`, `dropouts:`, `osd:`, and `audio:` blocks.
+- Implemented section fields: `name`, `type`, `source`, `start_frame`, `end_frame`, `duration_frames`, `duration_repeat`, and the optional per-section `noise:`, `dropouts:`, `osd:`, and `audio:` blocks.
 - The `line_injections` schema is split across two levels of the data model. A **project-level** `line_injections:` block (a sibling of `output:` and `sections:`) is parsed into a `ProjectLineInjections` value on `Project` holding the project-wide `disc_type` (`CAV`/`CLV`), the optional `placement` policy (`standard` default / `laserdisc` / `custom`, governing how VITS `target_lines` are constrained — see [VITS](#vits-vertical-interval-test-signals)), and the `vits` set (each entry a `vits_type` plus `target_lines`) applied to every frame of every section. Each **section-level** `line_injections:` list holds only `Section::LineInjection` entries (`type` plus, per type, `target_lines`/`codes`) — the per-section biphase `codes` (picture_number, chapter_number, lead_in/out, etc.) that legitimately differ between lead-in, programme, and lead-out. Both levels receive validator-level schema/compatibility checks for injection type, `target_lines`, and standard-dependent VITS constraints.
 - VITS line injections have a generation-stage orchestration path and are applied only on their targeted frame lines within the owning section span.
 - Built-in VITS catalog entries now carry full waveform-definition primitive/composite trees for every supported `vits_type`, so the default runtime path can render all supported PAL and NTSC VITS patterns.
@@ -1190,8 +1191,10 @@ video_path: "out/pal_test_video.cvbs" # project-relative output file path
   - Ingestion must not apply scaling, implicit aspect-ratio remap, or ad-hoc crop normalization.
   - `duration_frames` must be either:
     - A positive integer (fixed number of frames).
-    - `"all"` (use all available frames from the source).
-  - `duration_repeat` is an optional positive integer (default `1`) that replays the whole source `duration_repeat` times when `duration_frames: "all"`. Total output frames = source frame count × `duration_repeat`; each replay loops the source (source frame indices restart at 0). It is ignored — and a validation warning is emitted — when `duration_frames` is a fixed integer.
+    - `"all"` (play the selected source range); an omitted `duration_frames` means `"all"`.
+  - `duration_repeat` is an optional positive integer (default `1`) that replays the selected range `duration_repeat` times when `duration_frames: "all"`. Total output frames = range length × `duration_repeat`; each replay restarts at `start_frame`. It is ignored — and a validation warning is emitted — when `duration_frames` is a fixed integer.
+  - The selected range is [`start_frame`, `end_frame`] (or [`start_frame`, last frame] without `end_frame`), resolved by `ResolveSourceFrameRange` (`source_frame_range.h`) for the schedule, the validator and the GUI alike. `start_frame` must be ≥ 0, `end_frame` ≥ `start_frame`, and both must lie inside the probed video; `end_frame` must not be combined with an integer `duration_frames` (the range already sets the duration).
+  - An EXR still takes neither `start_frame` nor `end_frame`, and needs an integer `duration_frames`: it has no length of its own, so `"all"` does not apply.
 
 ---
 
@@ -1246,9 +1249,10 @@ The same rules apply to every source regardless of the asset root it resolves th
 | `name`            | string         | Yes          | User-friendly name.                                                            | `"Video Source"`     |
 | `type`            | string         | Yes          | Must be `"progressive"`.                                                       | `"progressive"`      |
 | `source`          | string         | Yes          | Path to the source file. May be a `builtin:` prefixed name, an absolute path, or a path relative to the project YAML. See [File Path Resolution](#file-path-resolution). | `"assets/test.mkv"` |
-| `start_frame`     | integer        | No           | First frame to use (default: `0`). Not yet supported with `duration_frames: "all"` (the schedule runs past the source end). | `0`                  |
-| `duration_frames` | integer/string | No           | Number of frames to extract. Use `"all"` for all frames or a positive integer; a video must hold `start_frame` + the count frames (looping a shorter clip is not yet implemented). | `100` or `"all"`     |
-| `duration_repeat` | integer        | No           | Replay count when `duration_frames: "all"` (default `1`). Total frames = source length × repeat. Ignored for fixed integer durations. | `2`                  |
+| `start_frame`     | integer        | No           | First source frame of the selected range, 0-based (default: `0`). Video only. | `1500`               |
+| `end_frame`       | integer        | No           | Last source frame of the selected range, inclusive (default: the source's last frame). Video only; not combined with an integer `duration_frames`. Emitted only when set. | `2999`               |
+| `duration_frames` | integer/string | No           | Output frames. `"all"` (the default when omitted) plays the selected range once; a positive integer plays that many frames from `start_frame`, looping the range when it is shorter (source index = `start_frame` + (i mod range length)). The emitter always writes it. | `100` or `"all"`     |
+| `duration_repeat` | integer        | No           | Replay count when `duration_frames: "all"` (default `1`). Total frames = range length × repeat. Ignored for fixed integer durations. | `2`                  |
 
 
 ##### **Colour Space and Frame Rate**

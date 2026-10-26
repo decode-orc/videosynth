@@ -121,6 +121,21 @@ std::string RgbPngMkv() {
               "-pix_fmt rgb24");
 }
 
+// 30 PAL frames of FFV1 at the BT.601 decode target whose flat luma carries
+// the frame number: Y = 64 + 24 n (10-bit), so every frame is identifiable.
+std::string NumberedFramesPalMkv() {
+  return Clip("numbered_frames_pal.mkv",
+              "-f lavfi -i \"nullsrc=s=720x576:r=25:d=1.2,format=yuv422p10le,"
+              "geq=lum=64+24*N:cb=512:cr=512\" -c:v ffv1 -color_range tv"
+              " -colorspace smpte170m");
+}
+
+// ITU-R BT.1700 Annex 1 Part B Table 2: 625-line luma spans 0 (black) to
+// 700 mV (white) over 10-bit codes 64-940.
+double NumberedFrameLumaMillivolts(int source_frame) {
+  return (24.0 * source_frame) * 700.0 / 876.0;
+}
+
 Section VideoSection(const std::string& source) {
   Section section;
   section.name = "Clip";
@@ -195,13 +210,17 @@ TEST(VideoSourcesTest, BlackExrDecodesToStudioBlackInEveryPixel) {
   }
 }
 
-// Mean of the luma signal over the middle of an active line.
+// Mean of the luma signal over the middle of an active line of output frame
+// `frame_index`.
 double MidLineLumaMillivolts(const std::vector<SampleFixed>& y_mv,
-                             Standard standard, int line_1based) {
+                             Standard standard, int line_1based,
+                             int frame_index = 0) {
   const TimingConstants timing = GetTimingConstants(standard);
   const std::size_t line_start =
-      static_cast<std::size_t>(line_1based - 1) *
-      static_cast<std::size_t>(timing.samples_per_line_4fsc);
+      (static_cast<std::size_t>(frame_index) *
+       static_cast<std::size_t>(SamplesPerFrame4fsc(standard))) +
+      (static_cast<std::size_t>(line_1based - 1) *
+       static_cast<std::size_t>(timing.samples_per_line_4fsc));
   // 30-45 µs after 0H sits well inside the active line in both systems.
   const auto first = static_cast<std::size_t>(
       std::lround(timing.sample_rate_4fsc_hz * 30.0e-6));
@@ -424,6 +443,60 @@ TEST(VideoSourcesTest, FrameSourceServesH264Mp4FramesAcrossTheClip) {
   std::shared_ptr<const FrameSourceImage> past_end;
   EXPECT_FALSE(frame_source.GenerateFrame(section, 100, Standard::kPal,
                                           &past_end, &error));
+}
+
+// --- Source frame ranges --------------------------------------------------
+
+// Generates `section` as a one-section PAL project and returns which numbered
+// source frame each output frame shows (-1 where the luma matches none).
+std::vector<int> GeneratedSourceFrames(const Section& section) {
+  Project project = MakeBlackProject(Standard::kPal);
+  project.sections = {section};
+  GenerationStage generation;
+  std::vector<SampleFixed> y;
+  std::vector<SampleFixed> c;
+  std::vector<std::string> errors;
+  EXPECT_TRUE(generation.Generate(project, &y, &c, &errors))
+      << (errors.empty() ? "" : errors.front());
+  const std::size_t frame_samples =
+      static_cast<std::size_t>(SamplesPerFrame4fsc(Standard::kPal));
+  std::vector<int> frames;
+  for (std::size_t frame = 0; frame < y.size() / frame_samples; ++frame) {
+    const double luma =
+        MidLineLumaMillivolts(y, Standard::kPal, 100, static_cast<int>(frame));
+    int matched = -1;
+    for (int n = 0; n < 30; ++n) {
+      if (std::abs(luma - NumberedFrameLumaMillivolts(n)) < 2.0) {
+        matched = n;
+      }
+    }
+    frames.push_back(matched);
+  }
+  return frames;
+}
+
+TEST(VideoSourcesTest, StartAndEndFrameEmitExactlyThatRange) {
+  Section section = VideoSection(NumberedFramesPalMkv());
+  section.start_frame = 10;
+  section.end_frame = 19;
+  section.end_frame_specified = true;
+  EXPECT_EQ(GeneratedSourceFrames(section),
+            (std::vector<int>{10, 11, 12, 13, 14, 15, 16, 17, 18, 19}));
+}
+
+TEST(VideoSourcesTest, AllDurationFromStartFrameStopsAtTheSourceEnd) {
+  Section section = VideoSection(NumberedFramesPalMkv());
+  section.start_frame = 26;
+  EXPECT_EQ(GeneratedSourceFrames(section), (std::vector<int>{26, 27, 28, 29}));
+}
+
+TEST(VideoSourcesTest, FixedDurationLongerThanTheRangeLoopsIt) {
+  Section section = VideoSection(NumberedFramesPalMkv());
+  section.duration_frames_all = false;
+  section.duration_frames = 9;
+  section.start_frame = 26;
+  EXPECT_EQ(GeneratedSourceFrames(section),
+            (std::vector<int>{26, 27, 28, 29, 26, 27, 28, 29, 26}));
 }
 
 // --- Colour normalisation -------------------------------------------------

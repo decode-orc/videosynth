@@ -341,6 +341,9 @@ void EmitSection(YAML::Emitter& out, const Section& section) {
   if (section.start_frame != 0) {
     out << YAML::Key << "start_frame" << YAML::Value << section.start_frame;
   }
+  if (section.end_frame_specified) {
+    out << YAML::Key << "end_frame" << YAML::Value << section.end_frame;
+  }
   EmitLineInjections(out, section);
   EmitNoise(out, section.noise);
   EmitDropouts(out, section.dropouts);

@@ -97,13 +97,39 @@ double DurationFramesToSeconds(int frames, double frame_rate_hz);
 int DurationSecondsToFrames(double seconds, double frame_rate_hz,
                             int max_frames);
 
+// Resets the frame selection after the editor picks a new source; `section`
+// already holds the new source and `previous_source` is the one it replaces.
+// A video then plays all of its frames from the first (duration "all", no
+// start_frame/end_frame). A still has neither a frame range nor a length of
+// its own, so the range is cleared and an "all" duration becomes
+// `still_duration_frames`. An unchanged source is left alone, so loading or
+// re-committing a section never rewrites its duration.
+void ApplySourceSelectionDefaults(const std::string& previous_source,
+                                  int still_duration_frames, Section* section);
+
+// How the editor's source-range widgets (start frame, end frame, "to end of
+// source") present for a section.
+struct SourceRangeEditorState {
+  // Only video sources have frames to select; stills disable the widgets.
+  bool enabled = false;
+  // Largest frame index the widgets accept: the probed last frame, raised to
+  // the stored start_frame/end_frame so a stale or pending probe never clamps
+  // what the project holds; `unbounded_maximum` while the length is unknown.
+  int maximum = 0;
+};
+SourceRangeEditorState SourceRangeEditorStateFor(const Section& section,
+                                                 int probed_frame_count,
+                                                 int unbounded_maximum);
+
 // Multi-select batch editing: mirrors onto `target` exactly the editor-visible
 // fields that differ between `before` and `after` (an edit applied to the
 // primary selected section), leaving everything else in `target` untouched.
 // The name is never mirrored — it identifies the individual section. The three
 // duration fields propagate as a unit because the editor's widgets couple
-// them (frames vs "all frames" x repeat). Line injections mirror per code via
-// ApplyLineInjectionEditDelta, never wholesale. Returns the updated target.
+// them (frames vs "all frames" x repeat), as do the three source frame range
+// fields (start_frame, end_frame and whether the end is set). Line injections
+// mirror per code via ApplyLineInjectionEditDelta, never wholesale. Returns the
+// updated target.
 Section ApplySectionEditDelta(const Section& before, const Section& after,
                               Section target);
 

@@ -95,6 +95,7 @@ std::vector<IGenerationStage::FrameScheduleItem> MakeSchedule(
     IGenerationStage::FrameScheduleItem item;
     item.section = &project.sections[0];
     item.source_frame_index = i;
+    item.section_frame_index = i;
     schedule.push_back(item);
   }
   return schedule;

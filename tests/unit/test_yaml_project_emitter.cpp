@@ -348,6 +348,53 @@ sections:
 )");
 }
 
+TEST(YamlProjectEmitterTest, EndFrameRoundTrips) {
+  ExpectRoundTrip(R"(
+cvbs_presets:
+  video_standard_preset: PAL
+output:
+  video_path: out/video.cvbs
+sections:
+  - name: Excerpt
+    type: progressive
+    source: assets/capture.mp4
+    duration_frames: all
+    start_frame: 1500
+    end_frame: 2999
+)");
+}
+
+TEST(YamlProjectEmitterTest, OmittedDurationIsEmittedAsAll) {
+  YamlProjectParser parser;
+  YamlProjectEmitter emitter;
+  const ParseResult parsed = parser.ParseString(R"(
+cvbs_presets:
+  video_standard_preset: PAL
+output:
+  video_path: out/video.cvbs
+sections:
+  - name: Excerpt
+    type: progressive
+    source: assets/capture.mp4
+    start_frame: 10
+    end_frame: 19
+)");
+  ASSERT_TRUE(parsed.ok);
+  const std::string emitted = emitter.EmitString(parsed.project);
+  EXPECT_NE(emitted.find("duration_frames: all"), std::string::npos) << emitted;
+  EXPECT_NE(emitted.find("end_frame: 19"), std::string::npos) << emitted;
+  ExpectRoundTrip(emitted);
+}
+
+TEST(YamlProjectEmitterTest, UnsetEndFrameIsOmitted) {
+  YamlProjectParser parser;
+  YamlProjectEmitter emitter;
+  const ParseResult parsed = parser.ParseString(kMinimalPalYaml);
+  ASSERT_TRUE(parsed.ok);
+  EXPECT_EQ(emitter.EmitString(parsed.project).find("end_frame"),
+            std::string::npos);
+}
+
 TEST(YamlProjectEmitterTest, DurationRepeatDefaultOfOneIsOmitted) {
   YamlProjectParser parser;
   YamlProjectEmitter emitter;

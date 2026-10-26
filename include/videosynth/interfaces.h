@@ -214,7 +214,12 @@ class IGenerationStage {
   virtual ~IGenerationStage() = default;
   struct FrameScheduleItem {
     const Section* section = nullptr;
+    // Source frame shown, within the section's selected range.
     int source_frame_index = 0;
+    // 0-based position of this frame within its section. Differs from
+    // source_frame_index once start_frame, duration_repeat or a looping
+    // duration is involved.
+    int section_frame_index = 0;
     // CAV picture number for this frame (> 0 when a picture_number injection
     // code is present); 0 for sections without a picture_number code.
     // Used to derive disc-accurate colour-subcarrier phase independent of file

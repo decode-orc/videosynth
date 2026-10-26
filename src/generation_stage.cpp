@@ -14,6 +14,7 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -37,6 +38,7 @@
 #include "videosynth/secam_chroma_encoder.h"
 #include "videosynth/signal_shaping.h"
 #include "videosynth/signal_timing_model.h"
+#include "videosynth/source_frame_range.h"
 #include "videosynth/timing_constants.h"
 
 namespace videosynth {
@@ -355,45 +357,37 @@ bool BuildFramePatternSchedule(
         return false;
       }
 
-      if (section.duration_frames_all) {
-        int resolved_frame_count = 0;
+      // Only a video has a length to probe; a still is one frame.
+      int source_frame_count = kUnknownSourceFrameCount;
+      if (IsProgressiveVideoSource(section.source)) {
         std::string count_error;
         if (!progressive_source.ResolveFrameCount(
-                section, standard, &resolved_frame_count, &count_error)) {
+                section, standard, &source_frame_count, &count_error)) {
           if (error != nullptr) {
             *error = count_error.empty()
-                         ? "Failed to resolve progressive section frame count "
-                           "for duration_frames='all'."
+                         ? "Failed to resolve progressive section frame count."
                          : count_error;
           }
           return false;
         }
-
-        if (resolved_frame_count <= 0) {
-          if (error != nullptr) {
-            *error =
-                "Progressive section duration_frames='all' resolved to zero "
-                "frames.";
-          }
-          return false;
-        }
-
-        // Replay the whole resolved source duration_frames_repeat times. Each
-        // pass re-emits source frames 0..N-1 (a loop), so the source frame
-        // index never exceeds the source length regardless of the multiplier.
-        const int repeat = section.duration_frames_repeat > 0
-                               ? section.duration_frames_repeat
-                               : 1;
-        for (int pass = 0; pass < repeat; ++pass) {
-          for (int i = 0; i < resolved_frame_count; ++i) {
-            out_frame_sections->push_back(
-                std::make_pair(&section, i + section.start_frame));
-          }
-        }
-        continue;
       }
 
-      if (section.duration_frames <= 0) {
+      SourceFrameRange range;
+      if (!ResolveSourceFrameRange(section, source_frame_count, &range,
+                                   error)) {
+        return false;
+      }
+      if (range.count <= 0) {
+        if (error != nullptr) {
+          *error = "Progressive section '" + section.name +
+                   "' selects no source frames.";
+        }
+        return false;
+      }
+
+      const std::int64_t output_frames =
+          SectionOutputFrameCount(section, range);
+      if (output_frames <= 0) {
         if (error != nullptr) {
           *error =
               "Progressive sections must define duration_frames > 0 or 'all'.";
@@ -401,9 +395,13 @@ bool BuildFramePatternSchedule(
         return false;
       }
 
-      for (int i = 0; i < section.duration_frames; ++i) {
+      // An "all" duration replays the range duration_frames_repeat times and
+      // a fixed duration longer than the range loops it; either way every
+      // pass restarts at the range's first frame, so the source index never
+      // leaves the selected range.
+      for (std::int64_t i = 0; i < output_frames; ++i) {
         out_frame_sections->push_back(
-            std::make_pair(&section, i + section.start_frame));
+            std::make_pair(&section, SourceFrameAtSectionPosition(range, i)));
       }
       continue;
     }
@@ -1484,6 +1482,7 @@ bool GenerationStage::BuildFrameSchedule(
     out_schedule->push_back(FrameScheduleItem{
         .section = sec,
         .source_frame_index = frame_section.second,
+        .section_frame_index = section_frame_offset,
         .disc_picture_number = disc_pn,
     });
     ++section_frame_offset;

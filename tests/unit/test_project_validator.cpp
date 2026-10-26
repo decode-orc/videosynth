@@ -104,6 +104,7 @@ TEST(ProjectValidatorTest, AcceptsMvpCompliantProject) {
 
 TEST(ProjectValidatorTest, AcceptsDurationRepeatWithAllSourceFrames) {
   Project project = MakeValidProject();
+  project.sections[0].source = MakeSourcePath("test.mkv");
   project.sections[0].duration_frames_all = true;
   project.sections[0].duration_frames = 0;
   project.sections[0].duration_frames_repeat = 3;
@@ -837,6 +838,7 @@ TEST(ProjectValidatorTest, RejectsProgressiveRawSourceFamily) {
 
 TEST(ProjectValidatorTest, AcceptsProgressiveAllDurationSemantics) {
   Project project = MakeValidProject();
+  project.sections[0].source = MakeSourcePath("test.mkv");
   project.sections[0].duration_frames_all = true;
   project.sections[0].duration_frames = 0;
 
@@ -976,6 +978,113 @@ TEST(ProjectValidatorTest, AcceptsProgressiveMp4WithMp4Container) {
 
   EXPECT_TRUE(result.is_valid);
   EXPECT_TRUE(result.errors.empty());
+}
+
+// A 120-frame conformant MKV section (see MakeConformantVideoProfile) with
+// the given range; duration "all" unless the test overrides it.
+Project MakeRangedVideoProject(int start_frame, int end_frame,
+                               bool end_frame_specified) {
+  Project project = MakeValidProject();
+  Section& section = project.sections[0];
+  section.source = MakeSourcePath("capture.mkv");
+  section.duration_frames_all = true;
+  section.duration_frames = 0;
+  section.start_frame = start_frame;
+  section.end_frame = end_frame;
+  section.end_frame_specified = end_frame_specified;
+  return project;
+}
+
+ValidationResult ValidateWithConformantVideo(const Project& project) {
+  MockProgressiveFrameSourceProbe probe;
+  probe.profile = MakeConformantVideoProfile(Standard::kPal);
+  ProjectValidator validator(&probe);
+  return validator.Validate(project);
+}
+
+TEST(ProjectValidatorTest, AcceptsVideoRangeInsideTheSource) {
+  const ValidationResult result =
+      ValidateWithConformantVideo(MakeRangedVideoProject(10, 119, true));
+  EXPECT_TRUE(result.is_valid)
+      << (result.errors.empty() ? "" : result.errors[0]);
+}
+
+TEST(ProjectValidatorTest, RejectsEndFrameBeforeStartFrame) {
+  const ValidationResult result =
+      ValidateWithConformantVideo(MakeRangedVideoProject(20, 19, true));
+  EXPECT_FALSE(result.is_valid);
+  EXPECT_TRUE(
+      ContainsMessage(result.errors, "end_frame must be >= start_frame"));
+}
+
+TEST(ProjectValidatorTest, RejectsNegativeStartFrame) {
+  const ValidationResult result =
+      ValidateWithConformantVideo(MakeRangedVideoProject(-1, 0, false));
+  EXPECT_FALSE(result.is_valid);
+  EXPECT_TRUE(ContainsMessage(result.errors, "start_frame must be >= 0"));
+}
+
+TEST(ProjectValidatorTest, RejectsStartFrameBeyondTheSource) {
+  const ValidationResult result =
+      ValidateWithConformantVideo(MakeRangedVideoProject(120, 0, false));
+  EXPECT_FALSE(result.is_valid);
+  EXPECT_TRUE(ContainsMessage(result.errors,
+                              "start_frame 120 is beyond the end of the "
+                              "source (120 frames, last frame 119)"));
+}
+
+TEST(ProjectValidatorTest, RejectsEndFrameBeyondTheSource) {
+  const ValidationResult result =
+      ValidateWithConformantVideo(MakeRangedVideoProject(0, 120, true));
+  EXPECT_FALSE(result.is_valid);
+  EXPECT_TRUE(
+      ContainsMessage(result.errors, "end_frame 120 is beyond the end"));
+}
+
+TEST(ProjectValidatorTest, RejectsEndFrameWithIntegerDuration) {
+  Project project = MakeRangedVideoProject(10, 19, true);
+  project.sections[0].duration_frames_all = false;
+  project.sections[0].duration_frames = 50;
+  const ValidationResult result = ValidateWithConformantVideo(project);
+  EXPECT_FALSE(result.is_valid);
+  EXPECT_TRUE(ContainsMessage(result.errors,
+                              "end_frame cannot be combined with an integer "
+                              "duration_frames"));
+}
+
+TEST(ProjectValidatorTest, AcceptsStartFrameWithLoopingIntegerDuration) {
+  // 110 frames remain after frame 10, so 500 frames loop the range.
+  Project project = MakeRangedVideoProject(10, 0, false);
+  project.sections[0].duration_frames_all = false;
+  project.sections[0].duration_frames = 500;
+  const ValidationResult result = ValidateWithConformantVideo(project);
+  EXPECT_TRUE(result.is_valid)
+      << (result.errors.empty() ? "" : result.errors[0]);
+}
+
+TEST(ProjectValidatorTest, RejectsFrameRangeOnExrStill) {
+  for (const bool end_specified : {false, true}) {
+    Project project = MakeValidProject();
+    project.sections[0].start_frame = end_specified ? 0 : 5;
+    project.sections[0].end_frame = 9;
+    project.sections[0].end_frame_specified = end_specified;
+    ProjectValidator validator;
+    const ValidationResult result = validator.Validate(project);
+    EXPECT_FALSE(result.is_valid) << "end_specified " << end_specified;
+    EXPECT_TRUE(
+        ContainsMessage(result.errors, "an EXR still has only one frame"));
+  }
+}
+
+TEST(ProjectValidatorTest, RejectsAllDurationOnExrStill) {
+  Project project = MakeValidProject();
+  project.sections[0].duration_frames_all = true;
+  project.sections[0].duration_frames = 0;
+  ProjectValidator validator;
+  const ValidationResult result = validator.Validate(project);
+  EXPECT_FALSE(result.is_valid);
+  EXPECT_TRUE(ContainsMessage(result.errors,
+                              "an EXR still needs an integer duration_frames"));
 }
 
 TEST(ProjectValidatorTest, RejectsVideoWhoseContainerDoesNotMatchExtension) {

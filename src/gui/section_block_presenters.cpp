@@ -14,6 +14,8 @@
 #include <cmath>
 #include <cstdint>
 
+#include "videosynth/progressive_frame_source.h"
+
 namespace videosynth::gui {
 
 namespace {
@@ -200,6 +202,44 @@ int DurationSecondsToFrames(double seconds, double frame_rate_hz,
       std::clamp<int64_t>(frames, 1, std::max(1, max_frames)));
 }
 
+void ApplySourceSelectionDefaults(const std::string& previous_source,
+                                  int still_duration_frames, Section* section) {
+  if (section == nullptr || section->source == previous_source) {
+    return;
+  }
+  if (IsProgressiveVideoSource(section->source)) {
+    section->duration_frames_all = true;
+    section->duration_frames = 0;
+    section->start_frame = 0;
+    section->end_frame = 0;
+    section->end_frame_specified = false;
+    return;
+  }
+  if (IsProgressiveStillSource(section->source)) {
+    section->start_frame = 0;
+    section->end_frame = 0;
+    section->end_frame_specified = false;
+    if (section->duration_frames_all) {
+      section->duration_frames_all = false;
+      section->duration_frames = std::max(1, still_duration_frames);
+      section->duration_frames_repeat = 1;
+    }
+  }
+}
+
+SourceRangeEditorState SourceRangeEditorStateFor(const Section& section,
+                                                 int probed_frame_count,
+                                                 int unbounded_maximum) {
+  SourceRangeEditorState state;
+  state.enabled = IsProgressiveVideoSource(section.source);
+  const int stored_max = std::max(
+      section.start_frame, section.end_frame_specified ? section.end_frame : 0);
+  state.maximum = probed_frame_count > 0
+                      ? std::max(probed_frame_count - 1, stored_max)
+                      : unbounded_maximum;
+  return state;
+}
+
 Section ApplySectionEditDelta(const Section& before, const Section& after,
                               Section target) {
   if (after.section_type != before.section_type) {
@@ -216,6 +256,13 @@ Section ApplySectionEditDelta(const Section& before, const Section& after,
     target.duration_frames_all = after.duration_frames_all;
     target.duration_frames = after.duration_frames;
     target.duration_frames_repeat = after.duration_frames_repeat;
+  }
+  if (after.start_frame != before.start_frame ||
+      after.end_frame != before.end_frame ||
+      after.end_frame_specified != before.end_frame_specified) {
+    target.start_frame = after.start_frame;
+    target.end_frame = after.end_frame;
+    target.end_frame_specified = after.end_frame_specified;
   }
   if (!(after.noise == before.noise)) {
     target.noise = after.noise;

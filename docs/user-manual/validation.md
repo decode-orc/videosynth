@@ -51,7 +51,10 @@ Unknown keys are rejected outright, at every level, naming the offending key and
 ### Sections and disc structure
 
 - Every section needs a valid `type` (`progressive`) and either frame content or line injections.
-- `duration_frames` must be a positive integer or `"all"`.
+- `duration_frames` must be a positive integer or `"all"` (an omitted `duration_frames` means `"all"`).
+- `start_frame` must be ≥ 0 and `end_frame` ≥ `start_frame`; both must lie inside the video source.
+- `end_frame` must not be combined with an integer `duration_frames`.
+- An EXR still takes neither `start_frame` nor `end_frame`, and needs an integer `duration_frames`.
 - Once any section declares a `section_type`, the sequence must be `[lead_in] programme_area… [lead_out]` — at most one of each, in that order, with nothing outside them.
 - CAV lead-in ≥ 938 frames; lead-out ≥ 1250 frames.
 

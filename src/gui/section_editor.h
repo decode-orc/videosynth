@@ -80,6 +80,12 @@ class SectionEditor : public QWidget {
   void LoadOsdTable(const Section& section);
   // Reads the staged widget state into a Section and commits it.
   void CommitSection();
+  // Commits after the user picked a different source: a new video defaults
+  // to all of its frames, a new still to a fixed duration (see
+  // ApplySourceSelectionDefaults).
+  void CommitSourceSelection();
+  // Commits `section` and schedules the deferred reload of derived displays.
+  void CommitEditedSection(const Section& section);
   // Commits `section` to the current section and mirrors the changed fields
   // onto the other selected sections. Returns true when the document changed.
   bool CommitSectionToDocument(const Section& section);
@@ -110,9 +116,17 @@ class SectionEditor : public QWidget {
   void PopulateBuiltinFiles(const QString& keep_file);
   // The bundled raster subfolder ("720x576"/"720x486") for the project.
   QString ProjectBundledRaster() const;
-  // Refreshes the "N frames x R = T total" duration hint from the latest probe
-  // result and the current repeat multiplier.
+  // Refreshes the "N frames x R = T total" duration hint from the selected
+  // source range (resolved against the latest probe result) and the current
+  // repeat multiplier, or the loop note for a fixed duration longer than the
+  // range.
   void UpdateDurationSummary();
+  // Applies SourceRangeEditorStateFor to the source-range widgets: enabled for
+  // video sources only, capped at the probed frame count.
+  void UpdateSourceRangeWidgets();
+  // The probed frame count of the current video source, or
+  // kUnknownSourceFrameCount until a successful probe report arrives.
+  int ProbedSourceFrameCount() const;
   // Refreshes the section's frame range and, for programme_area sections of
   // laserdisc projects, the CAV picture-number / CLV timecode range (anchored
   // at the programme area start; see BuildDiscFrameOffsets). The end of an
@@ -161,6 +175,11 @@ class SectionEditor : public QWidget {
   QSpinBox* duration_repeat_spin_ = nullptr;
   QLabel* duration_repeat_label_ = nullptr;
   QLabel* duration_summary_label_ = nullptr;
+  // Selected source range (video only): first frame, last frame, and
+  // "to end of source" for an open-ended range.
+  QSpinBox* start_frame_spin_ = nullptr;
+  QSpinBox* end_frame_spin_ = nullptr;
+  QCheckBox* end_frame_to_source_end_check_ = nullptr;
   // General-group form layout, kept for toggling the disc-range row.
   QFormLayout* general_form_ = nullptr;
   QLabel* frame_range_label_ = nullptr;

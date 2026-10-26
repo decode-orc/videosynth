@@ -248,6 +248,101 @@ TEST(SectionBlockPresenterTest, ApplySectionEditDeltaMirrorsOnlyChangedFields) {
   EXPECT_TRUE(result.noise.enabled);
 }
 
+TEST(SectionBlockPresenterTest, ApplySectionEditDeltaMirrorsSourceRange) {
+  Section before;
+  before.source = "assets/capture.mp4";
+  before.duration_frames_all = true;
+  Section after = before;
+  after.start_frame = 10;
+  after.end_frame = 19;
+  after.end_frame_specified = true;
+
+  Section target;
+  target.source = "assets/other.mkv";
+  target.duration_frames_all = true;
+  const Section result = ApplySectionEditDelta(before, after, target);
+  EXPECT_EQ(result.start_frame, 10);
+  EXPECT_EQ(result.end_frame, 19);
+  EXPECT_TRUE(result.end_frame_specified);
+  EXPECT_EQ(result.source, "assets/other.mkv");
+}
+
+TEST(SectionBlockPresenterTest, NewVideoSourceDefaultsToAllOfItsFrames) {
+  Section section;
+  section.source = "assets/new.mp4";
+  section.duration_frames = 250;
+  section.start_frame = 40;
+  section.end_frame = 90;
+  section.end_frame_specified = true;
+  ApplySourceSelectionDefaults("assets/old.mkv", 250, &section);
+  EXPECT_TRUE(section.duration_frames_all);
+  EXPECT_EQ(section.start_frame, 0);
+  EXPECT_FALSE(section.end_frame_specified);
+}
+
+TEST(SectionBlockPresenterTest, NewStillSourceClearsRangeAndAllDuration) {
+  Section section;
+  section.source = "assets/bars.exr";
+  section.duration_frames_all = true;
+  section.duration_frames_repeat = 3;
+  section.start_frame = 40;
+  section.end_frame = 90;
+  section.end_frame_specified = true;
+  ApplySourceSelectionDefaults("assets/old.mkv", 125, &section);
+  EXPECT_FALSE(section.duration_frames_all);
+  EXPECT_EQ(section.duration_frames, 125);
+  EXPECT_EQ(section.duration_frames_repeat, 1);
+  EXPECT_EQ(section.start_frame, 0);
+  EXPECT_FALSE(section.end_frame_specified);
+}
+
+TEST(SectionBlockPresenterTest, NewStillSourceKeepsAFixedDuration) {
+  Section section;
+  section.source = "assets/bars.exr";
+  section.duration_frames = 75;
+  ApplySourceSelectionDefaults("assets/grey.exr", 125, &section);
+  EXPECT_FALSE(section.duration_frames_all);
+  EXPECT_EQ(section.duration_frames, 75);
+}
+
+TEST(SectionBlockPresenterTest, UnchangedSourceNeverRewritesTheDuration) {
+  Section section;
+  section.source = "assets/capture.mp4";
+  section.duration_frames = 75;
+  section.start_frame = 12;
+  const Section original = section;
+  ApplySourceSelectionDefaults("assets/capture.mp4", 125, &section);
+  EXPECT_EQ(section, original);
+}
+
+TEST(SectionBlockPresenterTest, RangeWidgetsAreDisabledForStills) {
+  Section section;
+  section.source = "assets/bars.exr";
+  section.duration_frames = 50;
+  EXPECT_FALSE(SourceRangeEditorStateFor(section, 1, 1000).enabled);
+}
+
+TEST(SectionBlockPresenterTest, RangeWidgetsAreCappedAtTheProbedLastFrame) {
+  Section section;
+  section.source = "assets/capture.mp4";
+  section.duration_frames_all = true;
+  const SourceRangeEditorState probed =
+      SourceRangeEditorStateFor(section, 120, 1000);
+  EXPECT_TRUE(probed.enabled);
+  EXPECT_EQ(probed.maximum, 119);
+  EXPECT_EQ(SourceRangeEditorStateFor(section, -1, 1000).maximum, 1000);
+}
+
+TEST(SectionBlockPresenterTest, RangeWidgetCapNeverClampsStoredValues) {
+  Section section;
+  section.source = "assets/capture.mp4";
+  section.duration_frames_all = true;
+  section.start_frame = 150;
+  section.end_frame = 200;
+  section.end_frame_specified = true;
+  EXPECT_EQ(SourceRangeEditorStateFor(section, 120, 1000).maximum, 200);
+}
+
 TEST(SectionBlockPresenterTest, ApplySectionEditDeltaNeverMirrorsName) {
   Section before;
   before.name = "Primary";

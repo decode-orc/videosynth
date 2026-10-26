@@ -42,6 +42,8 @@
 #include "section_list_model.h"
 #include "source_path_model.h"
 #include "videosynth/path_resolution.h"
+#include "videosynth/progressive_frame_source.h"
+#include "videosynth/source_frame_range.h"
 #include "videosynth/timing_constants.h"
 
 namespace videosynth::gui {
@@ -205,6 +207,29 @@ QWidget* SectionEditor::BuildGeneralGroup() {
   source_resolved_hint_->setEnabled(false);
   form->addRow(QString(), source_resolved_hint_);
 
+  // Selected source range: which frames of a video the section plays. The
+  // duration below then counts or loops within this range.
+  start_frame_spin_ = new QSpinBox(group);
+  start_frame_spin_->setObjectName(QStringLiteral("startFrameSpin"));
+  start_frame_spin_->setRange(0, kMaxDurationFrames);
+  start_frame_spin_->setToolTip(
+      tr("First source frame the section plays (0-based)."));
+  end_frame_spin_ = new QSpinBox(group);
+  end_frame_spin_->setObjectName(QStringLiteral("endFrameSpin"));
+  end_frame_spin_->setRange(0, kMaxDurationFrames);
+  end_frame_spin_->setToolTip(
+      tr("Last source frame the section plays (0-based, inclusive)."));
+  end_frame_to_source_end_check_ = new QCheckBox(tr("To end of source"), group);
+  end_frame_to_source_end_check_->setObjectName(
+      QStringLiteral("endFrameToSourceEndCheck"));
+  auto* range_row = new QHBoxLayout();
+  range_row->addWidget(start_frame_spin_);
+  range_row->addWidget(new QLabel(tr("to"), group));
+  range_row->addWidget(end_frame_spin_);
+  range_row->addWidget(end_frame_to_source_end_check_);
+  range_row->addStretch();
+  form->addRow(tr("Source frames:"), range_row);
+
   duration_spin_ = new QSpinBox(group);
   duration_spin_->setRange(1, kMaxDurationFrames);
   duration_spin_->setSuffix(tr(" frames"));
@@ -227,7 +252,8 @@ QWidget* SectionEditor::BuildGeneralGroup() {
   duration_repeat_spin_->setRange(1, kMaxDurationFrames);
   duration_repeat_spin_->setSuffix(tr("x"));
   duration_repeat_spin_->setToolTip(
-      tr("How many times the whole source is replayed in this section."));
+      tr("How many times the selected source frames are replayed in this "
+         "section."));
   auto* duration_row = new QHBoxLayout();
   duration_row->addWidget(duration_spin_);
   duration_row->addWidget(duration_seconds_spin_);
@@ -256,7 +282,16 @@ QWidget* SectionEditor::BuildGeneralGroup() {
           &SectionEditor::CommitSection);
   connect(section_type_combo_, &QComboBox::activated, this,
           &SectionEditor::CommitSection);
+  // A different file resets the frame selection; storing the same file
+  // relative or absolute does not.
   const auto commit_source = [this] {
+    if (!updating_) {
+      CommitSourceSelection();
+      RequestProbe();
+      UpdateSourceResolvedHint();
+    }
+  };
+  const auto commit_source_path_form = [this] {
     if (!updating_) {
       CommitSection();
       RequestProbe();
@@ -279,8 +314,43 @@ QWidget* SectionEditor::BuildGeneralGroup() {
           [commit_source](int) { commit_source(); });
   connect(source_edit_, &QLineEdit::editingFinished, this, commit_source);
   connect(source_relative_check_, &QCheckBox::toggled, this,
-          [commit_source](bool) { commit_source(); });
+          [commit_source_path_form](bool) { commit_source_path_form(); });
   connect(browse, &QPushButton::clicked, this, &SectionEditor::OnBrowseSource);
+  connect(start_frame_spin_, &QSpinBox::valueChanged, this, [this](int start) {
+    if (updating_) {
+      return;
+    }
+    // Moving the start past a set end drags the end along, so the range
+    // never inverts.
+    if (!end_frame_to_source_end_check_->isChecked() &&
+        end_frame_spin_->value() < start) {
+      const QSignalBlocker blocker(end_frame_spin_);
+      end_frame_spin_->setValue(start);
+    }
+    CommitSection();
+  });
+  connect(end_frame_spin_, &QSpinBox::valueChanged, this, [this](int) {
+    if (!updating_) {
+      CommitSection();
+    }
+  });
+  connect(end_frame_to_source_end_check_, &QCheckBox::toggled, this,
+          [this](bool to_source_end) {
+            end_frame_spin_->setEnabled(!to_source_end &&
+                                        start_frame_spin_->isEnabled());
+            if (updating_) {
+              return;
+            }
+            if (!to_source_end) {
+              // Start from the whole remaining source when its length is
+              // known, otherwise from a one-frame range.
+              const int frame_count = ProbedSourceFrameCount();
+              const QSignalBlocker blocker(end_frame_spin_);
+              end_frame_spin_->setValue(
+                  std::max(start_frame_spin_->value(), frame_count - 1));
+            }
+            CommitSection();
+          });
   connect(duration_spin_, &QSpinBox::valueChanged, this, [this](int) {
     SyncDurationSecondsFromFrames();
     if (!updating_) {
@@ -673,6 +743,15 @@ void SectionEditor::LoadFromDocument() {
   duration_repeat_spin_->setValue(std::max(1, section.duration_frames_repeat));
   duration_repeat_label_->setEnabled(section.duration_frames_all);
   duration_repeat_spin_->setEnabled(section.duration_frames_all);
+  // A still has no length of its own; the box stays usable only to untick a
+  // project that set it anyway.
+  duration_all_check_->setEnabled(!IsProgressiveStillSource(section.source) ||
+                                  section.duration_frames_all);
+  end_frame_to_source_end_check_->setChecked(!section.end_frame_specified);
+  UpdateSourceRangeWidgets();
+  start_frame_spin_->setValue(section.start_frame);
+  end_frame_spin_->setValue(section.end_frame_specified ? section.end_frame
+                                                        : section.start_frame);
   UpdateDurationSummary();
 
   UpdateFrameRangeDisplay();
@@ -807,6 +886,14 @@ Section SectionEditor::SectionFromWidgets() const {
       section.duration_frames_all ? 0 : duration_spin_->value();
   section.duration_frames_repeat =
       section.duration_frames_all ? duration_repeat_spin_->value() : 1;
+  // The range widgets are live for video sources only; otherwise the stored
+  // values stand (the validator reports any a still should not carry).
+  if (start_frame_spin_->isEnabled()) {
+    section.start_frame = start_frame_spin_->value();
+    section.end_frame_specified = !end_frame_to_source_end_check_->isChecked();
+    section.end_frame =
+        section.end_frame_specified ? end_frame_spin_->value() : 0;
+  }
 
   // Audio block (unticking excludes it entirely).
   section.audio_channel_pairs = audio_group_->isChecked()
@@ -918,7 +1005,25 @@ void SectionEditor::CommitSection() {
   if (updating_ || section_index_ < 0) {
     return;
   }
-  const bool changed = CommitSectionToDocument(SectionFromWidgets());
+  CommitEditedSection(SectionFromWidgets());
+}
+
+void SectionEditor::CommitSourceSelection() {
+  if (updating_ || section_index_ < 0) {
+    return;
+  }
+  const std::string previous_source =
+      document_->project()
+          .sections[static_cast<std::size_t>(section_index_)]
+          .source;
+  Section section = SectionFromWidgets();
+  ApplySourceSelectionDefaults(previous_source, duration_spin_->value(),
+                               &section);
+  CommitEditedSection(section);
+}
+
+void SectionEditor::CommitEditedSection(const Section& section) {
+  const bool changed = CommitSectionToDocument(section);
 
   if (changed && !reload_pending_) {
     // Refresh derived displays (start frame, block defaults seeded by the
@@ -972,30 +1077,51 @@ void SectionEditor::UpdateProbeDisplay() {
                                      : tr("Source profile incompatible"));
     probe_detail_label_->setText(FormatProbeReportDetail(report));
   }
-  // The probed frame count resolves "all source frames" durations, so the
-  // derived displays refresh on every report regardless of the verdict.
+  // The probed frame count resolves "all source frames" durations and caps
+  // the range widgets, so the derived displays refresh on every report
+  // regardless of the verdict.
+  {
+    const bool was_updating = updating_;
+    updating_ = true;
+    UpdateSourceRangeWidgets();
+    updating_ = was_updating;
+  }
   UpdateDurationSummary();
   UpdateFrameRangeDisplay();
 }
 
 void SectionEditor::UpdateDurationSummary() {
-  // Only relevant while "All source frames" drives the duration; a manually
-  // entered frame count already shows in the spinbox.
-  if (!duration_all_check_->isChecked()) {
+  if (section_index_ < 0 || section_index_ >= document_->section_count()) {
     duration_summary_label_->clear();
+    return;
+  }
+  const Section& section =
+      document_->project().sections[static_cast<std::size_t>(section_index_)];
+  SourceFrameRange range;
+  std::string range_error;
+  const bool range_known = ResolveSourceFrameRange(
+      section, ProbedSourceFrameCount(), &range, &range_error);
+
+  // A fixed duration already shows in the spinbox; only a video range it
+  // overruns needs a note.
+  if (!duration_all_check_->isChecked()) {
+    if (IsProgressiveVideoSource(section.source) && range_known &&
+        duration_spin_->value() > range.count) {
+      duration_summary_label_->setText(
+          tr("Loops the %1-frame source range").arg(range.count));
+    } else {
+      duration_summary_label_->clear();
+    }
     return;
   }
 
   const int repeat = std::max(1, duration_repeat_spin_->value());
-  int source_frames = 0;
-  if (probe_controller_->has_report()) {
-    const SourceProbeReport& report = probe_controller_->report();
-    if (report.probe_ok) {
-      source_frames = report.profile.frame_count;
+  if (!range_known) {
+    if (ProbedSourceFrameCount() != kUnknownSourceFrameCount) {
+      // The probe answered, so the range itself is invalid.
+      duration_summary_label_->setText(QString::fromStdString(range_error));
+      return;
     }
-  }
-
-  if (source_frames <= 0) {
     // Probe pending or unavailable: still convey the multiplier.
     duration_summary_label_->setText(
         repeat > 1 ? tr("Source frame count x %1 (probing source…)").arg(repeat)
@@ -1003,11 +1129,37 @@ void SectionEditor::UpdateDurationSummary() {
     return;
   }
 
-  const int64_t total = static_cast<int64_t>(source_frames) * repeat;
+  const int64_t total = static_cast<int64_t>(range.count) * repeat;
   duration_summary_label_->setText(tr("%1 frames x %2 = %3 total")
-                                       .arg(source_frames)
+                                       .arg(range.count)
                                        .arg(repeat)
                                        .arg(static_cast<qlonglong>(total)));
+}
+
+void SectionEditor::UpdateSourceRangeWidgets() {
+  if (section_index_ < 0 || section_index_ >= document_->section_count()) {
+    return;
+  }
+  const Section& section =
+      document_->project().sections[static_cast<std::size_t>(section_index_)];
+  const SourceRangeEditorState state = SourceRangeEditorStateFor(
+      section, ProbedSourceFrameCount(), kMaxDurationFrames);
+  start_frame_spin_->setEnabled(state.enabled);
+  end_frame_to_source_end_check_->setEnabled(state.enabled);
+  end_frame_spin_->setEnabled(state.enabled &&
+                              !end_frame_to_source_end_check_->isChecked());
+  start_frame_spin_->setMaximum(state.maximum);
+  end_frame_spin_->setMaximum(state.maximum);
+}
+
+int SectionEditor::ProbedSourceFrameCount() const {
+  if (!probe_controller_->has_report()) {
+    return kUnknownSourceFrameCount;
+  }
+  const SourceProbeReport& report = probe_controller_->report();
+  return report.probe_ok && report.profile.frame_count > 0
+             ? report.profile.frame_count
+             : kUnknownSourceFrameCount;
 }
 
 void SectionEditor::UpdateFrameRangeDisplay() {
@@ -1024,21 +1176,11 @@ void SectionEditor::UpdateFrameRangeDisplay() {
   const int start_frame =
       rows[static_cast<std::size_t>(section_index_)].start_frame;
 
-  // Duration: fixed durations are known immediately; an "all source frames"
-  // duration resolves from the probed source length, so it stays unknown
-  // until a successful probe report arrives.
-  int64_t duration = -1;
-  if (!section.duration_frames_all) {
-    if (section.duration_frames > 0) {
-      duration = section.duration_frames;
-    }
-  } else if (probe_controller_->has_report()) {
-    const SourceProbeReport& report = probe_controller_->report();
-    if (report.probe_ok && report.profile.frame_count > 0) {
-      const int repeat = std::max(1, section.duration_frames_repeat);
-      duration = static_cast<int64_t>(report.profile.frame_count) * repeat;
-    }
-  }
+  // Duration: fixed durations and closed ranges are known immediately; an
+  // open-ended "all source frames" duration resolves from the probed source
+  // length, so it stays unknown until a successful probe report arrives.
+  const int64_t duration =
+      KnownSectionOutputFrameCount(section, ProbedSourceFrameCount());
   // An end below the start renders as "?" (unknown duration).
   const int end_frame = duration > 0
                             ? static_cast<int>(start_frame + duration - 1)
@@ -1112,12 +1254,15 @@ void SectionEditor::OnBrowseSource() {
       source_edit_->setText(relative);
     } else {
       source_edit_->setText(path);
+      // Blocked so the checkbox's own handler does not commit the new file
+      // ahead of the source-selection commit below.
+      const QSignalBlocker blocker(source_relative_check_);
       source_relative_check_->setChecked(false);
     }
   } else {
     source_edit_->setText(path);
   }
-  CommitSection();
+  CommitSourceSelection();
   RequestProbe();
   UpdateSourceResolvedHint();
 }

@@ -10,6 +10,7 @@
 #include "section_list_model.h"
 
 #include "videosynth/clv_code_generator.h"
+#include "videosynth/source_frame_range.h"
 
 namespace videosynth::gui {
 
@@ -33,9 +34,12 @@ QString FormatClvTimecodeText(const ClvTimecode& timecode) {
 
 QString SectionListRow::DurationText() const {
   if (duration_all) {
+    const QString all = range_frames > 0
+                            ? QStringLiteral("all %1 frames").arg(range_frames)
+                            : QStringLiteral("all frames");
     return duration_repeat > 1
-               ? QStringLiteral("all frames x%1").arg(duration_repeat)
-               : QStringLiteral("all frames");
+               ? QStringLiteral("%1 x%2").arg(all).arg(duration_repeat)
+               : all;
   }
   return QStringLiteral("%1 frames").arg(duration_frames);
 }
@@ -54,13 +58,21 @@ std::vector<SectionListRow> BuildSectionListRows(const Project& project) {
     row.duration_frames = section.duration_frames;
     row.duration_all = section.duration_frames_all;
     row.duration_repeat = section.duration_frames_repeat;
+    row.output_frames =
+        KnownSectionOutputFrameCount(section, kUnknownSourceFrameCount);
+    SourceFrameRange range;
+    if (section.duration_frames_all && section.end_frame_specified &&
+        ResolveSourceFrameRange(section, kUnknownSourceFrameCount, &range,
+                                nullptr)) {
+      row.range_frames = range.count;
+    }
     rows.push_back(row);
 
-    // 'all' resolves to the probed source length at generation time; the
-    // recalculated display treats it as open-ended (subsequent sections show
-    // the frames accumulated so far).
-    if (!section.duration_frames_all) {
-      next_start_frame += section.duration_frames;
+    // An open-ended 'all' resolves to the probed source length at generation
+    // time; the recalculated display treats it as contributing nothing
+    // (subsequent sections show the frames accumulated so far).
+    if (row.output_frames > 0) {
+      next_start_frame += static_cast<int>(row.output_frames);
     }
   }
   return rows;
@@ -121,8 +133,10 @@ std::vector<int> BuildDiscFrameOffsets(const Project& project,
     // Once started, the count runs across every later section (the engine's
     // timekeeping generators persist across boundaries); open-ended "all"
     // durations contribute nothing, as in BuildSectionListRows.
-    if (counter >= 0 && !section.duration_frames_all) {
-      counter += section.duration_frames;
+    const int64_t output_frames =
+        KnownSectionOutputFrameCount(section, kUnknownSourceFrameCount);
+    if (counter >= 0 && output_frames > 0) {
+      counter += static_cast<int>(output_frames);
     }
   }
   return offsets;

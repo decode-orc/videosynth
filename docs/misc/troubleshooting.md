@@ -102,9 +102,25 @@ A warning. The picture is used pixel-for-pixel, so content mastered for a differ
 
 The container declared more frames than could be decoded — usually a truncated or damaged file. Re-mux or re-encode it.
 
-### `Requested frame index exceeds progressive video source length`
+### `start_frame N is beyond the end of the source (M frames, last frame M-1)`
 
-A fixed `duration_frames` (counted from `start_frame`) asks for more frames than the clip holds, or `duration_frames: "all"` is combined with a non-zero `start_frame`. Looping a short clip is not implemented yet; use `duration_frames: "all"` with `duration_repeat` to replay a clip.
+`start_frame` (or `end_frame`, in the matching `end_frame N is beyond…` message) points past the clip's last frame. Frame numbers are 0-based, so a 250-frame clip runs from 0 to 249. Check the frame count in the GUI's **Source Profile** box, or with `ffprobe`.
+
+### `end_frame must be >= start_frame`
+
+The selected range is reversed. Swap the two values, or remove `end_frame` to run to the end of the clip.
+
+### `end_frame cannot be combined with an integer duration_frames`
+
+A range with an `end_frame` already sets the section's length. Remove `duration_frames` (or set it to `"all"`), and use `duration_repeat` to play the range more than once. To loop a clip for a fixed time instead, keep `duration_frames` and remove `end_frame`.
+
+### `start_frame and end_frame select frames from a video source; an EXR still has only one frame`
+
+Remove `start_frame` and `end_frame` from the still section.
+
+### `an EXR still needs an integer duration_frames`
+
+A still has no length of its own, so `duration_frames: "all"` (or leaving `duration_frames` out) does not apply. Give the section a frame count, for example `duration_frames: 250` for ten seconds of PAL.
 
 ## Line injections
 

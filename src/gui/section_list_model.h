@@ -11,6 +11,7 @@
 
 #include <QAbstractTableModel>
 #include <QString>
+#include <cstdint>
 #include <vector>
 
 #include "project_document.h"
@@ -30,13 +31,22 @@ struct SectionListRow {
   int duration_frames = 0;
   bool duration_all = false;
   int duration_repeat = 1;
+  // Output frames the section produces, or -1 while an "all" duration waits
+  // for the source to be probed (see KnownSectionOutputFrameCount).
+  int64_t output_frames = -1;
+  // Length of an "all" section's selected source range when it is known
+  // without probing (an explicit end_frame); 0 otherwise.
+  int range_frames = 0;
 
-  // "500 frames", "all frames", or "all frames x3".
+  // "500 frames", "all frames", "all frames x3", or with a known range
+  // "all 10 frames" / "all 10 frames x3".
   QString DurationText() const;
 };
 
 // Builds the presentation rows for a project, recalculating start frames
-// from the ordered section durations.
+// from the ordered section durations. An "all" duration counts its selected
+// range x repeat when the range has an explicit end_frame, and is
+// open-ended otherwise (no probe data is consulted).
 //
 // Thread-safety: thread-safe (pure function).
 std::vector<SectionListRow> BuildSectionListRows(const Project& project);
@@ -66,7 +76,7 @@ QString DiscRangeTitle(DiscType disc_type);
 // but only programme_area sections receive an offset. A CAV programme_area
 // section whose picture_number injection code specifies an explicit
 // start_value re-anchors the count there. Open-ended "all source frames"
-// durations contribute no frames, matching BuildSectionListRows'
+// durations (no end_frame) contribute no frames, matching BuildSectionListRows'
 // open-ended treatment. All -1 for a non-laserdisc project.
 //
 // Thread-safety: thread-safe (pure function).

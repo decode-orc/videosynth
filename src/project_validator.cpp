@@ -271,6 +271,75 @@ bool FieldOrderOpposesStandard(const std::string& field_order,
   return field_order == "tb" || field_order == "tt";
 }
 
+// Checks the section's start_frame/end_frame and duration combination, which
+// needs no probe. Stills have one frame and no natural length; a video range
+// with an explicit end already sets the duration.
+bool ValidateSourceFrameRange(const videosynth::Section& section,
+                              videosynth::ValidationResult* result) {
+  const auto fail = [result](const std::string& message) {
+    result->is_valid = false;
+    result->errors.push_back("Progressive section validation error: " +
+                             message);
+    return false;
+  };
+
+  if (section.start_frame < 0) {
+    return fail("start_frame must be >= 0.");
+  }
+  if (videosynth::IsProgressiveStillSource(section.source)) {
+    if (section.start_frame != 0 || section.end_frame_specified) {
+      return fail(
+          "start_frame and end_frame select frames from a video source; an "
+          "EXR still has only one frame.");
+    }
+    if (section.duration_frames_all) {
+      return fail(
+          "an EXR still needs an integer duration_frames; a still has no "
+          "length of its own, so 'all' (or an omitted duration_frames) does "
+          "not apply.");
+    }
+    return true;
+  }
+  if (section.end_frame_specified) {
+    if (section.end_frame < section.start_frame) {
+      return fail("end_frame must be >= start_frame.");
+    }
+    if (!section.duration_frames_all) {
+      return fail(
+          "end_frame cannot be combined with an integer duration_frames; the "
+          "range already sets the duration. Omit duration_frames or set it to "
+          "'all'.");
+    }
+  }
+  return true;
+}
+
+// Checks the selected range against the probed video length. A frame count
+// of zero (unknown) is left to the decoder.
+bool ValidateSourceFrameRangeBounds(const videosynth::Section& section,
+                                    int frame_count,
+                                    videosynth::ValidationResult* result) {
+  if (frame_count <= 0) {
+    return true;
+  }
+  const auto fail = [result, frame_count](const std::string& key, int value) {
+    result->is_valid = false;
+    result->errors.push_back(
+        "Progressive section validation error: " + key + " " +
+        std::to_string(value) + " is beyond the end of the source (" +
+        std::to_string(frame_count) + " frames, last frame " +
+        std::to_string(frame_count - 1) + ").");
+    return false;
+  };
+  if (section.start_frame >= frame_count) {
+    return fail("start_frame", section.start_frame);
+  }
+  if (section.end_frame_specified && section.end_frame >= frame_count) {
+    return fail("end_frame", section.end_frame);
+  }
+  return true;
+}
+
 // Checks a probed MKV/MP4 profile. Only raster and rate are hard requirements
 // (checked by the caller); range, matrix, chroma format and bit depth are
 // normalised at decode, and field order and sample aspect only warn.
@@ -1789,6 +1858,10 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
         break;
       }
 
+      if (!ValidateSourceFrameRange(section, &result)) {
+        break;
+      }
+
       if (progressive_frame_source_probe_ != nullptr) {
         ProgressiveFrameSourceProfile profile;
         std::string probe_error;
@@ -1827,6 +1900,10 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
                                     project.cvbs_presets.video_standard_preset,
                                     profile, &result, logger_)) {
             result.is_valid = false;
+            break;
+          }
+          if (!ValidateSourceFrameRangeBounds(section, profile.frame_count,
+                                              &result)) {
             break;
           }
         } else {

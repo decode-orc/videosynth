@@ -523,9 +523,14 @@ void ProgressiveFrameSource::DecodeSectionIntoCache(const Section& section,
   // is a separate request, so the entry lock is released between frames and
   // a worker that reaches the section early is served as soon as its frame
   // is decoded rather than after the whole prefetch.
-  const int prefetch_frames = IsProgressiveVideoSource(section.source)
-                                  ? static_cast<int>(window_capacity_ / 2U)
-                                  : 1;
+  int prefetch_frames = IsProgressiveVideoSource(section.source)
+                            ? static_cast<int>(window_capacity_ / 2U)
+                            : 1;
+  // Frames past the selected range's end are never shown.
+  if (section.end_frame_specified) {
+    prefetch_frames =
+        std::min(prefetch_frames, section.end_frame - frame_index + 1);
+  }
   for (int i = 0; i < std::max(1, prefetch_frames); ++i) {
     {
       const std::lock_guard<std::mutex> lock(prefetch_mutex_);

@@ -13,8 +13,10 @@
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
+#include <cstdint>
 #include <utility>
 
+#include "videosynth/source_frame_range.h"
 #include "videosynth/vits_definition.h"
 #include "videosynth/vits_definition_provider.h"
 
@@ -324,7 +326,8 @@ std::string FormatTargetLines(const std::vector<int>& lines) {
 int TotalDiscFrames(const Project& project) {
   int total = 0;
   for (const Section& section : project.sections) {
-    total += section.duration_frames;
+    total += static_cast<int>(std::max<int64_t>(
+        0, KnownSectionOutputFrameCount(section, kUnknownSourceFrameCount)));
   }
   return total;
 }

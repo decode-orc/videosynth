@@ -42,6 +42,62 @@ TEST(YamlProjectParserTest, ParsesProgressiveSectionWithAllDuration) {
   EXPECT_EQ(result.project.sections[0].duration_frames, 0);
 }
 
+// A section-only YAML document around `section_body` (indented keys).
+std::string MakeVideoSectionYaml(const std::string& section_body) {
+  return "cvbs_presets:\n"
+         "  video_standard_preset: PAL\n"
+         "output:\n"
+         "  video_path: out.cvbs\n"
+         "sections:\n"
+         "  - name: Excerpt\n"
+         "    type: progressive\n"
+         "    source: capture.mp4\n" +
+         section_body;
+}
+
+TEST(YamlProjectParserTest, OmittedDurationFramesMeansAll) {
+  YamlProjectParser parser;
+  const ParseResult result =
+      parser.ParseString(MakeVideoSectionYaml("    start_frame: 4\n"));
+
+  ASSERT_TRUE(result.ok) << (result.errors.empty() ? "" : result.errors[0]);
+  EXPECT_TRUE(result.project.sections[0].duration_frames_all);
+  EXPECT_EQ(result.project.sections[0].duration_frames_repeat, 1);
+}
+
+TEST(YamlProjectParserTest, ParsesEndFrame) {
+  YamlProjectParser parser;
+  const ParseResult result = parser.ParseString(
+      MakeVideoSectionYaml("    start_frame: 1500\n    end_frame: 2999\n"));
+
+  ASSERT_TRUE(result.ok) << (result.errors.empty() ? "" : result.errors[0]);
+  const Section& section = result.project.sections[0];
+  EXPECT_EQ(section.start_frame, 1500);
+  EXPECT_TRUE(section.end_frame_specified);
+  EXPECT_EQ(section.end_frame, 2999);
+  EXPECT_TRUE(section.duration_frames_all);
+}
+
+TEST(YamlProjectParserTest, EndFrameIsUnsetWhenAbsent) {
+  YamlProjectParser parser;
+  const ParseResult result =
+      parser.ParseString(MakeVideoSectionYaml("    duration_frames: 10\n"));
+
+  ASSERT_TRUE(result.ok);
+  EXPECT_FALSE(result.project.sections[0].end_frame_specified);
+}
+
+TEST(YamlProjectParserTest, RejectsNonIntegerEndFrame) {
+  YamlProjectParser parser;
+  const ParseResult result =
+      parser.ParseString(MakeVideoSectionYaml("    end_frame: last\n"));
+
+  EXPECT_FALSE(result.ok);
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors[0].find("end_frame"), std::string::npos)
+      << result.errors[0];
+}
+
 TEST(YamlProjectParserTest, ParsesDurationRepeatWithAllDuration) {
   const std::string yaml =
       "project:\n"

@@ -105,24 +105,26 @@ Always reference bundled assets through `{bundled}/…` rather than a bare relat
 
 ## Choosing frames from the source
 
-Three section fields control which frames a section takes and how many it emits:
+Four section fields control which frames a section takes and how many it emits:
 
 | Field | Meaning |
 |-------|---------|
-| `start_frame` | First source frame to use (default `0`) |
-| `duration_frames` | How many output frames the section produces — a positive integer, or `"all"` |
-| `duration_repeat` | With `duration_frames: "all"`, how many times to replay the whole source (default `1`) |
+| `start_frame` | First source frame of the selected range, 0-based (default `0`). Video only |
+| `end_frame` | Last source frame of the selected range, inclusive and 0-based (default: the source's last frame). Video only |
+| `duration_frames` | How many output frames the section produces — a positive integer, or `"all"` (the default when omitted) |
+| `duration_repeat` | With `duration_frames: "all"`, how many times to play the selected range (default `1`) |
 
-**A fixed count** takes exactly that many output frames. For a still, the same picture is emitted for all of them. For a clip, the count must not run past the end of the source (counting from `start_frame`): looping a clip that is shorter than a fixed count is not implemented yet, and generation stops with `Requested frame index exceeds progressive video source length`. To replay a clip, use `"all"` with `duration_repeat`.
+`start_frame` and `end_frame` select a run of frames from a clip; the duration then counts or replays that run. Both must lie inside the clip.
+
+**`"all"`**, or leaving `duration_frames` out, plays the selected range once: `start_frame` to `end_frame`, or to the last frame of the clip when there is no `end_frame`. Its length comes from probing the file. With `duration_repeat`, the range plays that many times, each pass restarting at `start_frame`.
 
 ```yaml
-- name: TenSecondsOfBars
+- name: Excerpt
   type: progressive
-  source: "{bundled}/exr/720x576/100_BARS.exr"
-  duration_frames: 250          # 10 s at 25 fps
+  source: "{project}/capture.mp4"
+  start_frame: 1500
+  end_frame: 2999               # 1 500 frames; duration derived
 ```
-
-**`"all"`** uses the source's own length, discovered by probing the file. Combining `"all"` with a `start_frame` above `0` is not supported yet: the section would run past the end of the source, and generation stops with the error above.
 
 ```yaml
 - name: WholeClipTwice
@@ -131,6 +133,21 @@ Three section fields control which frames a section takes and how many it emits:
   duration_frames: "all"
   duration_repeat: 2            # total = source length x 2
 ```
+
+**A fixed count** produces exactly that many output frames. For a still, the same picture is emitted for all of them. For a clip, the frames are taken from `start_frame` onwards, and a count longer than the rest of the clip loops it: after the last frame, playback continues from `start_frame` again.
+
+```yaml
+- name: TenSecondsOfBars
+  type: progressive
+  source: "{bundled}/exr/720x576/100_BARS.exr"
+  duration_frames: 250          # 10 s at 25 fps
+```
+
+A few combinations are validation errors:
+
+- `end_frame` with an integer `duration_frames`: the range already sets the duration, so omit `duration_frames` or use `"all"`.
+- `start_frame` or `end_frame` on an EXR still: a still has only one frame.
+- `"all"`, or an omitted `duration_frames`, on an EXR still: a still has no length of its own, so give it a frame count.
 
 `duration_repeat` is ignored with a fixed `duration_frames`, and validation warns if you set it there.
 
@@ -144,7 +161,7 @@ The colour conversions a video will receive are logged at `info` level during va
 Progressive section 'Capture': colour conversion applied: full range -> studio swing, BT.709 matrix -> BT.601, yuv420p -> yuv422p10le.
 ```
 
-In the GUI the probe runs in the background whenever you change a section's source, and the **Source Profile** box in the section editor reports the result — *Source profile OK*, *Source profile incompatible*, or *Probing source…* while it works — with the codec, pixel format, frame count, the planned colour conversion and any warnings. The frame count it discovers is what feeds the `duration_frames: "all"` totals shown beside the duration field.
+In the GUI the probe runs in the background whenever you change a section's source, and the **Source Profile** box in the section editor reports the result — *Source profile OK*, *Source profile incompatible*, or *Probing source…* while it works — with the codec, pixel format, frame count, the planned colour conversion and any warnings. The frame count it discovers caps the **Source frames** range fields and feeds the `duration_frames: "all"` totals shown beside the duration field.
 
 ## Memory use
 
