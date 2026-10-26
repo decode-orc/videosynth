@@ -126,6 +126,20 @@ class IProjectValidator {
   virtual ValidationResult Validate(const Project& project) = 0;
 };
 
+// One audio stream of a video source, in the order the container lists its
+// audio streams (index 0 is the first audio stream, whatever its absolute
+// stream number).
+struct ProgressiveAudioStreamProfile {
+  // Absolute stream index within the container.
+  int stream_index = 0;
+  std::string codec;
+  int channels = 0;
+  int sample_rate_hz = 0;
+  // 0 when the container declares no stream duration.
+  double duration_seconds = 0.0;
+  double start_time_seconds = 0.0;
+};
+
 struct ProgressiveFrameSourceProfile {
   std::string container;
   std::string codec;
@@ -143,8 +157,19 @@ struct ProgressiveFrameSourceProfile {
   int crop_right = 0;
   int crop_top = 0;
   int crop_bottom = 0;
+  // Base (r_frame_rate) rate of the first video stream.
   double frame_rate_hz = 0.0;
+  // Average rate over the stream (avg_frame_rate); 0 when undeclared. A
+  // constant-rate source has avg == base rate.
+  double average_frame_rate_hz = 0.0;
   int frame_count = 0;
+  // Earliest presentation time over all streams (the container start), and
+  // that of the first video frame, in seconds. ffmpeg's input seek is
+  // measured from the container start, so a decoder seeking to a video frame
+  // must add the difference.
+  double container_start_time_seconds = 0.0;
+  double video_start_time_seconds = 0.0;
+  std::vector<ProgressiveAudioStreamProfile> audio_streams;
 };
 
 // Thread-safety: Implementations of IProgressiveFrameSourceProbe must be

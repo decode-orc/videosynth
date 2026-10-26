@@ -61,6 +61,7 @@ ProgressiveFrameSourceProfile MakeGoodPalMkvProfile() {
   profile.height = 576;
   profile.sample_aspect_ratio = 128.0 / 117.0;
   profile.frame_rate_hz = 25.0;
+  profile.average_frame_rate_hz = 25.0;
   profile.frame_count = 250;
   return profile;
 }
@@ -79,12 +80,76 @@ TEST(SourceProbeControllerTest, WrongRasterFailsValidatorRules) {
   EXPECT_FALSE(issues.isEmpty());
 }
 
-TEST(SourceProbeControllerTest, WrongFieldOrderFailsValidatorRules) {
+TEST(SourceProbeControllerTest, WrongFieldOrderWarnsWithoutFailing) {
   ProgressiveFrameSourceProfile profile = MakeGoodPalMkvProfile();
-  profile.field_order = "bt";  // PAL requires top-field-first metadata.
-  const QStringList issues = EvaluateSourceProfile(MakeMkvSection("clip.mkv"),
-                                                   Standard::kPal, profile);
-  EXPECT_FALSE(issues.isEmpty());
+  profile.field_order = "bt";  // PAL output is top-field-first.
+  const SourceProfileFindings findings = EvaluateSourceProfileFindings(
+      MakeMkvSection("clip.mkv"), Standard::kPal, profile);
+  EXPECT_TRUE(findings.errors.isEmpty());
+  ASSERT_EQ(findings.warnings.size(), 1);
+  EXPECT_TRUE(findings.warnings[0].contains(QStringLiteral("field order")));
+}
+
+TEST(SourceProbeControllerTest, ConformantVideoReportsUnconvertedColour) {
+  const QString summary =
+      FormatColourConversionSummary(MakeGoodPalMkvProfile(), Standard::kPal);
+  EXPECT_TRUE(summary.contains(QStringLiteral("unconverted")))
+      << summary.toStdString();
+}
+
+TEST(SourceProbeControllerTest, FullRangeH264ReportsPlannedConversion) {
+  ProgressiveFrameSourceProfile profile = MakeGoodPalMkvProfile();
+  profile.container = "mov,mp4,m4a,3gp,3g2,mj2";
+  profile.codec = "h264";
+  profile.pixel_format = "yuv420p";
+  profile.color_range = "pc";
+  profile.color_space = "bt709";
+  const QString summary =
+      FormatColourConversionSummary(profile, Standard::kPal);
+  EXPECT_TRUE(summary.contains(QStringLiteral("full range -> studio swing")));
+  EXPECT_TRUE(summary.contains(QStringLiteral("BT.709 matrix -> BT.601")));
+  EXPECT_TRUE(summary.contains(QStringLiteral("yuv420p -> yuv422p10le")));
+}
+
+TEST(SourceProbeControllerTest, StillHasNoColourConversionLine) {
+  ProgressiveFrameSourceProfile profile;
+  profile.container = "exr";
+  EXPECT_TRUE(FormatColourConversionSummary(profile, Standard::kPal).isEmpty());
+}
+
+TEST(SourceProbeControllerTest, ReportDetailListsSummaryConversionAndFindings) {
+  SourceProbeReport report;
+  report.probe_ok = true;
+  report.profile = MakeGoodPalMkvProfile();
+  report.colour_conversion = QStringLiteral("Colour conversion: x");
+  report.profile_warnings = {QStringLiteral("warning one")};
+  report.profile_issues = {QStringLiteral("error one")};
+
+  const QStringList lines =
+      FormatProbeReportDetail(report).split(QLatin1Char('\n'));
+  ASSERT_EQ(lines.size(), 4);
+  EXPECT_TRUE(lines[0].contains(QStringLiteral("720×576")));
+  EXPECT_EQ(lines[1], QStringLiteral("Colour conversion: x"));
+  EXPECT_EQ(lines[2], QStringLiteral("warning one"));
+  EXPECT_EQ(lines[3], QStringLiteral("error one"));
+}
+
+TEST(SourceProbeControllerTest, PublishedReportCarriesConversionAndWarnings) {
+  SourceProbeController controller(
+      [](const Section&, ProgressiveFrameSourceProfile* profile, std::string*) {
+        *profile = MakeGoodPalMkvProfile();
+        profile->field_order = "bt";
+        profile->color_range = "pc";
+        return true;
+      });
+  controller.SetDebounceInterval(0);
+  controller.RequestProbe(MakeMkvSection("clip.mkv"), Standard::kPal);
+
+  ASSERT_TRUE(PumpUntil([&] { return controller.has_report(); }, 5000));
+  EXPECT_TRUE(controller.report().profile_ok());
+  EXPECT_EQ(controller.report().profile_warnings.size(), 1);
+  EXPECT_TRUE(controller.report().colour_conversion.contains(
+      QStringLiteral("full range")));
 }
 
 TEST(SourceProbeControllerTest, SummaryListsResolvedProfile) {

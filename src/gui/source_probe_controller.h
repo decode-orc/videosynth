@@ -34,6 +34,12 @@ struct SourceProbeReport {
   // ProjectValidator findings for the probed profile against the requested
   // standard; empty means the source passes the HLD §8.1 profile rules.
   QStringList profile_issues;
+  // ProjectValidator warnings for the probed profile (field order, sample
+  // aspect); they do not make the profile incompatible.
+  QStringList profile_warnings;
+  // Planned colour normalisation (see FormatColourConversionSummary); empty
+  // for stills.
+  QString colour_conversion;
 
   bool profile_ok() const { return probe_ok && profile_issues.isEmpty(); }
 };
@@ -47,11 +53,35 @@ struct SourceProbeReport {
 QStringList EvaluateSourceProfile(const Section& section, Standard standard,
                                   const ProgressiveFrameSourceProfile& profile);
 
+// As EvaluateSourceProfile, returning the validator's errors and warnings.
+struct SourceProfileFindings {
+  QStringList errors;
+  QStringList warnings;
+};
+SourceProfileFindings EvaluateSourceProfileFindings(
+    const Section& section, Standard standard,
+    const ProgressiveFrameSourceProfile& profile);
+
+// Describes the colour normalisation the decoder will apply to a video source
+// (PlanSourceColourConversion), e.g. "Colour conversion: full range -> studio
+// swing". Returns an empty string for EXR stills.
+//
+// Thread-safety: thread-safe (pure function).
+QString FormatColourConversionSummary(
+    const ProgressiveFrameSourceProfile& profile, Standard standard);
+
 // One-line human-readable profile summary for the section editor.
 //
 // Thread-safety: thread-safe (pure function).
 QString FormatSourceProfileSummary(
     const ProgressiveFrameSourceProfile& profile);
+
+// Multi-line detail text for the section editor's Source Profile box: the
+// profile summary, the planned colour conversion, then every validator
+// warning and error, one per line.
+//
+// Thread-safety: thread-safe (pure function).
+QString FormatProbeReportDetail(const SourceProbeReport& report);
 
 // Probes a section's source file off the GUI thread with debouncing and
 // latest-wins coalescing, mirroring ValidationController: RequestProbe

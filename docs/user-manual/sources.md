@@ -2,7 +2,7 @@
 
 Every section draws its picture content from one **progressive source** file. videosynth converts it to an interlaced signal on the way through — the source is progressive, the output is interlaced, and the two-field weave is the generator's job, not yours.
 
-Source ingestion is deliberately strict. There is no scaling, no cropping, no frame-rate conversion and no format guessing: a file either matches a supported profile exactly or it is rejected at validation. This is what makes the output predictable — nothing is silently resampled behind your back.
+Source ingestion is strict about geometry and timing and forgiving about colour coding. There is no scaling, no cropping and no frame-rate conversion: a source must already have the standard's raster and frame rate, or it is rejected at validation. Colour coding — range, matrix, chroma format, bit depth — is normalised to BT.601 studio swing on the way in, and validation tells you which conversions it will apply.
 
 ## Supported profiles
 
@@ -17,34 +17,52 @@ A single-frame OpenEXR image, used when a section should hold one picture for it
 | Type | `FLOAT` (32-bit) |
 | Compression | None |
 | Windows | Data and display windows must cover the full raster |
-| Raster | 720×576 (PAL) or 720×486 (NTSC/PAL-M) |
-| Frame rate metadata | `25/1` (PAL) or `30000/1001` (NTSC/PAL-M) |
+| Raster | 720×576 (PAL/SECAM) or 720×486 (NTSC/PAL-M) |
+| Frame rate metadata | `25/1` (PAL/SECAM) or `30000/1001` (NTSC/PAL-M) |
 | Pixel aspect metadata | Must match the standard |
 
-### MKV video clip
+RGB `0.0` maps to studio black (Y′ 64, Cb/Cr 512) and `1.0` to studio white (Y′ 940).
 
-A Matroska clip, used when a section should show moving content.
+### Video clip (MKV or MP4)
+
+A Matroska (`.mkv`) or MP4 (`.mp4`) file, used when a section should show moving content. Any video codec FFmpeg can decode is accepted — FFV1, H.264, HEVC, ProRes, MPEG-2 and so on.
 
 | Requirement | Value |
 |-------------|-------|
-| Container | Matroska |
-| Video codec | FFV1 |
-| Pixel format | `yuv422p10le` |
-| Raster and rate | 720×576 @ 25 (PAL) or 720×486 @ 30000/1001 (NTSC/PAL-M) |
-| Metadata | Standard-matching SD field order and colour metadata |
+| Container | Matroska for `.mkv`, MP4 for `.mp4` (the extension must match the content) |
+| Video stream | The first video stream is used |
+| Raster | 720×576 (PAL/SECAM) or 720×486 (NTSC/PAL-M) |
+| Frame rate | Exactly 25 (PAL/SECAM) or 30000/1001 (NTSC/PAL-M), constant |
+| Crop metadata | Must not be present |
+
+Everything else is either converted or reported:
+
+| Property | Handling |
+|----------|----------|
+| Colour range | Full range (`pc`/`jpeg`, or a `yuvj*` pixel format) is scaled to studio swing. `tv` or untagged is taken as studio swing already. |
+| Colour matrix | BT.709, FCC, SMPTE 240M and BT.2020 are converted to BT.601. `smpte170m`, `bt470bg` or untagged is taken as BT.601. |
+| RGB-coded video | Converted to BT.601 studio-swing YCbCr. |
+| Pixel format and bit depth | Any format (4:2:0, 4:4:4, 8–16 bit) is converted to 10-bit 4:2:2. |
+| Colour primaries, transfer | Used as they are — not converted. |
+| Field order | A tag opposite to the output's dominance (PAL/SECAM top field first, NTSC/PAL-M bottom field first) is a **warning**: interlaced motion may play out of order. |
+| Sample aspect ratio | One that is not the standard's BT.601 ratio is a **warning**: the picture is used unscaled. |
+
+A source already coded as `yuv422p10le`, studio range, BT.601 matrix — like the bundled clips — passes through unconverted and bit-exact. Conversions happen inside FFmpeg (`scale` filter, bit-exact rounding); a full-range source is range-converted at its own bit depth before widening, so 8-bit 0 and 255 land exactly on 64 and 940.
+
+Video is decoded as a stream, never held in memory whole, so clips of any length can be used. See [Memory use](#memory-use).
 
 ### BT.601 content compliance
 
-Both profiles additionally require the *content* to be BT.601-consistent, not merely the metadata: the sampling model, active-window placement and horizontal padding must match what the profile expects.
+The bundled assets are additionally BT.601-consistent in their *content*, not merely their metadata: the sampling model, active-window placement and horizontal padding follow the standard. Your own material does not have to, but it will look as intended only if it does.
 
 | Standard | Raster | Sample aspect ratio | Horizontal padding |
 |----------|--------|---------------------|--------------------|
-| PAL | 720×576 | 128:117 | 8–704–8 |
+| PAL / SECAM | 720×576 | 128:117 | 8–704–8 |
 | NTSC / PAL-M | 720×486 | 108:119 | 8–704–8 |
 
 Source data is converted to 10-bit 4:4:4 YCbCr BT.601 studio swing at ingestion, and studio-domain sub-black and over-white excursions are preserved where the source carries them.
 
-The full requirements are documented in the asset repository, in `videosynth-assets/docs/mkv-bt601-compliance-requirements.md` and `exr-bt601-compliance-requirements.md`.
+The full requirements for the bundled assets are documented in the asset repository, in `videosynth-assets/docs/mkv-bt601-compliance-requirements.md` and `exr-bt601-compliance-requirements.md`.
 
 ## Bundled assets
 
@@ -60,6 +78,7 @@ The layout is `{bundled}/<type>/<raster>/<file>`, where `<type>` is `exr` or `mk
 
 | Asset | Content |
 |-------|---------|
+| `BLACK.exr` | Full-frame black at studio black level (Y′ 64, Cb/Cr 512) — blanking level in PAL, setup level in NTSC |
 | `100_BARS.exr` | 100 % colour bars |
 | `75_BARS.exr` | 75 % colour bars |
 | `75_BARS_RED.exr` | 75 % bars with 100 % red |
@@ -94,7 +113,7 @@ Three section fields control which frames a section takes and how many it emits:
 | `duration_frames` | How many output frames the section produces — a positive integer, or `"all"` |
 | `duration_repeat` | With `duration_frames: "all"`, how many times to replay the whole source (default `1`) |
 
-**A fixed count** takes exactly that many output frames. For a still, the same picture is emitted for all of them. For a clip shorter than the count, the source loops.
+**A fixed count** takes exactly that many output frames. For a still, the same picture is emitted for all of them. For a clip, the count must not run past the end of the source (counting from `start_frame`): looping a clip that is shorter than a fixed count is not implemented yet, and generation stops with `Requested frame index exceeds progressive video source length`. To replay a clip, use `"all"` with `duration_repeat`.
 
 ```yaml
 - name: TenSecondsOfBars
@@ -103,7 +122,7 @@ Three section fields control which frames a section takes and how many it emits:
   duration_frames: 250          # 10 s at 25 fps
 ```
 
-**`"all"`** uses the source's own length, discovered by probing the file.
+**`"all"`** uses the source's own length, discovered by probing the file. Combining `"all"` with a `start_frame` above `0` is not supported yet: the section would run past the end of the source, and generation stops with the error above.
 
 ```yaml
 - name: WholeClipTwice
@@ -117,12 +136,36 @@ Three section fields control which frames a section takes and how many it emits:
 
 ## Source probing
 
-Validation probes each source file: it opens it, checks it against the profile rules and reads its frame count. A source that does not exist, or does not match a profile, is a validation error naming the file and the reason.
+Validation probes each source file: it opens it, checks it against the profile rules and reads its frame count. A source that does not exist, or does not match a profile, is a validation error naming the reason. For a video, the probe also reads the average frame rate (to detect variable-rate files), the start times and the audio streams. The frame count comes from the container (`nb_frames` in MP4, the duration in Matroska), so probing never decodes the clip.
 
-In the GUI this runs in the background whenever you change a section's source, and the **Source Profile** box in the section editor reports the result — *Source profile OK*, *Source profile incompatible*, or *Probing source…* while it works. The frame count it discovers is what feeds the `duration_frames: "all"` totals shown beside the duration field.
+The colour conversions a video will receive are logged at `info` level during validation, for example:
+
+```text
+Progressive section 'Capture': colour conversion applied: full range -> studio swing, BT.709 matrix -> BT.601, yuv420p -> yuv422p10le.
+```
+
+In the GUI the probe runs in the background whenever you change a section's source, and the **Source Profile** box in the section editor reports the result — *Source profile OK*, *Source profile incompatible*, or *Probing source…* while it works — with the codec, pixel format, frame count, the planned colour conversion and any warnings. The frame count it discovers is what feeds the `duration_frames: "all"` totals shown beside the duration field.
+
+## Memory use
+
+Video is decoded through one FFmpeg process per decode position, reading forward frame by frame into a bounded window of recently decoded frames. The window holds `max(32, 2 × CPU threads + 16)` frames per source (about 2.4 MiB each for a 625-line raster) and up to three sources are cached at once — the current section, the previous one and the next one, which is decoded ahead in the background. Peak memory therefore depends on the thread count, not on the clip length.
 
 ## Converting your own material
 
-The repository ships `scripts/convert_progressive_raw_to_exr.py` for turning raw `yuv422p10le` stills into conforming OpenEXR fixtures, with `scripts/run_stage1_raw_to_exr_conversion.sh` to run it in an ad-hoc Nix shell.
+A clip needs only the right raster and frame rate; FFmpeg can produce both. For example, to fit a 4:3 capture to the PAL raster with BT.601 padding:
 
-For video, the essential FFmpeg requirements are FFV1 in Matroska at `yuv422p10le`, at the exact raster and frame rate for the target standard, with correct SD colour and field-order metadata. Anything else will be rejected — which is the point.
+```bash
+ffmpeg -i capture.mov -vf "scale=704:576,pad=720:576:8:0,setsar=128/117,fps=25" \
+  -c:v ffv1 -c:a flac capture_pal.mkv
+```
+
+and for NTSC/PAL-M:
+
+```bash
+ffmpeg -i capture.mov -vf "scale=704:486,pad=720:486:8:0,setsar=108/119,fps=30000/1001" \
+  -c:v ffv1 -c:a flac capture_ntsc.mkv
+```
+
+`fps` drops or repeats frames to reach the target rate; for interlaced material, deinterlace first. Any codec works; a lossless one (FFV1) avoids a second generation of compression artefacts.
+
+For stills, the repository ships `scripts/convert_progressive_raw_to_exr.py` for turning raw `yuv422p10le` stills into OpenEXR, with `scripts/run_stage1_raw_to_exr_conversion.sh` to run it in an ad-hoc Nix shell. Its output uses ZIP compression, which the EXR profile rejects, so re-encode the result without compression before use. `videosynth-assets/scripts/generate_black_exr.sh` shows the full recipe (FFmpeg `-c:v exr -compression none -format float -gamma 1`, then `exrstdattr` for the frame-rate and pixel-aspect metadata).

@@ -48,10 +48,10 @@ Must be `progressive`. This is the only implemented section type: a progressive 
 
 The picture content. Must resolve to an existing file that matches a supported progressive profile:
 
-- **EXR** — single-frame scanline OpenEXR, `R/G/B` `FLOAT`, uncompressed, full-raster windows, standard-matching frame-rate and pixel-aspect metadata.
-- **MKV** — Matroska with FFV1 video, `yuv422p10le`, standard-matching raster, frame rate and SD colour/field metadata.
+- **EXR** (`.exr`) — single-frame scanline OpenEXR, `R/G/B` `FLOAT`, uncompressed, full-raster windows, standard-matching frame-rate and pixel-aspect metadata.
+- **Video** (`.mkv` Matroska or `.mp4` MP4) — any FFmpeg-decodable codec at a constant frame rate of 25 (PAL/SECAM) or 30000/1001 (NTSC/PAL-M). Colour range, matrix, chroma format and bit depth are normalised to BT.601 10-bit 4:2:2 studio swing; field order and sample aspect mismatches are warnings.
 
-The raster must be exactly 720×576 (PAL) or 720×486 (NTSC/PAL-M). There is no scaling path; a source of any other size is rejected. See [Picture sources](../user-manual/sources.md).
+The raster must be exactly 720×576 (PAL/SECAM) or 720×486 (NTSC/PAL-M). There is no scaling or frame-rate conversion; a source of any other size or rate is rejected. See [Picture sources](../user-manual/sources.md).
 
 Use `{bundled}/…` for shipped assets and `{project}/…` for files beside the project. A bare relative path resolves against the working directory in the CLI but against the project directory in the GUI, so it will not behave the same in both.
 
@@ -59,7 +59,7 @@ Use `{bundled}/…` for shipped assets and `{project}/…` for files beside the 
 
 How many output frames the section produces.
 
-- **A positive integer** — exactly that many. A still is repeated; a clip shorter than the count loops.
+- **A positive integer** — exactly that many. A still is repeated. A clip must hold at least `start_frame` + the count frames; looping a shorter clip is not implemented yet, and generation fails when it runs out.
 - **`"all"`** — the source's own frame count, discovered by probing.
 
 ## `duration_repeat`
@@ -94,7 +94,7 @@ Violations are errors, not warnings: out-of-order sections would break monotonic
 
 ## `start_frame`
 
-The first source frame to use, 0-based. Useful for taking a passage from the middle of a clip.
+The first source frame to use, 0-based. Useful for taking a passage from the middle of a clip with a fixed `duration_frames`. Combining it with `duration_frames: "all"` is not supported yet: the section would run past the end of the source and generation fails.
 
 ## Section sub-blocks
 
@@ -113,7 +113,7 @@ All are optional, and only blocks that are explicitly set are written back out b
 ## Validation summary
 
 - `type` must be `progressive`.
-- `source` must exist and match a supported profile, at the standard's raster and frame rate.
+- `source` must exist and match a supported profile, at the standard's raster and constant frame rate; a video's container must match its extension and carry no crop metadata.
 - `duration_frames` must be a positive integer or `"all"`.
 - The disc-structure ordering rules above.
 - CAV lead-in and lead-out minimum durations.

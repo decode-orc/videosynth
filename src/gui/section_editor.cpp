@@ -172,7 +172,7 @@ QWidget* SectionEditor::BuildGeneralGroup() {
   builtin_type_combo_ = new QComboBox(builtin_page);
   builtin_type_combo_->setObjectName(QStringLiteral("builtinTypeCombo"));
   builtin_type_combo_->addItem(tr("Still image (EXR)"), QStringLiteral("exr"));
-  builtin_type_combo_->addItem(tr("Video (MKV)"), QStringLiteral("mkv"));
+  builtin_type_combo_->addItem(tr("Video"), QStringLiteral("mkv"));
   builtin_file_combo_ = new QComboBox(builtin_page);
   builtin_file_combo_->setObjectName(QStringLiteral("builtinFileCombo"));
   builtin_row->addWidget(builtin_type_combo_);
@@ -966,14 +966,11 @@ void SectionEditor::UpdateProbeDisplay() {
   if (!report.probe_ok) {
     probe_status_label_->setText(tr("Probe failed"));
     probe_detail_label_->setText(report.probe_error);
-  } else if (report.profile_issues.isEmpty()) {
-    probe_status_label_->setText(tr("Source profile OK"));
-    probe_detail_label_->setText(FormatSourceProfileSummary(report.profile));
   } else {
-    probe_status_label_->setText(tr("Source profile incompatible"));
-    probe_detail_label_->setText(
-        FormatSourceProfileSummary(report.profile) + QStringLiteral("\n") +
-        report.profile_issues.join(QStringLiteral("\n")));
+    probe_status_label_->setText(report.profile_issues.isEmpty()
+                                     ? tr("Source profile OK")
+                                     : tr("Source profile incompatible"));
+    probe_detail_label_->setText(FormatProbeReportDetail(report));
   }
   // The probed frame count resolves "all source frames" durations, so the
   // derived displays refresh on every report regardless of the verdict.
@@ -1100,7 +1097,8 @@ void SectionEditor::OnBrowseSource() {
   }
   const QString path = QFileDialog::getOpenFileName(
       this, tr("Section Source"), start,
-      tr("Progressive sources (*.mkv *.exr);;All files (*)"));
+      tr("Progressive sources (*.mkv *.mp4 *.exr *.MKV *.MP4 *.EXR);;All "
+         "files (*)"));
   if (path.isEmpty()) {
     return;
   }

@@ -53,7 +53,7 @@
 - **Time-based signal generation** for PAL and NTSC, closely following analogue standards.
 - Support for multiple sample rates: **4fsc**, **20MSPS**, **40MSPS**, or custom.
 - **Frame-based content** from:
-  - Progressive sources from constrained, validated file profiles (MKV/EXR).
+  - Progressive sources: EXR stills and MKV/MP4 video, validated for raster and frame rate and colour-normalised to BT.601 studio swing.
 - **Line-based injections** for VBI content:
   - **VITS** (Vertical Interval Test Signals).
   - **Laserdisc biphase encoding** (IEC 60856/60857).
@@ -340,13 +340,22 @@ SECAM is selected with `cvbs_presets.video_standard_preset: SECAM` and follows [
 - No SECAM LaserVision format exists, so laserdisc line injections, `disc_type`, laserdisc VITS placement, the pilot burst and EFM audio are validation errors for SECAM.
 - Known gaps: VITS use the 625-line PAL catalogue and keep their PAL-modulated chroma packets (validator warning), and the optional SECAM luminance intermodulation correction (BT.470-6 Table 2 note 6) is not modelled.
 
-**Progressive sources** are converted during ingestion by `progressive_source`, but only when they match one of the supported source profiles defined in [Section 8.1](#81-frame-based-sections). Inputs that do not match a supported profile are invalid.
+**Progressive sources** are converted during ingestion by `ProgressiveFrameSource`, but only when they match one of the supported source profiles defined in [Section 8.1](#81-frame-based-sections). Inputs that do not match a supported profile are invalid.
 
-All accepted progressive inputs are normalized to **10-bit 4:4:4 YCbCr BT.601 studio swing** before frame data is passed to the generator. The conversion path uses source metadata (primaries, transfer, matrix, range) when present.
+All accepted progressive inputs are normalized to **10-bit 4:4:4 YCbCr BT.601 studio swing** before frame data is passed to the generator. EXR stills are converted from RGB float with the BT.601 matrix in-process. Video sources are normalised inside the `ffmpeg` decode by a filter chain planned from the probed metadata (`PlanSourceColourConversion`, `src/source_colour_conversion.cpp`):
+
+- `color_range` `pc`/`jpeg` (or a `yuvj*` pixel format) → studio swing; `tv` or untagged is taken as studio swing. The range change runs at the source's own bit depth and is widened to 10 bits in a second `scale` stage, because swscale's combined path maps 8-bit 255 to 937 rather than 940.
+- A known non-BT.601 matrix (`bt709`, `fcc`, `smpte240m`, `bt2020*`) → BT.601; `smpte170m`, `bt470bg` or untagged is taken as BT.601 (the SD convention).
+- RGB pixel formats → BT.601 studio-swing YCbCr.
+- Any other pixel format or bit depth → `yuv422p10le`, then unpacked to 4:4:4 by repeating each colour-difference sample for its co-sited luma pair (ITU-R BT.601-5 Annex 1 Table 2 item 3).
+- Primaries and transfer characteristics are not converted; mismatches are logged at `debug`.
+- A source already at `yuv422p10le`, studio range, BT.601 matrix takes no filter and passes through bit-exact.
+
+Every `scale` stage uses `accurate_rnd+full_chroma_int+bitexact`, so the decoded codes do not depend on the host CPU's SIMD path.
 
 Source-range capability note:
 
-- **MKV and EXR supported profiles** are required to preserve 10-bit studio-domain detail, including below-black and above-white code excursions when present in the source.
+- **Video and EXR supported profiles** are required to preserve 10-bit studio-domain detail, including below-black and above-white code excursions when present in the source.
 
 ---
 
@@ -379,7 +388,7 @@ Per-frame synthesis is split into a **clean frame template** and a set of **per-
 - The PAL/PAL-M burst-blanking meander and V-switch have period 2 frames, which divides 4.
 - The PAL LaserDisc pilot burst is period 1 (17,734,475 pilot cycles = 25 × 709,379 samples).
 
-Hence **P = 4 frames for PAL and PAL-M, and P = 2 frames for NTSC**; a still section contains only P distinct clean frames, and an MKV `duration_repeat` section contains at most P × clip_length. Synthesis reduces `disc_frame_index` to this residue (`sequence_phase`) before deriving any phase, which is exact — every use of the index inside clean synthesis depends only on the residue — so the split does not change output bits.
+Hence **P = 4 frames for PAL and PAL-M, and P = 2 frames for NTSC**; a still section contains only P distinct clean frames, and a video `duration_repeat` section contains at most P × clip_length. Synthesis reduces `disc_frame_index` to this residue (`sequence_phase`) before deriving any phase, which is exact — every use of the index inside clean synthesis depends only on the residue — so the split does not change output bits.
 
 **Cache.** `GenerationStage` shares clean templates between worker threads through a bounded `TemplateCache`:
 
@@ -400,18 +409,49 @@ frame stays valid after its entry is evicted.
 
 The table lock is held only for the lookup; each entry carries its own lock,
 held across that entry's decode. Two requests for the same source therefore
-share one decode, while decoding one source never blocks requests for another.
+share one decoder, while decoding one source never blocks requests for another.
+
+**Streaming video decode.** An EXR entry holds its single image. A video entry
+never holds the whole clip — a 30-minute 625-line clip would need ~100 GiB —
+but a bounded **window** of recently decoded frames fed by sequential
+decoders (`IVideoFrameDecoder`, `src/video_frame_decoder.cpp`):
+
+- `FfmpegVideoFrameDecoder` holds one `ffmpeg … -map 0:v:0 [-vf <plan>]
+  -pix_fmt yuv422p10le -f rawvideo -` pipe open and reads one frame per call.
+  Opening at frame *N* > 0 places an input-side `-ss` half a frame before
+  *N* (offset by the video stream's start relative to the container start);
+  ffmpeg decodes from the preceding keyframe and drops earlier frames, so the
+  seek is frame-exact for intra and long-GOP codecs and robust to the 1 ms
+  Matroska timestamp rounding.
+- Each entry keeps up to two decode cursors. A request inside the window is a
+  hit; one less than a window ahead of a cursor reads forward; anything else
+  (a loop back to the start, a far jump) reopens the least recently used
+  cursor half a window before the request, never before the section's
+  `start_frame`, so workers that reach a section start or a jump out of order
+  are served by the same decoder. Two cursors keep a loop boundary — workers
+  straddling the end of one pass and the start of the next — from reopening on
+  every request.
+- The window evicts the least recently used frame beyond its capacity of
+  `max(32, 2 × hardware threads + 16)` frames: the frame-synthesis pool's
+  in-flight bound (2 × threads) plus margin for the batch path and prefetch.
+  Peak decoded-frame memory is therefore 3 sources × capacity × raster size,
+  independent of clip length (a 3 000-frame clip measured 184 MiB peak RSS
+  with `--threads 1`).
+- `ResolveFrameCount` returns the probed count (`nb_frames`, or container
+  duration × rate) without decoding. A stream that ends before that count is
+  reported as an error naming the frame.
 
 That separation is what makes **prefetching** useful. `BuildFrameSchedule`
 records, for each section, the source the next section will read; when
 synthesis reaches the first frame of a section run, it asks the frame source to
-decode the next section's source on a background thread
-(`ProgressiveFrameSource::PrefetchSection`). A section-start decode — an EXR
-convert, or a whole-clip `ffmpeg` decode — otherwise stalls every worker at the
-boundary. Prefetch failures are ignored: the frame request that follows repeats
-the decode and reports the error, so the prefetch changes only when work
-happens, never what is produced. Hand-built schedules carry no such mapping and
-simply do not prefetch.
+decode the start of the next section's source on a background thread
+(`ProgressiveFrameSource::PrefetchSection`): an EXR convert, or half a window of
+video frames, one frame per entry-lock acquisition so a worker that arrives
+early is served as soon as its frame exists. A section-start decode otherwise
+stalls every worker at the boundary. Prefetch failures are ignored: the frame
+request that follows repeats the decode and reports the error, so the prefetch
+changes only when work happens, never what is produced. Hand-built schedules
+carry no such mapping and simply do not prefetch.
 
 ### **OSD (On-Screen Display) Sub-system**
 
@@ -1190,34 +1230,34 @@ Ingests progressive sources and converts them to interlaced signals, subject to 
 
 ##### **Supported Source Profiles (Normative)**
 
-Container names alone are not sufficient for validation; source files must match one of the following profiles:
+The extension selects the family (`.exr` still, `.mkv`/`.mp4` video, case-insensitive); the probe then checks the file itself:
 
-- **MKV video**: Matroska container with `ffv1` video, `yuv422p10le`, standard-matching raster and frame rate (`720x576@25` PAL or `720x486@30000/1001` NTSC), and standard-matching SD field-order/color metadata.
+- **Video (MKV or MP4)**: a Matroska (`.mkv`) or MP4 (`.mp4`) container — the probed demuxer must match the extension — with at least one video stream (the first is used) in any codec `ffmpeg` decodes. **Hard requirements:** raster `720x576` (PAL/SECAM) or `720x486` (NTSC/PAL-M), `r_frame_rate` 25 or 30000/1001 matching the standard, constant rate (`avg_frame_rate` within 0.2 % of `r_frame_rate`), and no stream crop side data. **Normalised** (see *Source Colour Space Requirement*): colour range, matrix, RGB coding, chroma format and bit depth. **Warnings:** a field-order tag opposite to the output's dominance (625-line `tb`, 525-line `bt` expected; `bt`/`bb` or `tb`/`tt` respectively warn) and a sample aspect ratio outside ±0.002 of 128:117 or 108:119. **Info:** the planned colour conversion is logged during validation. The probe also records the average frame rate, the container and video start times, and each audio stream's index, codec, channel count, sample rate, start time and duration.
 - **EXR still image**: Single-frame OpenEXR scanline input with `R/G/B` channels in `FLOAT` (32-bit), no compression, full-raster data/display windows, standard-matching frame-rate metadata (`25/1` PAL or `30000/1001` NTSC), and matching pixel-aspect metadata.
-- **BT.601 source-content compliance (required)**: accepted MKV and EXR assets must satisfy the source-content constraints documented in [MKV BT.601 Compliance Requirements](../../videosynth-assets/docs/mkv-bt601-compliance-requirements.md) and [EXR BT.601 Compliance Requirements](../../videosynth-assets/docs/exr-bt601-compliance-requirements.md), including sampling model interpretation, active-window placement, and padding expectations for the applicable profile.
+- **BT.601 source-content compliance (bundled assets)**: the bundled MKV and EXR assets satisfy the source-content constraints documented in [MKV BT.601 Compliance Requirements](../../videosynth-assets/docs/mkv-bt601-compliance-requirements.md) and [EXR BT.601 Compliance Requirements](../../videosynth-assets/docs/exr-bt601-compliance-requirements.md), including sampling model interpretation, active-window placement, and padding expectations, enforced by the asset verification scripts rather than at runtime. User material is accepted on the hard requirements above.
 
-Any other codec, chroma format, bit depth, or packing is outside scope and must fail validation.
+The same rules apply to every source regardless of the asset root it resolves through.
 
 ##### **Fields**
 
 
 | **Field**         | **Type**       | **Required** | **Description**                                                                | **Example**          |
 | ----------------- | -------------- | ------------ | ------------------------------------------------------------------------------ | -------------------- |
-| `name`            | string         | Yes          | User-friendly name.                                                            | `"MKV Source"`       |
+| `name`            | string         | Yes          | User-friendly name.                                                            | `"Video Source"`     |
 | `type`            | string         | Yes          | Must be `"progressive"`.                                                       | `"progressive"`      |
 | `source`          | string         | Yes          | Path to the source file. May be a `builtin:` prefixed name, an absolute path, or a path relative to the project YAML. See [File Path Resolution](#file-path-resolution). | `"assets/test.mkv"` |
-| `start_frame`     | integer        | No           | First frame to use (default: `0`).                                             | `0`                  |
-| `duration_frames` | integer/string | No           | Number of frames to extract. Use `"all"` for all frames or a positive integer. | `100` or `"all"`     |
+| `start_frame`     | integer        | No           | First frame to use (default: `0`). Not yet supported with `duration_frames: "all"` (the schedule runs past the source end). | `0`                  |
+| `duration_frames` | integer/string | No           | Number of frames to extract. Use `"all"` for all frames or a positive integer; a video must hold `start_frame` + the count frames (looping a shorter clip is not yet implemented). | `100` or `"all"`     |
 | `duration_repeat` | integer        | No           | Replay count when `duration_frames: "all"` (default `1`). Total frames = source length × repeat. Ignored for fixed integer durations. | `2`                  |
 
 
 ##### **Colour Space and Frame Rate**
 
-- **Colour Space**: Source data is converted into 10-bit 4:4:4 YCbCr BT.601 studio swing at ingestion.
+- **Colour Space**: Source data is converted into 10-bit 4:4:4 YCbCr BT.601 studio swing at ingestion (see *Source Colour Space Requirement*).
 - **Frame Rate**: **Fixed by the output standard** (25 fps for PAL, ~29.97 fps for NTSC). Input sources **must match** this frame rate.
-- **BT.601 content requirement**: BT.601 compliance is a source-content requirement, not only a container/metadata requirement. Source picture data must already be BT.601-consistent for its profile before ingestion.
+- **BT.601 content requirement**: for the bundled assets, BT.601 compliance is a source-content requirement, not only a container/metadata requirement. User sources are shown pixel-for-pixel; content that is not BT.601-consistent (for example square-pixel material) is not rescaled.
 - **10-bit studio-range preservation**:
-  - MKV and EXR supported profiles must preserve studio-domain sub-black and over-white excursions when present.
+  - Video and EXR supported profiles must preserve studio-domain sub-black and over-white excursions when present.
 
 ##### **Accepted Dimensions and Ingestion Behavior**
 
@@ -1950,9 +1990,9 @@ The rule set below remains the intended validation contract for VITC and custom 
     - Frame-based content (`progressive`).
     - Line injections (`line_injections`).
   - For `progressive` sections, `source` must point to a valid file.
-  - **Input source frame rate must match the required output format (including MKV sources)**.
-  - **Progressive source must match a supported source profile (container + codec + pixel format/bit depth as applicable)**.
-  - **Progressive source content must satisfy the BT.601 source-content requirements defined by the referenced asset specifications in Section 8.1 (including active-window placement/padding semantics for the applicable profile).**
+  - **Input source frame rate must match the required output format and be constant (including MKV and MP4 sources)**.
+  - **Progressive source must match a supported source profile (Section 8.1): EXR still rules, or for video a container matching its extension, a video stream and no crop metadata.**
+  - **Video field order opposite to the output dominance, or a non-BT.601 sample aspect ratio, is a warning.**
   - **Progressive source dimensions must be PAL: `720x576`; NTSC: `720x486`**.
   - **Scaling/resizing of progressive sources is not supported**.
   - **Ingestion must preserve the full source raster geometry (`720x576` or `720x486`) with no horizontal crop, no vertical crop, and no sample-rate conversion.**
@@ -2292,7 +2332,7 @@ Three CMake options separate the shipped artefacts from the development gates, s
 `packaging/flatpak/io.github.decode_orc.VideoSynth.yml` builds the Linux desktop package on the `org.kde.Platform` runtime (Qt 6). The GUI is the manifest's `command`; the CLI ships in the same bundle and is reached with `flatpak run --command=videosynth`.
 
 - **Filesystem access**: `--filesystem=host`, plus `/media` and `/run/media`. Generation reads source media and writes multi-gigabyte sample files at user-chosen paths, so the sandbox is given unrestricted read/write access to the user's own filesystem rather than a portal-mediated subset.
-- **Bundled modules**: yaml-cpp, spdlog, Imath and OpenEXR are built into `/app` (the runtime carries neither), as is FFmpeg — Section 8.1's progressive MKV sources shell out to the `ffmpeg` and `ffprobe` programs, which no runtime provides. sqlite3 and zlib come from the runtime.
+- **Bundled modules**: yaml-cpp, spdlog, Imath and OpenEXR are built into `/app` (the runtime carries neither), as is FFmpeg — Section 8.1's progressive video sources shell out to the `ffmpeg` and `ffprobe` programs, which no runtime provides. sqlite3 and zlib come from the runtime.
 - **Asset root**: `VIDEOSYNTH_BUNDLED_ASSET_DIR` is set to `/app/share/videosynth/assets`, so `{bundled}` (Section 9.1) resolves inside the sandbox.
 - **Version metadata**: the build sandbox has no git metadata, so `scripts/prepare-flatpak-manifest.py` substitutes the release version and date into a generated copy of the manifest before the build.
 

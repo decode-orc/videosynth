@@ -2007,8 +2007,9 @@ bool GenerationStage::GenerateFrameBatch(
 
     // At the first frame of a section run, ask the frame source to decode the
     // next section's source in the background. Section-start decodes (EXR
-    // convert, whole-clip MKV decode) otherwise stall every worker at the
-    // boundary; the frame source decodes each source under its own lock, so
+    // convert, ffmpeg start-up and seek for a video) otherwise stall every
+    // worker at the boundary; the frame source decodes each source under its
+    // own lock, so
     // the prefetch overlaps this section's synthesis instead of blocking it.
     if (global_frame_index == 0U ||
         schedule[global_frame_index - 1U].section != section) {

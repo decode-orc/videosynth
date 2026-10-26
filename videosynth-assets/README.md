@@ -23,6 +23,10 @@ This directory contains reference media in EXR and MKV formats, plus verificatio
 - [Run EXR verification (shell)](scripts/run_verify_bt601_exr.sh)
 - [Run MKV verification (shell)](scripts/run_verify_bt601_mkv.sh)
 
+## Generation Scripts
+
+- [Generate BLACK.exr for both rasters (shell)](scripts/generate_black_exr.sh) — writes `assets/exr/<raster>/BLACK.exr` with every pixel `R=G=B=0.0` (BT.601 studio black). Runs in an ad-hoc Nix shell with `ffmpeg` and `openexr`.
+
 ## Quick Start
 
 Use the shell wrappers to validate assets:

@@ -97,10 +97,10 @@ The centre pane is a set of collapsible groups covering everything a section hol
 
 **Section Source** — a two-way choice:
 
-- **Built-in asset** — pick an asset type (still EXR or video MKV) and a file name from a dropdown of the shipped assets. The raster is derived from the project standard and is not a field you set, so changing the standard self-heals the path.
-- **Local file** — a browsed path, stored relative to the project when **Relative to project** is ticked, absolute otherwise.
+- **Built-in asset** — pick an asset type (*Still image (EXR)* or *Video*) and a file name from a dropdown of the shipped assets. The raster is derived from the project standard and is not a field you set, so changing the standard self-heals the path.
+- **Local file** — a browsed `.mkv`, `.mp4` or `.exr` file, stored relative to the project when **Relative to project** is ticked, absolute otherwise.
 
-**Source Profile** — the result of probing the chosen file: whether it matches a supported profile, and its frame count. Probing runs in the background; the editor shows *Probing source…* until it completes.
+**Source Profile** — the result of probing the chosen file: whether it matches a supported profile, its raster, rate, codec, pixel format and frame count, the colour conversion a video will receive (or that it is used unconverted), and any warnings such as an opposite field order. Probing runs in the background; the editor shows *Probing source…* until it completes.
 
 **Line injections** — the laserdisc code checklist for this section. See [Laserdisc discs](laserdisc.md).
 

@@ -37,6 +37,40 @@ Project MakeValidProject() {
 
 std::string MakeSourcePath(const std::string& file_name) { return file_name; }
 
+// A profile matching the bundled BT.601 FFV1 clips for the given standard.
+ProgressiveFrameSourceProfile MakeConformantVideoProfile(Standard standard) {
+  const bool is_625 = Is625LineStandard(standard);
+  ProgressiveFrameSourceProfile profile;
+  profile.container = "matroska,webm";
+  profile.codec = "ffv1";
+  profile.pixel_format = "yuv422p10le";
+  profile.field_order = is_625 ? "tb" : "bt";
+  profile.color_space = "smpte170m";
+  profile.color_primaries = is_625 ? "bt470bg" : "smpte170m";
+  profile.color_transfer = "bt709";
+  profile.color_range = "tv";
+  profile.bit_depth = 10;
+  profile.width = 720;
+  profile.height = is_625 ? 576 : 486;
+  profile.sample_aspect_ratio = is_625 ? (128.0 / 117.0) : (108.0 / 119.0);
+  profile.frame_rate_hz = is_625 ? 25.0 : (30000.0 / 1001.0);
+  profile.average_frame_rate_hz = profile.frame_rate_hz;
+  profile.frame_count = 120;
+  return profile;
+}
+
+class RecordingLogger final : public ILogger {
+ public:
+  void Info(const std::string& message) override { info.push_back(message); }
+  void Warning(const std::string&) override {}
+  void Error(const std::string&) override {}
+  void Debug(const std::string& message) override { debug.push_back(message); }
+  void Trace(const std::string&) override {}
+
+  std::vector<std::string> info;
+  std::vector<std::string> debug;
+};
+
 class MockProgressiveFrameSourceProbe final
     : public IProgressiveFrameSourceProbe {
  public:
@@ -852,7 +886,7 @@ TEST(ProjectValidatorTest, AcceptsProgressiveMkvWithSupportedFfv1Profile) {
 }
 
 TEST(ProjectValidatorTest,
-     RejectsProgressiveMkvWithMismatchedSampleAspectMetadata) {
+     WarnsButAcceptsProgressiveMkvWithMismatchedSampleAspectMetadata) {
   Project project = MakeValidProject();
   project.cvbs_presets.video_standard_preset = Standard::kNtsc;
   project.sections[0].source = MakeSourcePath("test.mkv");
@@ -860,27 +894,16 @@ TEST(ProjectValidatorTest,
   project.sections[0].duration_frames = 0;
 
   MockProgressiveFrameSourceProbe probe;
-  probe.profile.container = "matroska,webm";
-  probe.profile.codec = "ffv1";
-  probe.profile.pixel_format = "yuv422p10le";
-  probe.profile.field_order = "bt";
-  probe.profile.color_space = "smpte170m";
-  probe.profile.color_primaries = "smpte170m";
-  probe.profile.color_transfer = "bt709";
-  probe.profile.color_range = "tv";
-  probe.profile.bit_depth = 10;
-  probe.profile.width = 720;
-  probe.profile.height = 486;
+  probe.profile = MakeConformantVideoProfile(Standard::kNtsc);
   probe.profile.sample_aspect_ratio = 1.0;
-  probe.profile.frame_rate_hz = 30000.0 / 1001.0;
-  probe.profile.frame_count = 90;
 
   ProjectValidator validator(&probe);
   const ValidationResult result = validator.Validate(project);
 
-  EXPECT_FALSE(result.is_valid);
-  ASSERT_FALSE(result.errors.empty());
-  EXPECT_NE(result.errors[0].find("sample-aspect"), std::string::npos);
+  EXPECT_TRUE(result.is_valid);
+  EXPECT_TRUE(result.errors.empty());
+  ASSERT_EQ(result.warnings.size(), 1U);
+  EXPECT_NE(result.warnings[0].find("sample aspect ratio"), std::string::npos);
 }
 
 TEST(ProjectValidatorTest, RejectsProgressiveMkvWithStreamCropMetadata) {
@@ -915,7 +938,7 @@ TEST(ProjectValidatorTest, RejectsProgressiveMkvWithStreamCropMetadata) {
   EXPECT_NE(result.errors[0].find("crop metadata"), std::string::npos);
 }
 
-TEST(ProjectValidatorTest, RejectsProgressiveMkvWithUnsupportedCodecProfile) {
+TEST(ProjectValidatorTest, AcceptsProgressiveMkvWithAnyDecodableCodecProfile) {
   Project project = MakeValidProject();
   project.cvbs_presets.video_standard_preset = Standard::kNtsc;
   project.sections[0].source = MakeSourcePath("test.mkv");
@@ -923,25 +946,181 @@ TEST(ProjectValidatorTest, RejectsProgressiveMkvWithUnsupportedCodecProfile) {
   project.sections[0].duration_frames = 0;
 
   MockProgressiveFrameSourceProbe probe;
-  probe.profile.container = "matroska,webm";
+  probe.profile = MakeConformantVideoProfile(Standard::kNtsc);
   probe.profile.codec = "h264";
   probe.profile.pixel_format = "yuv420p";
-  probe.profile.field_order = "bt";
-  probe.profile.color_space = "smpte170m";
-  probe.profile.color_primaries = "smpte170m";
-  probe.profile.color_transfer = "bt709";
-  probe.profile.color_range = "tv";
   probe.profile.bit_depth = 8;
-  probe.profile.width = 720;
-  probe.profile.height = 486;
-  probe.profile.frame_rate_hz = 30000.0 / 1001.0;
-  probe.profile.frame_count = 90;
+
+  ProjectValidator validator(&probe);
+  const ValidationResult result = validator.Validate(project);
+
+  EXPECT_TRUE(result.is_valid);
+  EXPECT_TRUE(result.errors.empty());
+  EXPECT_TRUE(result.warnings.empty());
+}
+
+TEST(ProjectValidatorTest, AcceptsProgressiveMp4WithMp4Container) {
+  Project project = MakeValidProject();
+  project.sections[0].source = MakeSourcePath("capture.MP4");
+  project.sections[0].duration_frames_all = true;
+  project.sections[0].duration_frames = 0;
+
+  MockProgressiveFrameSourceProbe probe;
+  probe.profile = MakeConformantVideoProfile(Standard::kPal);
+  probe.profile.container = "mov,mp4,m4a,3gp,3g2,mj2";
+  probe.profile.codec = "h264";
+  probe.profile.pixel_format = "yuv420p";
+
+  ProjectValidator validator(&probe);
+  const ValidationResult result = validator.Validate(project);
+
+  EXPECT_TRUE(result.is_valid);
+  EXPECT_TRUE(result.errors.empty());
+}
+
+TEST(ProjectValidatorTest, RejectsVideoWhoseContainerDoesNotMatchExtension) {
+  Project project = MakeValidProject();
+  project.sections[0].source = MakeSourcePath("capture.mp4");
+  project.sections[0].duration_frames_all = true;
+  project.sections[0].duration_frames = 0;
+
+  MockProgressiveFrameSourceProbe probe;
+  probe.profile = MakeConformantVideoProfile(Standard::kPal);
+  probe.profile.container = "matroska,webm";
 
   ProjectValidator validator(&probe);
   const ValidationResult result = validator.Validate(project);
 
   EXPECT_FALSE(result.is_valid);
   ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors[0].find("does not match its file extension"),
+            std::string::npos);
+}
+
+TEST(ProjectValidatorTest, RejectsVariableFrameRateVideo) {
+  Project project = MakeValidProject();
+  project.sections[0].source = MakeSourcePath("capture.mkv");
+  project.sections[0].duration_frames_all = true;
+  project.sections[0].duration_frames = 0;
+
+  MockProgressiveFrameSourceProbe probe;
+  probe.profile = MakeConformantVideoProfile(Standard::kPal);
+  probe.profile.average_frame_rate_hz = 23.1;
+
+  ProjectValidator validator(&probe);
+  const ValidationResult result = validator.Validate(project);
+
+  EXPECT_FALSE(result.is_valid);
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors[0].find("variable frame rate"), std::string::npos);
+}
+
+TEST(ProjectValidatorTest, AcceptsAverageRateWithinTimestampRounding) {
+  Project project = MakeValidProject();
+  project.sections[0].source = MakeSourcePath("capture.mkv");
+  project.sections[0].duration_frames_all = true;
+  project.sections[0].duration_frames = 0;
+
+  MockProgressiveFrameSourceProbe probe;
+  probe.profile = MakeConformantVideoProfile(Standard::kPal);
+  probe.profile.average_frame_rate_hz = 25.01;
+
+  ProjectValidator validator(&probe);
+  EXPECT_TRUE(validator.Validate(project).is_valid);
+}
+
+TEST(ProjectValidatorTest, WarnsWhenFieldOrderOpposesStandardDominance) {
+  struct Case {
+    Standard standard;
+    const char* field_order;
+  };
+  for (const Case& c :
+       {Case{Standard::kPal, "bt"}, Case{Standard::kPal, "bb"},
+        Case{Standard::kNtsc, "tb"}, Case{Standard::kNtsc, "tt"}}) {
+    Project project = MakeValidProject();
+    project.cvbs_presets.video_standard_preset = c.standard;
+    project.sections[0].source = MakeSourcePath("capture.mkv");
+    project.sections[0].duration_frames_all = true;
+    project.sections[0].duration_frames = 0;
+
+    MockProgressiveFrameSourceProbe probe;
+    probe.profile = MakeConformantVideoProfile(c.standard);
+    probe.profile.field_order = c.field_order;
+
+    ProjectValidator validator(&probe);
+    const ValidationResult result = validator.Validate(project);
+
+    EXPECT_TRUE(result.is_valid) << c.field_order;
+    ASSERT_EQ(result.warnings.size(), 1U) << c.field_order;
+    EXPECT_NE(result.warnings[0].find("field order"), std::string::npos);
+  }
+}
+
+TEST(ProjectValidatorTest, ProgressiveOrUntaggedFieldOrderDoesNotWarn) {
+  for (const char* field_order : {"progressive", "", "unknown"}) {
+    Project project = MakeValidProject();
+    project.sections[0].source = MakeSourcePath("capture.mkv");
+    project.sections[0].duration_frames_all = true;
+    project.sections[0].duration_frames = 0;
+
+    MockProgressiveFrameSourceProbe probe;
+    probe.profile = MakeConformantVideoProfile(Standard::kPal);
+    probe.profile.field_order = field_order;
+
+    ProjectValidator validator(&probe);
+    const ValidationResult result = validator.Validate(project);
+    EXPECT_TRUE(result.is_valid);
+    EXPECT_TRUE(result.warnings.empty()) << field_order;
+  }
+}
+
+TEST(ProjectValidatorTest, LogsPlannedColourConversionAtInfo) {
+  Project project = MakeValidProject();
+  project.sections[0].source = MakeSourcePath("capture.mp4");
+  project.sections[0].duration_frames_all = true;
+  project.sections[0].duration_frames = 0;
+
+  MockProgressiveFrameSourceProbe probe;
+  probe.profile = MakeConformantVideoProfile(Standard::kPal);
+  probe.profile.container = "mov,mp4,m4a,3gp,3g2,mj2";
+  probe.profile.pixel_format = "yuv420p";
+  probe.profile.color_range = "pc";
+  probe.profile.color_space = "bt709";
+
+  RecordingLogger logger;
+  ProjectValidator validator(&probe, &logger);
+  const ValidationResult result = validator.Validate(project);
+
+  EXPECT_TRUE(result.is_valid);
+  const auto conversion_line = std::find_if(
+      logger.info.begin(), logger.info.end(), [](const std::string& line) {
+        return line.find("colour conversion") != std::string::npos;
+      });
+  ASSERT_NE(conversion_line, logger.info.end());
+  EXPECT_NE(conversion_line->find("full range -> studio swing"),
+            std::string::npos);
+  EXPECT_NE(conversion_line->find("BT.709 matrix -> BT.601"),
+            std::string::npos);
+}
+
+TEST(ProjectValidatorTest, ConformantVideoLogsNoColourConversion) {
+  Project project = MakeValidProject();
+  project.sections[0].source = MakeSourcePath("capture.mkv");
+  project.sections[0].duration_frames_all = true;
+  project.sections[0].duration_frames = 0;
+
+  MockProgressiveFrameSourceProbe probe;
+  probe.profile = MakeConformantVideoProfile(Standard::kPal);
+
+  RecordingLogger logger;
+  ProjectValidator validator(&probe, &logger);
+  const ValidationResult result = validator.Validate(project);
+
+  EXPECT_TRUE(result.is_valid);
+  EXPECT_TRUE(result.warnings.empty());
+  for (const std::string& line : logger.info) {
+    EXPECT_EQ(line.find("colour conversion"), std::string::npos) << line;
+  }
 }
 
 TEST(ProjectValidatorTest, AcceptsProgressiveExrWithSupportedProfile) {
@@ -1002,7 +1181,7 @@ TEST(ProjectValidatorTest,
   ASSERT_FALSE(result.errors.empty());
   EXPECT_EQ(result.errors[0],
             "Unsupported progressive source family. Supported source families "
-            "are EXR and MKV.");
+            "are EXR stills and MKV or MP4 video.");
 }
 
 TEST(ProjectValidatorTest,

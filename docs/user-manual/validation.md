@@ -38,11 +38,15 @@ Unknown keys are rejected outright, at every level, naming the offending key and
 
 ### Sources
 
-- The file must exist after [asset root resolution](../reference/asset-roots.md).
-- It must match a supported profile — container, codec, pixel format and bit depth, not just the file extension.
-- Its raster must be exactly 720×576 (PAL) or 720×486 (NTSC/PAL-M). No scaling path exists.
-- Its frame rate must match the output standard.
-- Its content must satisfy the BT.601 requirements for the profile.
+- The file must exist after [asset root resolution](../reference/asset-roots.md) and be an EXR still (`.exr`) or a video (`.mkv`, `.mp4`).
+- An EXR must match the still profile — single-frame scanline, `R/G/B` `FLOAT`, uncompressed, with standard-matching metadata.
+- A video must have a video stream, and its container must match its extension (Matroska for `.mkv`, MP4 for `.mp4`).
+- Its raster must be exactly 720×576 (PAL/SECAM) or 720×486 (NTSC/PAL-M). No scaling path exists.
+- Its frame rate must match the output standard and be constant — an average rate more than 0.2 % from the base rate is rejected as variable.
+- A video must not carry stream crop metadata.
+- **Warning:** a video field-order tag opposite to the output's dominance (PAL/SECAM top field first, NTSC/PAL-M bottom field first).
+- **Warning:** a video sample aspect ratio other than the standard's BT.601 ratio (128:117 or 108:119); the picture is used unscaled.
+- **Info (log only):** the colour conversions a video will receive, such as `full range -> studio swing` or `BT.709 matrix -> BT.601`. See [Picture sources](sources.md#video-clip-mkv-or-mp4).
 
 ### Sections and disc structure
 

@@ -33,6 +33,7 @@
 #include <sstream>
 #include <string>
 #include <system_error>
+#include <utility>
 
 namespace videosynth {
 namespace {
@@ -278,15 +279,13 @@ bool ProbeExr(const Section& section,
   }
 }
 
-// Runs one ffprobe query and returns its key=value output.
-bool RunFfprobeQuery(const std::string& source, const std::string& entries,
-                     std::map<std::string, std::string>* out_values,
-                     std::string* error) {
+// Runs ffprobe with the given arguments ahead of the source path and returns
+// its standard output.
+bool RunFfprobe(const std::string& source, const std::string& arguments,
+                std::string* out_output, std::string* error) {
   const std::string escaped_source = EscapeForSingleQuotedShell(source);
-  const std::string command = "ffprobe -v error -select_streams v:0 " +
-                              entries +
-                              " -of default=noprint_wrappers=1:nokey=0 '" +
-                              escaped_source + "' 2>/dev/null";
+  const std::string command =
+      "ffprobe -v error " + arguments + " '" + escaped_source + "' 2>/dev/null";
 
   std::array<char, 4096> buffer{};
   std::string output;
@@ -311,7 +310,83 @@ bool RunFfprobeQuery(const std::string& source, const std::string& entries,
     return false;
   }
 
+  *out_output = std::move(output);
+  return true;
+}
+
+// Runs one ffprobe query over the first video stream and returns its
+// key=value output.
+bool RunFfprobeQuery(const std::string& source, const std::string& entries,
+                     std::map<std::string, std::string>* out_values,
+                     std::string* error) {
+  std::string output;
+  if (!RunFfprobe(source,
+                  "-select_streams v:0 " + entries +
+                      " -of default=noprint_wrappers=1:nokey=0",
+                  &output, error)) {
+    return false;
+  }
   ParseFfprobeKeyValueOutput(output, out_values);
+  return true;
+}
+
+double ParseSecondsOrZero(const std::string& value) {
+  if (value.empty() || value == "N/A") {
+    return 0.0;
+  }
+  return std::atof(value.c_str());
+}
+
+// Reads the container start time and the audio stream list. ffprobe's compact
+// writer prints one "section|key=value|..." line per stream and one for the
+// format, so streams with equal keys cannot overwrite one another.
+bool ProbeContainerTimingAndAudio(const std::string& source,
+                                  ProgressiveFrameSourceProfile* out_profile,
+                                  std::string* error) {
+  std::string output;
+  if (!RunFfprobe(source,
+                  "-show_entries format=start_time "
+                  "-show_entries "
+                  "stream=index,codec_type,codec_name,channels,sample_rate,"
+                  "start_time,duration "
+                  "-of compact=p=1:nk=0",
+                  &output, error)) {
+    return false;
+  }
+
+  out_profile->audio_streams.clear();
+  std::istringstream lines(output);
+  std::string line;
+  while (std::getline(lines, line)) {
+    std::istringstream fields(line);
+    std::string section_name;
+    std::getline(fields, section_name, '|');
+    std::map<std::string, std::string> values;
+    std::string field;
+    while (std::getline(fields, field, '|')) {
+      const std::size_t equals_pos = field.find('=');
+      if (equals_pos != std::string::npos && equals_pos > 0) {
+        values[field.substr(0, equals_pos)] = field.substr(equals_pos + 1);
+      }
+    }
+
+    if (section_name == "format") {
+      out_profile->container_start_time_seconds =
+          ParseSecondsOrZero(values["start_time"]);
+      continue;
+    }
+    if (section_name != "stream" || values["codec_type"] != "audio") {
+      continue;
+    }
+    ProgressiveAudioStreamProfile audio;
+    audio.stream_index = ParseIntegerOrZero(values["index"]);
+    audio.codec = Lowercase(values["codec_name"]);
+    audio.channels = ParseIntegerOrZero(values["channels"]);
+    audio.sample_rate_hz = ParseIntegerOrZero(values["sample_rate"]);
+    audio.duration_seconds = ParseSecondsOrZero(values["duration"]);
+    audio.start_time_seconds = ParseSecondsOrZero(values["start_time"]);
+    out_profile->audio_streams.push_back(std::move(audio));
+  }
   return true;
 }
 
@@ -358,6 +433,7 @@ bool ProbeWithFfprobe(const std::string& source,
                        "-show_entries format=format_name,duration "
                        "-show_entries "
                        "stream=codec_name,pix_fmt,width,height,r_frame_rate,"
+                       "avg_frame_rate,start_time,"
                        "nb_frames,bits_per_raw_sample,field_order,color_space,"
                        "color_primaries,color_transfer,color_range,"
                        "sample_aspect_ratio "
@@ -370,6 +446,13 @@ bool ProbeWithFfprobe(const std::string& source,
 
   const std::string format_name = Lowercase(values["format_name"]);
   const std::string codec_name = Lowercase(values["codec_name"]);
+  if (codec_name.empty()) {
+    if (error != nullptr) {
+      *error =
+          "Progressive section validation error: source has no video stream.";
+    }
+    return false;
+  }
   const std::string pix_fmt = Lowercase(values["pix_fmt"]);
   const std::string field_order = Lowercase(values["field_order"]);
   const std::string color_space = Lowercase(values["color_space"]);
@@ -397,7 +480,9 @@ bool ProbeWithFfprobe(const std::string& source,
   const int crop_bottom = ParseIntegerOrZero(values["crop_bottom"]);
 
   int bit_depth = ParseIntegerOrZero(values["bits_per_raw_sample"]);
-  if (bit_depth == 0 && pix_fmt == "yuv420p") {
+  if (bit_depth == 0 &&
+      (pix_fmt == "yuv420p" || pix_fmt == "yuv422p" || pix_fmt == "yuv444p" ||
+       pix_fmt == "yuvj420p" || pix_fmt == "yuvj422p")) {
     bit_depth = 8;
   }
 
@@ -418,8 +503,11 @@ bool ProbeWithFfprobe(const std::string& source,
   out_profile->crop_top = crop_top;
   out_profile->crop_bottom = crop_bottom;
   out_profile->frame_rate_hz = frame_rate;
+  out_profile->average_frame_rate_hz = ParseFrameRate(values["avg_frame_rate"]);
   out_profile->frame_count = frame_count;
-  return true;
+  out_profile->video_start_time_seconds =
+      ParseSecondsOrZero(values["start_time"]);
+  return ProbeContainerTimingAndAudio(source, out_profile, error);
 }
 
 }  // namespace
@@ -460,7 +548,8 @@ bool ProgressiveFrameSourceProbe::Probe(
   bool probed = false;
   if (EndsWithLowercase(source, ".exr")) {
     probed = ProbeExr(section, out_profile, error);
-  } else if (EndsWithLowercase(source, ".mkv")) {
+  } else if (EndsWithLowercase(source, ".mkv") ||
+             EndsWithLowercase(source, ".mp4")) {
     probed = ProbeWithFfprobe(section.source, out_profile, error);
   } else {
     if (error != nullptr) {

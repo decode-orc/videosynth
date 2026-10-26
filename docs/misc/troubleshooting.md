@@ -58,17 +58,53 @@ A warning, not an error. The pilot burst trough reaches −600 mV, which an unsi
 
 Check the path and the [asset root](../reference/asset-roots.md) it uses. The commonest cause is a bare relative path, which resolves against the working directory in the CLI but against the project directory in the GUI. Use `{bundled}/…` for shipped assets and `{project}/…` for files beside the project.
 
-### `Progressive source is not in a supported profile`
+### `Unsupported progressive source family. Supported source families are EXR stills and MKV or MP4 video.`
 
-The file's container, codec, chroma format or bit depth does not match. EXR must be single-frame scanline with `R/G/B` `FLOAT` channels and no compression; MKV must be FFV1 at `yuv422p10le`. The extension alone is never enough.
+The source extension is not `.exr`, `.mkv` or `.mp4`. Remux other containers to Matroska (`ffmpeg -i in.avi -c copy out.mkv`) or re-encode them.
 
-### `Progressive source dimensions are invalid for the selected standard`
+### `Progressive EXR …` (channels, compression, windows, gamma, framesPerSecond, pixelAspectRatio)
 
-PAL requires exactly 720×576, NTSC and PAL-M exactly 720×486. There is no scaling path — resize the source before ingesting it.
+The EXR does not match the still profile: it must be single-frame scanline with `R/G/B` `FLOAT` channels, no compression, full-raster windows, `gamma` 1 and the standard's frame-rate and pixel-aspect metadata. See [Picture sources](../user-manual/sources.md#exr-still-image).
 
-### `Input frame rate must match the output standard's frame rate`
+### `source has no video stream`
 
-25 fps for PAL, 30000/1001 for NTSC and PAL-M. Frame rate conversion is not performed.
+The file has no video stream FFmpeg can see — it may be audio-only, or damaged.
+
+### `source container '…' does not match its file extension`
+
+A `.mkv` file must really be Matroska and a `.mp4` really MP4. Rename the file to match its content, or remux it.
+
+### `source raster must be 720x576 for PAL and 720x486 for NTSC or PAL-M`
+
+PAL and SECAM require exactly 720×576, NTSC and PAL-M exactly 720×486. There is no scaling path — resize the source before ingesting it (see [Converting your own material](../user-manual/sources.md#converting-your-own-material)).
+
+### `source frame rate must match selected video standard`
+
+25 fps for PAL and SECAM, 30000/1001 for NTSC and PAL-M. Frame rate conversion is not performed; convert with FFmpeg's `fps` filter first.
+
+### `source has a variable frame rate; convert it to a constant frame rate first`
+
+The clip's average frame rate differs from its base rate, typical of phone and screen recordings. Re-encode with a fixed rate, for example `-vf fps=25` (PAL) or `-vf fps=30000/1001` (NTSC).
+
+### `source must not include stream crop metadata`
+
+The stream carries crop side data, which would change the visible raster. Re-encode without it.
+
+### `source is tagged field order '…', opposite to the output's … dominance`
+
+A warning. If the clip really is interlaced with that field order, its fields will play in the wrong temporal order. Fix the material (or its tag, if the tag is wrong) with FFmpeg's `fieldorder` or `setfield` filters.
+
+### `source sample aspect ratio differs from BT.601 for this standard`
+
+A warning. The picture is used pixel-for-pixel, so content mastered for a different aspect ratio will look stretched or squeezed.
+
+### `Progressive video source ended at frame N, before the probed frame count of M`
+
+The container declared more frames than could be decoded — usually a truncated or damaged file. Re-mux or re-encode it.
+
+### `Requested frame index exceeds progressive video source length`
+
+A fixed `duration_frames` (counted from `start_frame`) asks for more frames than the clip holds, or `duration_frames: "all"` is combined with a non-zero `start_frame`. Looping a short clip is not implemented yet; use `duration_frames: "all"` with `duration_repeat` to replay a clip.
 
 ## Line injections
 

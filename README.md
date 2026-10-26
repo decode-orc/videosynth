@@ -32,7 +32,7 @@ The project ships two front ends built from the same pipeline:
   the laserdisc pilot burst.
 - **Composite or Y/C output** (`output.signal_type: composite | yc`).
 - **Frame content** from validated progressive source profiles (EXR stills and
-  MKV video).
+  MKV/MP4 video in any FFmpeg-decodable codec, colour-normalised to BT.601).
 - **Line injections** for VBI content: VITS test signals, laserdisc biphase and
   FM codes (IEC 60856/60857), and VITC timecode (SMPTE 12M).
 - **Laserdisc disc simulation**: CAV/CLV picture numbers, chapters, programme

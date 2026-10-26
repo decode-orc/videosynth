@@ -15,6 +15,7 @@
 
 #include "videosynth/progressive_frame_source_probe.h"
 #include "videosynth/project_validator.h"
+#include "videosynth/source_colour_conversion.h"
 
 namespace videosynth::gui {
 
@@ -54,11 +55,11 @@ bool RunFilesystemProbe(const Section& section,
 
 }  // namespace
 
-QStringList EvaluateSourceProfile(
+SourceProfileFindings EvaluateSourceProfileFindings(
     const Section& section, Standard standard,
     const ProgressiveFrameSourceProfile& profile) {
   // Minimal single-section project: only source/profile rules can fire, so
-  // every reported error concerns the probed file.
+  // every reported finding concerns the probed file.
   Project project;
   project.cvbs_presets.video_standard_preset = standard;
   project.output.video_path = "probe.cvbs";
@@ -75,11 +76,38 @@ QStringList EvaluateSourceProfile(
   ProjectValidator validator(&fixed_probe);
   const ValidationResult result = validator.Validate(project);
 
-  QStringList issues;
+  SourceProfileFindings findings;
   for (const std::string& error : result.errors) {
-    issues.append(QString::fromStdString(error));
+    findings.errors.append(QString::fromStdString(error));
   }
-  return issues;
+  for (const std::string& warning : result.warnings) {
+    findings.warnings.append(QString::fromStdString(warning));
+  }
+  return findings;
+}
+
+QStringList EvaluateSourceProfile(
+    const Section& section, Standard standard,
+    const ProgressiveFrameSourceProfile& profile) {
+  return EvaluateSourceProfileFindings(section, standard, profile).errors;
+}
+
+QString FormatColourConversionSummary(
+    const ProgressiveFrameSourceProfile& profile, Standard standard) {
+  if (profile.container == "exr") {
+    return QString();
+  }
+  const SourceColourConversion plan =
+      PlanSourceColourConversion(profile, standard);
+  if (plan.IsPassThrough()) {
+    return QObject::tr("Colour: BT.601 studio swing, used unconverted");
+  }
+  QStringList conversions;
+  for (const std::string& conversion : plan.conversions) {
+    conversions.append(QString::fromStdString(conversion));
+  }
+  return QObject::tr("Colour conversion: %1")
+      .arg(conversions.join(QStringLiteral(", ")));
 }
 
 QString FormatSourceProfileSummary(
@@ -121,6 +149,17 @@ QString FormatSourceProfileSummary(
     parts.append(QStringLiteral("%1 frames").arg(profile.frame_count));
   }
   return parts.join(QStringLiteral(", "));
+}
+
+QString FormatProbeReportDetail(const SourceProbeReport& report) {
+  QStringList lines;
+  lines.append(FormatSourceProfileSummary(report.profile));
+  if (!report.colour_conversion.isEmpty()) {
+    lines.append(report.colour_conversion);
+  }
+  lines.append(report.profile_warnings);
+  lines.append(report.profile_issues);
+  return lines.join(QStringLiteral("\n"));
 }
 
 SourceProbeController::SourceProbeController(ProbeFn probe, QObject* parent)
@@ -167,8 +206,12 @@ void SourceProbeController::StartWorker() {
       report.probe_error = error.empty() ? tr("Source profile probing failed.")
                                          : QString::fromStdString(error);
     } else {
-      report.profile_issues = EvaluateSourceProfile(
+      SourceProfileFindings findings = EvaluateSourceProfileFindings(
           request.section, request.standard, report.profile);
+      report.profile_issues = std::move(findings.errors);
+      report.profile_warnings = std::move(findings.warnings);
+      report.colour_conversion =
+          FormatColourConversionSummary(report.profile, request.standard);
     }
 
     // Marshal back to the owning thread; if the controller is destroyed
