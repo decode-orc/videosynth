@@ -34,7 +34,7 @@ The laserdisc format for the whole project. A disc is entirely one or the other,
 | `CAV` | Picture number — one frame per track |
 | `CLV` | Programme time code plus CLV picture number |
 
-It determines which `code_type` values the validator accepts. Omit it entirely for projects that are not discs.
+It determines which `code_type` values the validator accepts, and setting it turns on the disc VITS rules below (reserved address-code lines, and VIRS on NTSC/PAL-M) whether or not any section carries codes. It is required as soon as any section carries a `laserdisc` injection. Omit it entirely for projects that are not discs. `SECAM` projects cannot set it.
 
 ## `placement`
 
@@ -42,13 +42,13 @@ How strictly the validator constrains each VITS entry's `target_lines`.
 
 | Value | Rule |
 |-------|------|
-| `standard` | Each VITS type must sit on its broadcast recommended line. Any other line is rejected |
-| `laserdisc` | VITS must sit on the laserdisc VBI lines — PAL 19, 20, 332, 333; NTSC/PAL-M 19, 20, 282, 283 |
+| `standard` | Each VITS type must sit on its broadcast recommended line. Any other line is rejected. `virs` has no single recommended line and is not constrained |
+| `laserdisc` | VITS must sit on the laserdisc VBI lines — PAL 19, 20, 332, 333; NTSC/PAL-M 19, 20, 282, 283. Not available for `SECAM` |
 | `custom` | Any valid VBI line, subject to the overlap and reserved-range rules |
 
 `standard` is also assumed when the key is absent, which preserves the behaviour of projects written before it existed.
 
-Under `custom` the validator still rejects overlapping lines, and on a disc carrying biphase codes it still rejects the reserved address-code ranges.
+Under `custom` the validator still rejects overlapping lines, and when `disc_type` is set it still rejects the reserved address-code ranges.
 
 ## `vits[]`
 
@@ -61,16 +61,16 @@ Each entry is a test signal applied to every frame of every section.
 
 Line numbers run across the whole frame, so PAL field 2 lines are 313–625 and NTSC field 2 lines are 263–525. `vits20` on line 20 is a field 1 line; on line 333 it is the field 2 equivalent.
 
-Valid `vits_type` values depend on the video standard; PAL types are rejected in NTSC projects and vice versa.
+Valid `vits_type` values depend on the video standard; PAL types are rejected in NTSC projects and vice versa. `SECAM` projects use the PAL types, with a warning that they are rendered with their PAL definitions.
 
 ### Rules
 
 - Lines must be within the standard's range (1–625 PAL, 1–525 NTSC/PAL-M).
-- Lines must not overlap between entries.
-- Under `standard` placement, each type must be on its recommended line.
+- Every entry needs at least one line, and no line may appear twice, within or between entries.
+- Under `standard` placement, each type must be on its recommended line (`virs` excepted).
 - Under `laserdisc` placement, lines must be from that standard's laserdisc VITS set.
-- When any section carries a `laserdisc` injection, no VITS may target a reserved address-code line (PAL 6–18, 319–331; NTSC/PAL-M 10–18, 273–281).
-- NTSC and PAL-M discs **must** include a `virs` entry (IEC 60857 §9.1.3).
+- When `disc_type` is set, no VITS may target a reserved address-code line (PAL 6–18, 319–331; NTSC/PAL-M 10–18, 273–281).
+- When `disc_type` is set on an NTSC or PAL-M project, a `virs` entry is **required** (IEC 60857 §9.1.3).
 
 ## Why VITS are project-wide
 

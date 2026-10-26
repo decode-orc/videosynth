@@ -446,6 +446,8 @@ AudioParameters AudioChannelPairsEditor::ChannelFromWidgets(
   audio.frequency_hz = widgets.frequency->value();
   audio.amplitude = widgets.amplitude->value();
   if (widgets.ramp_group->isChecked()) {
+    // The ramp replaces the fixed frequency, which is kept for the widgets
+    // but not saved.
     audio.ramp_enabled = true;
     audio.ramp_start_hz = widgets.ramp_start->value();
     audio.ramp_end_hz = widgets.ramp_end->value();
@@ -455,6 +457,8 @@ AudioParameters AudioChannelPairsEditor::ChannelFromWidgets(
     audio.ramp_mode = AudioRampModeFromString(mode);
     audio.ramp_mode_text = mode;
     audio.ramp_period_seconds = widgets.ramp_period->value();
+  } else {
+    audio.frequency_specified = true;
   }
   return audio;
 }

@@ -55,7 +55,12 @@ A project may carry up to 8 pairs (0–7), i.e. up to 16 SMPTE 272M channels. Th
 
 Waveforms are naive rather than band-limited, which is what a test signal wants.
 
-`ramp:` and a fixed `frequency` are mutually exclusive.
+`ramp:` and a fixed `frequency` are mutually exclusive; setting both is a validation error:
+
+```text
+Audio validation error in section 'SweepUp' channel pair 0 left: ramp and
+frequency are mutually exclusive; remove one.
+```
 
 ## `ramp`
 
@@ -83,7 +88,7 @@ Instantaneous frequency drives a phase accumulator, so swept tones stay phase-co
 | `path` | string | Yes | — | A `.wav` or `.flac` file. Resolved through the [asset roots](asset-roots.md) like `source`, e.g. `"{project}/narration.flac"` |
 | `repeat` | bool | No | `false` | Restart the file when it ends |
 
-The file plays from its first sample at the start of each section run (each contiguous run of output frames from one section). When it ends, the rest of the run is silent, or with `repeat: true` the file starts again, as often as needed.
+The file plays from its first sample at the start of each section run (each contiguous run of output frames from one section). When it ends, the rest of the run is silent, or with `repeat: true` the file starts again, as often as needed. Without `repeat`, a file shorter than a section of known length produces a warning.
 
 Mono files play on both channels. Files with more than two channels are rejected. Any sample rate is accepted and resampled to 48 kHz; 16- and 24-bit files convert exactly, and wider samples are rounded to 24 bits.
 
@@ -93,7 +98,7 @@ Mono files play on both channels. Files with more than two channels are rejected
 |-----|------|----------|---------|-------------|
 | `stream` | int | No | `0` | Which audio stream of the video, counted from 0 among its audio streams |
 
-`video_audio: {}` takes the first audio stream. The section `source` must be a video (MKV or MP4), not an EXR still.
+`video_audio: {}` takes the first audio stream. The section `source` must be a video (MKV or MP4), not an EXR still, and a `stream` the video does not have is a validation error.
 
 The sound follows the picture. Each output frame takes the soundtrack samples at the time of the source frame it shows (source frame index ÷ frame rate, measured from the video's first frame). So a section with `start_frame` starts the sound at that frame, a fixed duration that [loops the range](../user-manual/sources.md#choosing-frames-from-the-source) loops the sound with it, and each `duration_repeat` pass replays it. Where the soundtrack starts after the first picture, or ends before the last, those frames are silent.
 

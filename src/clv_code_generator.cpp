@@ -68,7 +68,8 @@ bool ProgrammeTimeCodeGenerator::IsValidTimeCode(int hours, int minutes) {
 
 // static
 int ProgrammeTimeCodeGenerator::FramesPerMinute(Standard standard) {
-  return (standard == Standard::kNtsc) ? 1800 : 1500;
+  // System M (NTSC and PAL-M) runs at 30 frame/s nominal; 625-line at 25.
+  return Is625LineStandard(standard) ? 1500 : 1800;
 }
 
 // ---------------------------------------------------------------------------
@@ -88,7 +89,7 @@ uint32_t ClvPictureNumberGenerator::CurrentCode() const {
 void ClvPictureNumberGenerator::Advance() {
   ++total_frames_;
 
-  if (standard_ == Standard::kNtsc && IsNtscCorrectionPoint(total_frames_)) {
+  if (!Is625LineStandard(standard_) && IsNtscCorrectionPoint(total_frames_)) {
     // IEC 60857 Amendment 2 §10.1.10: colour time error correction.
     // Seconds jumps one extra step forward; frame resets to zero.
     current_frame_ = 0;
@@ -160,7 +161,7 @@ bool ClvPictureNumberGenerator::IsNtscCorrectionPoint(int N) {
 
 // static
 int ClvPictureNumberGenerator::FramesPerSecond(Standard standard) {
-  return (standard == Standard::kNtsc) ? 30 : 25;
+  return Is625LineStandard(standard) ? 25 : 30;
 }
 
 // ---------------------------------------------------------------------------

@@ -21,7 +21,7 @@ sections:
 
 | Key | Type | Required | Values | Default |
 |-----|------|----------|--------|---------|
-| `name` | string | Yes | — | — |
+| `name` | string | No | — | empty |
 | `type` | string | Yes | `progressive` | — |
 | `source` | string | Yes | Path, optionally with an [asset root token](asset-roots.md) | — |
 | `duration_frames` | int or string | No | Positive integer, or `"all"` | `"all"` |
@@ -39,7 +39,7 @@ No other key is accepted.
 
 ## `name`
 
-Identifies the section in the GUI list, in log messages, in validation errors, and in the `{section_name}` OSD token. Names need not be unique, but making them so is considerably easier to work with.
+Identifies the section in the GUI list, in log messages, in validation errors, and in the `{section_name}` OSD token. It is not required, and names need not be unique, but a unique name for every section is considerably easier to work with.
 
 ## `type`
 
@@ -69,31 +69,38 @@ Omitting `duration_frames` means `"all"`. The emitter always writes the key out,
 
 With `duration_frames: "all"`, plays the selected range this many times. Total output frames = range length × `duration_repeat`; each replay restarts at `start_frame`.
 
-Ignored with a fixed integer `duration_frames`, and a warning is emitted if you set it there.
+Ignored with a fixed integer `duration_frames`, and a warning is emitted if you set it there. The emitter writes it only alongside `duration_frames: all`, so a saved project drops an ignored `duration_repeat`.
 
 ## `section_type`
 
 Marks the section as part of a laserdisc structure.
 
-| Value | Meaning | Minimum duration |
-|-------|---------|------------------|
-| `lead_in` | Before the programme content | 938 frames (CAV) |
+| Value | Meaning | Recommended minimum (CAV) |
+|-------|---------|---------------------------|
+| `lead_in` | Before the programme content | 938 frames |
 | `programme_area` | The content itself | — |
-| `lead_out` | After the programme content | 1250 frames (CAV) |
+| `lead_out` | After the programme content | 1250 frames |
 
-Omitting it means the section is not part of a disc structure.
+Omitting it means the section is not part of a disc structure. A section that carries a `laserdisc` [line injection](section-line-injections.md) must set it.
+
+The minimums are checked as **warnings**, only on a CAV disc, only for a section that carries a `laserdisc` injection, and only when `duration_frames` is an integer:
+
+```text
+Laserdisc injection warning: CAV lead_in section has 500 frames; IEC 1.5 mm
+minimum at 1.6 um track pitch requires 938.
+```
 
 ### Ordering rules
 
-Once **any** section declares a `section_type`, the whole sequence is checked:
+Once any section is a `lead_in` or a `lead_out`, the whole sequence is checked (a project that uses only `programme_area` is not):
 
 - At most one `lead_in`, and no section may precede it.
 - At most one `lead_out`, and no section may follow it.
-- Every section between them must be `programme_area`.
+- Every section between them must be `programme_area`. With only a lead-in this applies to every section after it, and with only a lead-out to every section before it.
 
 Violations are errors, not warnings: out-of-order sections would break monotonic picture-number and time-code generation (IEC 60856/60857).
 
-`section_type` also drives the [EFM](../user-manual/audio.md#laserdisc-efm-digital-audio) disc-area mapping — a lead-in carries the table of contents, each programme-area section is one EFM track, and the lead-out carries lead-out subcode. That mapping works whether or not the section carries biphase codes, which is why an EFM-only project can have a short lead-in where a biphase CAV lead-in would need 938 frames.
+`section_type` also drives the [EFM](../user-manual/audio.md#laserdisc-efm-digital-audio) disc-area mapping — a lead-in carries the table of contents, each programme-area section is one EFM track, and the lead-out carries lead-out subcode. That mapping works whether or not the section carries biphase codes, which is why an EFM-only project can have a short lead-in without the 938-frame warning a biphase CAV lead-in would get.
 
 ## `start_frame`
 
@@ -135,4 +142,5 @@ All are optional, and only blocks that are explicitly set are written back out b
 - `start_frame` ≥ 0 and `end_frame` ≥ `start_frame`, both inside the video source; `end_frame` never with an integer `duration_frames`.
 - An EXR still takes neither `start_frame` nor `end_frame`, and needs an integer `duration_frames`.
 - The disc-structure ordering rules above.
-- CAV lead-in and lead-out minimum durations.
+- A section with a `laserdisc` injection must set `section_type`.
+- CAV lead-in and lead-out minimum durations (warnings).

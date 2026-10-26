@@ -243,7 +243,6 @@ void BiphaseInjectionManager::Reset() {
   generators_.clear();
   fm_picture_number_generator_.reset();
   fm_programme_time_generator_.reset();
-  white_flag_tracker_.reset();
   placement_engine_.reset();
   biphase_encoder_.reset();
   fm_encoder_.reset();
@@ -471,7 +470,6 @@ bool BiphaseInjectionManager::InitializeSection(
   // fm_picture_number_generator_ and fm_programme_time_generator_ are NOT
   // reset here — they persist across section boundaries like the biphase
   // timekeeping generators above.
-  white_flag_tracker_.reset();
   placement_engine_.reset();
   biphase_encoder_.reset();
   fm_encoder_.reset();
@@ -516,7 +514,7 @@ bool BiphaseInjectionManager::InitializeSection(
 
   has_laserdisc_ = true;
   biphase_encoder_ = std::make_unique<BiphaseEncoder>(sample_rate_hz);
-  if (standard == Standard::kNtsc) {
+  if (!Is625LineStandard(standard)) {
     fm_encoder_ = std::make_unique<FmEncoder>(sample_rate_hz);
   }
 
@@ -636,9 +634,6 @@ bool BiphaseInjectionManager::InitializeSection(
         fm_programme_time_generator_ =
             std::make_unique<FmProgrammeTimeGenerator>();
       }
-
-    } else if (code.code_type == "fm_white_flag") {
-      white_flag_tracker_ = std::make_unique<WhiteFlagTracker>();
     }
   }
 

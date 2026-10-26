@@ -915,7 +915,9 @@ Section SectionEditor::SectionFromWidgets() const {
     SetNoiseBlockEnabled(&section, false);
   }
 
-  // Dropout blocks.
+  // Dropout blocks. The group boxes own the block, so a loaded block that
+  // enabled nothing is dropped, as the emitter would on save.
+  section.dropouts.block_present = false;
   if (random_dropouts_group_->isChecked()) {
     section.dropouts.random.enabled = true;
     section.dropouts.random.scale = random_scale_spin_->value();

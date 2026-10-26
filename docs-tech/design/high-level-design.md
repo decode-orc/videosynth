@@ -57,7 +57,7 @@
 - **Line-based injections** for VBI content:
   - **VITS** (Vertical Interval Test Signals).
   - **Laserdisc biphase encoding** (IEC 60856/60857).
-  - **VITC** (Vertical Interval Timecode, SMPTE 12M).
+  - **VITC** (Vertical Interval Timecode, SMPTE 12M) is a planned injection type: the YAML schema accepts `type: vitc`, but the validator rejects it as not implemented.
 - **Per-section noise injection**: two-component Gaussian noise model (floor + proportional) targeting orc-gui Black PSNR and White SNR metrics.
 - **Per-section dropout injection**: physical-tape and optical-disc dropout simulation (random surface dropouts and persistent scratch dropouts) with automatic sidecar generation conformant to the [Dropout Extension Format](../cvbs-file-format-specification/docs/extensions/dropout-extension-format.md) (schema version 5).
 
@@ -71,7 +71,7 @@
 - **Language**: C++17.
 - **Build System**: Nix.
 - **Logging**: [spdlog](https://github.com/gabime/spdlog).
-- **Sample Rate Conversion**: [soxr](https://sourceforge.net/p/soxr/).
+- **Sample Rate Conversion**: in-house linear resampling in the output stage (raw presets only); no external resampler library.
 - **Testing**: [Google Test](https://github.com/google/googletest).
 
 ---
@@ -136,9 +136,10 @@ Current implementation status:
 
 Current implementation status:
 
-- **4fsc**: Implemented for PAL and NTSC.
-- **20MSPS / 40MSPS / Custom**: Design targets only; not implemented in the current runtime.
-- The current validator and output path accept `CVBS_U10_4FSC`, `CVBS_U16_4FSC`, `CVBS_TPG21_4FSC`, `RAW_S16_28M`, and `RAW_S16_40M`. The 4fsc encodings remain locked to the 4fsc lattice, while raw encodings are resampled by the output stage.
+- **4fsc**: Implemented for all standards. Generation always runs on the 4fsc lattice.
+- **Raw 28 / 40 MSPS output**: Implemented as output encodings only (`RAW_S16_28M`, `RAW_S16_40M`): the output stage linearly resamples each whole 4fsc frame to the raw preset's frame span before encoding.
+- **20MSPS / Custom**: Design targets only; not implemented in the current runtime.
+- The current validator and output path accept `CVBS_U10_4FSC`, `CVBS_U16_4FSC`, `CVBS_TPG21_4FSC`, `CVBS_S16_4FSC`, `RAW_S16_28M`, and `RAW_S16_40M`. The 4fsc encodings remain locked to the 4fsc lattice, while raw encodings are resampled by the output stage. `CVBS_S16_4FSC` and the raw presets carry sub-sync excursions (needed for the full PAL pilot-burst trough); the other presets clip at the legal-code floor, and the validator warns when the pilot burst is enabled with one of them.
 
 
 | **Sample Rate** | **PAL (Hz)** | **NTSC (Hz)** | **Notes**                        |
@@ -326,7 +327,7 @@ $$
 
 - Line-to-line NTSC burst phase alternates at 4fsc because 910 samples/line corresponds to a $\pi$ radian subcarrier phase advance per line (SMPTE 244M §4.1.1 interpretation in this model).
 - The NTSC colour sequence is modeled as a 2-frame SC-H progression using a frame phase offset of $0$ then $\pi$, repeating (SMPTE 170M field/frame color-sequence behavior).
-- In baseline mode, burst is present on horizontal lines and suppressed on equalizing/broad-sync lines; when NTSC laserdisc VBI burst mode is enabled, burst is additionally inserted on equalizing and broad-sync pulses per [IEC 60857](../analogue-video-specifications/docs/laserdisc/IEC-60857-1986-Laservision-NTSC/IEC-60857-1986-Laservision-NTSC.md) §9.1.2.
+- Burst is present on horizontal lines and suppressed on equalizing/broad-sync lines. The NTSC laserdisc VBI burst mode of [IEC 60857](../analogue-video-specifications/docs/laserdisc/IEC-60857-1986-Laservision-NTSC/IEC-60857-1986-Laservision-NTSC.md) §9.1.2 (burst also on equalizing and broad-sync pulses) is not implemented: `ntsc_laserdisc_vbi_burst: true` is a validation error.
 
 ### **SECAM Chroma Encoding Model**
 
@@ -369,10 +370,10 @@ Source-range capability note:
 | **Progressive Source Ingestion**| Decode progressive frames, convert to 10-bit 4:4:4 YCbCr BT.601 studio swing, split into interlaced fields. | ITU-R BT.470-6, ITU-R BT.601   |
 | **Sync and Burst Insertion**    | Insert HSync, VSync, equalizing pulses, and colour burst.                                | ITU-R BT.470-6, ITU-R BT.1700   |
 | **PAL Laserdisc Pilot Burst**   | Superimpose a 3.75 MHz pilot burst on all sync pulses when enabled (PAL only).           | IEC 60856 §9.1.2                |
-| **NTSC Laserdisc VBI Burst**    | Insert colour burst on equalizing and broad sync pulses when enabled (NTSC only).        | IEC 60857 §9.1.2                |
-| **Line Injections**             | Inject VITS, Laserdisc biphase, VITC, or custom line content into VBI.                  | IEC 60856, IEC 60857, SMPTE 12M |
+| **NTSC Laserdisc VBI Burst**    | Not implemented: enabling it is a validation error (target: burst on equalizing and broad sync pulses, NTSC only). | IEC 60857 §9.1.2                |
+| **Line Injections**             | Inject VITS and Laserdisc biphase/FM codes into the VBI (VITC and custom line content are planned, rejected by the validator). | IEC 60856, IEC 60857, SMPTE 12M |
 | **Ramping and Smoothing**       | Apply ramping to transitions to simulate analogue behavior.                              | ITU-R BT.470-6, ITU-R BT.1700   |
-| **OSD Overlay**                 | Render monochrome bitmap-font text into the active-picture luma channel, after biphase injection. | — |
+| **OSD Overlay**                 | Render monochrome bitmap-font text into the active picture after biphase injection: luma takes the text level, chroma under the text is cleared (or carries the undeviated SECAM subcarrier). | — |
 
 
 ### **Frame Template Cache and Per-Frame Patches**
@@ -456,7 +457,7 @@ carry no such mapping and simply do not prefetch.
 
 ### **OSD (On-Screen Display) Sub-system**
 
-The `OsdRenderer` class writes monochrome bitmap-font text overlays into the luma sample buffer of an active video frame.  It is invoked as the final step of per-frame generation, after active video content and biphase injection, so that burn-in tokens have access to the current-frame biphase context.
+The `OsdRenderer` class writes monochrome bitmap-font text overlays into the active picture of a video frame.  It is invoked as the final step of per-frame generation, after active video content and the VBI (biphase/FM) waveforms have been written; its token strings are resolved earlier, from the frame's biphase context, during the schedule-enrichment pass.
 
 **Data model** (defined in `model.h`):
 
@@ -467,7 +468,7 @@ The `OsdRenderer` class writes monochrome bitmap-font text overlays into the lum
 
 - Uses a static 96-glyph 8×8 pixel bitmap font (`src/osd_font.h`) covering printable ASCII 0x20–0x7F, derived from the IBM PC BIOS 8×8 VGA font.
 - Each glyph pixel is rendered as a `scale` × `scale` output block.
-- Only the luma channel is written; the chroma channel is unchanged (monochrome overlay).
+- Each covered sample's luma is set to the text level and its chroma is replaced: with zero for the quadrature standards, or with the precomputed undeviated SECAM subcarrier (see [SECAM Chroma Encoding Model](#secam-chroma-encoding-model)), so the overlay is colourless.
 - Pixels outside `[active_sample_start, active_sample_end)` or `[active_line_start, active_line_end)` are silently clipped.
 - Token resolution is done by `OsdTokenResolver` (`include/videosynth/osd_token_resolver.h`) before passing `resolved_texts` to `Render()`.
 
@@ -482,27 +483,27 @@ The `OsdRenderer` class writes monochrome bitmap-font text overlays into the lum
 - Unavailable values render as all-zero fields with the same width as a real value, so overlay layout never shifts.
 - Unknown token names are rejected at project-validation time by `HasOnlyKnownTokens()`; static text with no tokens passes through unchanged.
 
-**Per-frame VBI context** (`PerFrameContext`, `include/videosynth/biphase_injection_manager.h`):
+**Per-frame VBI context** (`PerFrameContext`, `include/videosynth/frame_enrichment.h`):
 
-- Captured by `BiphaseInjectionManager::ProcessFrame()` before advancing generators.
-- Exposed via `GetLastFrameContext()` for use by token resolver immediately after injection.
-- Reset to defaults by `Reset()`.
+- Filled by `BiphaseInjectionManager::ResolveFrame()` into the frame's `FrameEnrichment` (together with the frame's VBI code words) before the generators advance.
+- `GenerationStage` adds the schedule-derived `frame_number` and, on CLV discs, the CLV timecode fields.
+- The manager's generator state is reset by `Reset()` at the start of each `BuildFrameSchedule`.
 
 **Pipeline wiring** (`GenerationStage`, `src/generation_stage.cpp`):
 
-- OSD rendering executes after `biphase_manager_.ProcessFrame()` for each frame.
-- Tokens are resolved from `biphase_manager_.GetLastFrameContext()`.
+- `BuildFrameSchedule` runs a sequential enrichment pass: for each scheduled frame it calls `biphase_manager_.ResolveFrame()` and resolves every overlay's text with `OsdTokenResolver` into `FrameEnrichment::osd_texts`.
+- Per-frame synthesis (on any worker thread) renders the VBI waveforms from the enrichment, then calls `Render()` with the pre-resolved texts.
 - `Render()` is called twice per frame — once for field 1 and once for field 2 — so overlays appear in both fields at the same y-offset within each field's active picture area.
 
 **YAML** (`src/yaml_project_parser.cpp`): sections may include an `osd:` block with an `overlays:` list; each overlay supports `text`, `x`, `y`, `scale`, `fg_luma` (string enum: `white`, `light_grey`, `dark_grey`, or `black`), and `bg_luma` (string enum: `transparent`, `white`, `light_grey`, `dark_grey`, or `black`).
 
-**Validation** (`src/project_validator.cpp`): `scale` ∈ [1, 4]; `fg_luma` must be one of `white`, `light_grey`, `dark_grey`, `black`; `bg_luma` must be one of `transparent`, `white`, `light_grey`, `dark_grey`, `black`; token names must be one of the four above.
+**Validation** (`src/project_validator.cpp`): `scale` ∈ [1, 4]; `fg_luma` must be one of `white`, `light_grey`, `dark_grey`, `black`; `bg_luma` must be one of `transparent`, `white`, `light_grey`, `dark_grey`, `black`; token names must be one of the six above (the error message lists all six).
 
 
 ### **Inputs**
 
 - Frame-based content in **10-bit 4:4:4 YCbCr BT.601 studio swing** from normalised progressive sources.
-- Line-based injections (VITS, Laserdisc biphase, VITC).
+- Line-based injections (VITS, Laserdisc biphase and 40-bit FM).
 - CVBS presets (video_standard_preset, sample_encoding_preset, signal_state_preset).
 
 ### **Outputs**
@@ -531,7 +532,7 @@ The `OsdRenderer` class writes monochrome bitmap-font text overlays into the lum
 | **mV to Integer Conversion** | Quantise fixed-point mV values to 10-bit integers per EBU 3280 (PAL) or SMPTE 244M (NTSC). | EBU Tech. 3280-E, SMPTE 244M-2003 |
 | **Combining Y and C**   | Combine quantised luma and chroma into composite signal (CVBS), or write them to separate `.cvbsy`/`.cvbsc` files in Y/C mode. | CVBS File Format Specification    |
 | **Output Formatting**   | Format the quantised composite signal into the output files (video and metadata).   | CVBS File Format Specification    |
-| **Locked 4fsc Enforcement**  | Enforce the current runtime requirement that output remains locked `4fsc` only. | SMPTE 244M-2003, EBU Tech. 3280-E |
+| **Raw Resampling**      | For the `RAW_S16_28M`/`RAW_S16_40M` presets, linearly resample each 4fsc frame to the preset's frame span before encoding; 4fsc presets are written on the generation lattice unchanged. | CVBS File Format Specification    |
 | **Metadata Generation** | Generate CVBS file metadata (magic number, version, sample rate, etc.). | CVBS File Format Specification    |
 
 
@@ -661,7 +662,7 @@ This derives from the NTSC definition that 100 IRE = 714.3 mV (the luminance ran
 
 #### **Internal Fixed-Point Representation**
 
-The generator uses **signed fixed-point millivolt buffers** to represent all signal levels internally. The runtime path now stores Y and C samples in a high-resolution integer domain (Q20.12-style scaling in the implementation) so the generation stage and output stage can stay deterministic without carrying a floating-point representation.
+The generator uses **signed fixed-point millivolt buffers** to represent all signal levels internally. The runtime path now stores Y and C samples in a high-resolution integer domain (signed 64-bit integers with 20 fractional bits, i.e. millivolts scaled by $2^{20}$; `include/videosynth/fixed_point.h`) so the generation stage and output stage can stay deterministic without carrying a floating-point representation.
 
 **Why fixed-point is sufficient:**  
 Certain signal additions push levels well outside the nominal PAL or NTSC signal range. The most significant case is the **PAL Laserdisc pilot burst** ([IEC 60856](../analogue-video-specifications/docs/laserdisc/IEC-60856-1986-Laservision-PAL/IEC-60856-1986-Laservision-PAL.md) §9.1.2), which is superimposed on the sync pulse at 3.75 MHz with a peak-to-peak amplitude of $\frac{6}{7} \times 700\ \text{mV} = 600\ \text{mV p-p}$. Centred on sync tip level (−300 mV), this burst swings between **−600 mV and 0 mV** — 300 mV below the standard sync tip. The fixed-point domain retains this headroom while still avoiding floating-point state in the runtime pipeline.
@@ -840,6 +841,7 @@ The current parser, validator, and runtime implement only a subset of the YAML s
 - Built-in VITS catalog entries now carry full waveform-definition primitive/composite trees for every supported `vits_type`, so the default runtime path can render all supported PAL and NTSC VITS patterns.
 - `video_standard_preset: SECAM` and `secam_field_identification` (default `true`) are parsed, emitted, validated, and implemented; SECAM requires `signal_state_preset: STANDARD_STABLE_UNLOCKED` (the default when the key is omitted). See [SECAM Chroma Encoding Model](#secam-chroma-encoding-model).
 - `pal_laserdisc_pilot_burst` is parsed, validated, and fully implemented: a 3.75 MHz (240 × f_H) sinusoidal burst at ±300 mV is superimposed on every sync pulse in the Y channel when enabled.
+- `ntsc_black_setup_ire` applies to both System M standards (NTSC and PAL-M).
 - `ntsc_laserdisc_vbi_burst` is parsed and validated for standard compatibility, but its runtime signal behavior remains deferred. Because a silent no-op would produce a file that looks compliant and is not, enabling it is a **validation error** ("ntsc_laserdisc_vbi_burst is parsed but not implemented in the current runtime") rather than being ignored.
 
 The remainder of Section 7 should therefore be read as the intended project-file design rather than the currently implemented parser surface.
@@ -859,8 +861,8 @@ cvbs_presets:
   sample_encoding_preset: CVBS_U10_4FSC  # CVBS_U10_4FSC, CVBS_U16_4FSC, CVBS_TPG21_4FSC, CVBS_S16_4FSC, RAW_S16_28M, RAW_S16_40M
   signal_state_preset: STANDARD_STABLE_LOCKED  # STANDARD_STABLE_LOCKED; STANDARD_STABLE_UNLOCKED for SECAM (default: per standard)
   pal_laserdisc_pilot_burst: false  # PAL only; inject 3.75 MHz pilot burst on all sync pulses (IEC 60856 §9.1.2); default: false
-  ntsc_laserdisc_vbi_burst: false   # NTSC only; insert colour burst on equalizing and broad sync pulses (IEC 60857 §9.1.2); default: false
-  ntsc_black_setup_ire: 7.5     # NTSC only; allowed values: 7.5 (standard setup) or 0.0 (black = blanking); default: 7.5
+  ntsc_laserdisc_vbi_burst: false   # NTSC only; not implemented — true is a validation error (target: IEC 60857 §9.1.2 burst on equalizing/broad sync pulses); default: false
+  ntsc_black_setup_ire: 7.5     # NTSC and PAL-M only; allowed values: 7.5 (standard setup) or 0.0 (black = blanking); default: 7.5
   secam_field_identification: true  # SECAM only; field identification signals on lines 7-15 / 320-328; default: true
   # No other key is accepted. Field order/dominance follow the standard,
   # sample data is little-endian, and the locked/unlocked distinction is
@@ -894,7 +896,7 @@ sections:
             waveform: sine     # sine, square, sawtooth, or triangle
             frequency: 1000.0  # Fixed-tone frequency in Hz [0, 22000]
             amplitude: 0.5     # Peak amplitude as a fraction of full scale [0.0, 1.0]
-    line_injections:           # Per-section laserdisc codes / VITC for this section
+    line_injections:           # Per-section laserdisc codes for this section
       - type: laserdisc
         # No disc_type or target_lines — disc_type is project-wide; line
         # placement is fixed by IEC 60856 §10
@@ -947,6 +949,7 @@ The `noise:` block enables per-section additive Gaussian noise injection targeti
 |-----|------|----------|-------|-------------|
 | `noise_db` | float | Conditional | [20.0, 61.0] | Noise floor in dB; sets Black PSNR target. Required if `noise_spread_db` is present. |
 | `noise_spread_db` | float | No | [0.0, `noise_db`−20.0] | White is this many dB noisier than black; White SNR target = `noise_db` − `noise_spread_db`. Defaults to 0.0. |
+| `noise_seed` | int | No | any int64 | Fixed RNG base seed for reproducible output. If absent, a seed drawn once per run is used, so the noise differs between runs. |
 
 Rules:
 - Neither key present → no noise injection (pass-through).
@@ -976,20 +979,21 @@ The `dropouts:` block enables per-section dropout simulation. Two independent dr
 | `scale` | int | Yes | [1, 20] | Severity scale. `0` disables scratch dropouts (equivalent to omitting the block). |
 | `seed` | int | No | any int64 | Fixed RNG seed for reproducible output. If absent, a run-specific seed is used. |
 
-**Scale mapping (exponential)**:
+**Scale mapping (exponential)** — `DeriveRandomDropoutParams` / `DeriveScratchDropoutParams` in `include/videosynth/dropout_scale.h`, with $t = (\text{scale} - 1)/19$:
 
-| Parameter | Scale 1 | Scale 10 | Scale 20 |
-|-----------|---------|----------|---------|
-| Random frequency (events/frame) | 0.05 | ~2.8 | 100 |
-| Random max duration (samples) | 5 | ~282 | 2000 |
-| Scratch count | 1 | 8 | 15 |
-| Scratch max lifespan (frames) | 2 | ~113 | 500 |
-| Scratch max peak width (samples) | 5 | ~282 | 2000 |
+| Parameter | Formula | Scale 1 | Scale 10 | Scale 20 |
+|-----------|---------|---------|----------|---------|
+| Random frequency (events/frame, Poisson mean) | $0.5 \times 400^t$ | 0.5 | ~8.5 | 200 |
+| Random min duration (samples) | $\max(1, \operatorname{round}(5 \times 10^t))$ | 5 | 15 | 50 |
+| Random max duration (samples) | $\max(\text{min}+1, \operatorname{round}(50 \times 8^t))$ | 50 | ~134 | 400 |
+| Scratch count | $\max(2, \operatorname{round}(2 \times 20^t))$ | 2 | 8 | 40 |
+| Scratch max lifespan (frames) | $\max(1, \operatorname{round}(2 \times 250^t))$ | 2 | ~27 | 500 |
+| Scratch max peak width (samples) | $\max(1, \operatorname{round}(5 \times 400^t))$ | 5 | ~85 | 2000 |
 
 Rules:
 - A `dropouts:` block with both `random.scale = 0` and `scratch.scale = 0` (or neither sub-block present) is a validation error — omit the `dropouts:` block entirely to disable.
 - `scale` outside `[1, 20]` is a validation error.
-- If `scratch.scale > 0` and the derived maximum scratch lifespan exceeds `section.duration_frames`, a **warning** is emitted (scratch events may never reach their peak amplitude within the section).
+- If `scratch.scale > 0` and the derived maximum scratch lifespan exceeds an integer `section.duration_frames`, a **warning** is emitted (scratch events may never reach their peak amplitude within the section). Sections with `duration_frames: "all"` are not checked.
 
 **Sidecar output**: when any section has dropout injection enabled, the pipeline creates a companion SQLite file at `<metadata_stem>.dropouts.meta` (where `<metadata_stem>` is the derived, video-colocated metadata path; schema version 5) with a single table `dropout_run(cvbs_file_id, frame_id, sample_start, sample_count, severity)`. Severity is `25` for non-visible VBI runs and `75` for runs intersecting the active picture.
 
@@ -1058,7 +1062,7 @@ Design decisions:
 | `waveform` | string | No | `sine`, `square`, `sawtooth`, `triangle` | Oscillator shape. Default `sine`. Waveforms are naive (non-band-limited) — acceptable for test signals. |
 | `frequency` | float | No | [0, 22000] Hz | Fixed-tone frequency, used when no `ramp:` block is present. Default `1000.0`. |
 | `amplitude` | float | No | [0.0, 1.0] | Peak amplitude as a fraction of full scale. Default `0.5`. |
-| `ramp:` | map | No | — | Optional frequency-sweep block (below); mutually exclusive with the fixed `frequency` mode. |
+| `ramp:` | map | No | — | Optional frequency-sweep block (below); mutually exclusive with the fixed `frequency` mode — a tone that sets both `ramp:` and `frequency` is a validation error. The emitter writes no `frequency` on ramp tones. |
 
 **`ramp:` block** — frequency sweep:
 
@@ -1151,22 +1155,16 @@ output:
 
 ### **File Path Resolution**
 
-Any field in a project YAML that accepts a file path (e.g., `source` on a `progressive` section) resolves the path using the following priority order:
-
-1. **Built-in sources** — paths prefixed with `builtin:` refer to source files bundled and installed with the application. The prefix is followed by the built-in asset name (e.g., `builtin:smpte_leader`). The application resolves these against its installation data directory at runtime, regardless of where the project YAML is located.
-2. **Absolute paths** — paths beginning with `/` are used exactly as specified. The file must exist at that location on the host filesystem.
-3. **Project-relative paths** — all other paths are resolved relative to the **directory containing the project YAML file**. This allows a project and its associated assets to be grouped together and moved as a unit.
-
-The application must report a clear validation error if a referenced file cannot be found after applying these rules.
+Every field in a project YAML that accepts a file path (section `source`, audio `file.path`, `output.video_path`) is resolved by the rules in [Asset Roots & Path Resolution](#asset-roots-path-resolution): a leading `{name}` logical-root token, an absolute path, or a plain relative path (working-directory-relative in the CLI, project-directory-relative in the GUI). There is no other prefix scheme. The validator reports an error when a referenced source cannot be found after resolution, or when a path names an unknown root.
 
 #### **Examples**
 
 ```yaml
-source: "builtin:smpte_leader"        # built-in asset bundled with the application
-source: "/media/archive/clip.mkv"     # absolute path
-source: "assets/clip.mkv"             # relative to the project YAML directory
-source: "../shared/clip.mkv"          # relative path traversal is permitted
-video_path: "out/pal_test_video.cvbs" # project-relative output file path
+source: "{bundled}/exr/720x576/BLACK.exr"  # asset shipped with the application
+source: "{project}/clips/clip.mkv"         # relative to the project YAML directory (CLI and GUI)
+source: "/media/archive/clip.mkv"          # absolute path
+source: "assets/clip.mkv"                  # CLI: working-directory-relative; GUI: project-relative
+video_path: "{output}/pal_test_video.cvbs" # run output directory (defaults to the project directory)
 ```
 
 ---
@@ -1174,19 +1172,17 @@ video_path: "out/pal_test_video.cvbs" # project-relative output file path
 ### **Validation Rules**
 
 1. **Single CVBS Preset**:
-  - Only one `video_standard_preset` (PAL or NTSC) per project.
+  - Only one `video_standard_preset` (PAL, NTSC, PAL_M or SECAM) per project.
   - Only one `sample_encoding_preset` per project.
   - Only one `signal_state_preset` per project.
   - `output.video_path` is required in the project YAML. The metadata sidecar path is derived from it (video-colocated) and is not specified in YAML.
   - `output.signal_type` must be `"composite"` or `"yc"` (default: `"composite"`).
-  - When `output.signal_type` is `"yc"`, `output.video_path` must end in `".cvbsy"`.
-  - `output.signal_type` must be `"composite"` or `"yc"` (default: `"composite"`).
   - When `output.signal_type` is `"yc"`, `output.video_path` must end in `".cvbsy"`; the chroma path is derived automatically by replacing the suffix with `".cvbsc"`.
   - Output resolution is fixed by the standard (720x576 for PAL and SECAM, 720x486 for NTSC and PAL-M) and must not be specified in the project file.
-  - 4fsc generation requires a 4fsc `sample_encoding_preset` and a locked `signal_state_preset` (unlocked for SECAM).
-  - `pal_laserdisc_pilot_burst` can **only be enabled for PAL projects**. If enabled for NTSC, the YAML is considered **invalid**.
-  - `ntsc_laserdisc_vbi_burst` can **only be enabled for NTSC projects**. If enabled for PAL, the YAML is considered **invalid**.
-  - `ntsc_black_setup_ire` can **only be specified for NTSC projects**. If specified for PAL, the YAML is considered **invalid**.
+  - `sample_encoding_preset` must be one of the supported 4fsc or raw presets, and `signal_state_preset` must be `STANDARD_STABLE_LOCKED` (`STANDARD_STABLE_UNLOCKED` for SECAM).
+  - `pal_laserdisc_pilot_burst` can **only be enabled for PAL projects**; any other standard is **invalid**. With a preset that cannot carry sub-sync excursions (U10/U16/TPG21) a warning is emitted.
+  - `ntsc_laserdisc_vbi_burst` can **only be enabled for NTSC projects**; it is also rejected on NTSC because it is not implemented.
+  - `ntsc_black_setup_ire` can **only be specified for NTSC or PAL-M projects**. If specified for PAL or SECAM, the YAML is considered **invalid**.
   - `ntsc_black_setup_ire` allowed values are `7.5` and `0.0`. `7.5` selects standards-based NTSC setup; `0.0` moves NTSC black level to blanking (`0 IRE`).
 2. **Sections**:
     - Each section must have a valid `type` (`progressive`).
@@ -1198,7 +1194,7 @@ video_path: "out/pal_test_video.cvbs" # project-relative output file path
   - `target_lines` must be within the valid range for the standard (1-625 for PAL, 1-525 for NTSC).
   - `target_lines` must **not** be specified for `laserdisc` injection types; specifying it is a validation error.
   - **If injected lines overlap within a section, the YAML must fail validation.**
-  - **When a `laserdisc` injection is active in a section, no other injection type may target lines within the laserdisc reserved ranges** (PAL: Field 1 lines 6–18, Field 2 lines 319–331; NTSC: Field 1 lines 10–18, Field 2 lines 273–281).
+  - **When the project declares a `disc_type` (a laserdisc project), no project VITS entry may target lines within the laserdisc reserved ranges** (PAL: Field 1 lines 6–18, Field 2 lines 319–331; NTSC/PAL-M: Field 1 lines 10–18, Field 2 lines 273–281).
   - **A `vitc` injection and a `laserdisc` injection must not appear in the same section.** Laserdisc does not use VITC.
 4. **Progressive Sources**:
   - `source` must resolve to an accessible file after applying [File Path Resolution](#file-path-resolution) rules. If the resolved path does not exist, the YAML is considered **invalid**.
@@ -1234,8 +1230,8 @@ video_path: "out/pal_test_video.cvbs" # project-relative output file path
 
 - **Implemented**: `progressive` frame-based sections in Section 8.1.
 - **Implemented**: Section 8.2 parser/validator constraints for VITS line-injection schema, VITS/line-allocation compatibility checks, and generation-stage VITS line application for all supported built-in PAL and NTSC VITS patterns.
-- **Implemented**: Full laserdisc biphase injection for PAL and NTSC (CAV and CLV), including 24-bit biphase signal generation, 40-bit FM signal generation (NTSC), all code types (lead_in, lead_out, picture_number, picture_stop, chapter_number, programme_status, users_code, programme_time_code, clv_code, clv_picture_number, fm_picture_number, fm_programme_time, fm_white_flag), field-aware line placement, timecode continuity, chapter stop-bit logic, NTSC frozen values, NTSC CLV colour time error correction, and biphase/VITS line-conflict validation.
-- **Not yet implemented**: runtime synthesis/application for VITC and custom per-line content. A section-level injection whose `type` is neither `laserdisc` nor `vits` is a **validation error** ("line injection type '<type>' is not implemented in the current runtime"), so a project cannot silently generate a file that lacks the content it declares.
+- **Implemented**: Full laserdisc biphase injection for PAL, NTSC and PAL-M (CAV and CLV; PAL-M follows the System M/NTSC rules — 1800 frames/min and 30 fps CLV picture numbers, colour time error correction, 79 999 maximum CAV picture number, and the NTSC line placement), including 24-bit biphase signal generation, 40-bit FM signal generation (NTSC/PAL-M), all code types (lead_in, lead_out, picture_number, picture_stop, chapter_number, programme_status, users_code, programme_time_code, clv_code, clv_picture_number, fm_picture_number, fm_programme_time, fm_white_flag), field-aware line placement, timecode continuity, chapter stop-bit logic, NTSC frozen values, System M CLV colour time error correction, and biphase/VITS line-conflict validation.
+- **Not yet implemented**: runtime synthesis/application for VITC and custom per-line content. A section-level injection whose `type` is not `laserdisc` is a **validation error** (`vitc`: "line injection type 'vitc' is not implemented in the current runtime"; `vits`: VITS must be declared project-wide; anything else: "unsupported injection type"), so a project cannot silently generate a file that lacks the content it declares.
 
 For VITC and custom per-line content paths, Section 8.2 remains the intended design contract for later implementation work.
 
@@ -1268,7 +1264,7 @@ The same rules apply to every source regardless of the asset root it resolves th
 | ----------------- | -------------- | ------------ | ------------------------------------------------------------------------------ | -------------------- |
 | `name`            | string         | Yes          | User-friendly name.                                                            | `"Video Source"`     |
 | `type`            | string         | Yes          | Must be `"progressive"`.                                                       | `"progressive"`      |
-| `source`          | string         | Yes          | Path to the source file. May be a `builtin:` prefixed name, an absolute path, or a path relative to the project YAML. See [File Path Resolution](#file-path-resolution). | `"assets/test.mkv"` |
+| `source`          | string         | Yes          | Path to the source file: a `{root}/…` logical-root path, an absolute path, or a plain relative path. See [File Path Resolution](#file-path-resolution). | `"{project}/test.mkv"` |
 | `start_frame`     | integer        | No           | First source frame of the selected range, 0-based (default: `0`). Video only. | `1500`               |
 | `end_frame`       | integer        | No           | Last source frame of the selected range, inclusive (default: the source's last frame). Video only; not combined with an integer `duration_frames`. Emitted only when set. | `2999`               |
 | `duration_frames` | integer/string | No           | Output frames. `"all"` (the default when omitted) plays the selected range once; a positive integer plays that many frames from `start_frame`, looping the range when it is shorter (source index = `start_frame` + (i mod range length)). The emitter always writes it. | `100` or `"all"`     |
@@ -1298,20 +1294,13 @@ The same rules apply to every source regardless of the asset root it resolves th
 
 ```yaml
 sections:
-  - name: "MKV with VITC"
+  - name: "Video excerpt"
     type: progressive
-    source: "/assets/test.mkv"
-    duration_frames: "all"  # Use all frames from the source
-    duration_repeat: 2      # Optional: play the whole source twice
-    line_injections:
-      - type: vitc
-        target_lines: [19, 20, 21]
-        timecode: "00:00:00:00"
-        flags:
-          drop_frame: false
-          colour_frame: true
-          field_flag: 1
-        crc: true
+    source: "{project}/test.mkv"
+    start_frame: 100        # Optional: first source frame (video only)
+    end_frame: 199          # Optional: last source frame, inclusive
+    duration_frames: "all"  # Play the selected range (the default when omitted)
+    duration_repeat: 2      # Optional: play the range twice
 ```
 
 ---
@@ -1334,7 +1323,7 @@ Line injections live at two levels:
 
 | **Field**      | **Type** | **Required**              | **Description**                                                                                                                                                  | **Example**    |
 | -------------- | -------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
-| `type`         | string   | Section-level only        | Type of a section-level line injection: `laserdisc`, `vitc`, or `line_content`. (`vits` is not a section-level type — VITS is declared project-wide.)            | `"laserdisc"`  |
+| `type`         | string   | Section-level only        | Type of a section-level line injection: `laserdisc` (implemented) or `vitc` (parsed, rejected as not implemented). Any other value, including `vits` (VITS is declared project-wide), is a validation error. | `"laserdisc"`  |
 | `target_lines` | list     | Yes (except `laserdisc`)  | Lines to inject into (1-based, sequential across the entire frame). **Not applicable for `laserdisc` injections** — line placement is fixed by the standard.     | `[10, 11, 12]` |
 
 
@@ -1409,24 +1398,24 @@ For **Laserdisc biphase encoding**, refer to:
 - [IEC 60856](../analogue-video-specifications/docs/laserdisc/IEC-60856-1986-Laservision-PAL/IEC-60856-1986-Laservision-PAL.md) (and Amendments 1–2): Laservision PAL
 - [IEC 60857](../analogue-video-specifications/docs/laserdisc/IEC-60857-1986-Laservision-NTSC/IEC-60857-1986-Laservision-NTSC.md) (and Amendments 1–2): Laservision NTSC
 
-> **Important**: For `laserdisc` injections, **`target_lines` must not be specified**. VBI line placement is entirely determined by the standard: each code type is assigned to specific lines based on the `disc_type` and the current field identity (which field opens the picture). User-specified `target_lines` on a `laserdisc` injection will fail validation.
+> **Important**: For `laserdisc` injections, **`target_lines` must not be specified**. VBI line placement is entirely determined by the standard: each code type is assigned to specific lines based on the `disc_type`, the section type, and the field (field 1 always opens the picture). User-specified `target_lines` on a `laserdisc` injection will fail validation.
 
-Laserdisc VBI encoding is a **frame-level operation**: both fields of each frame carry codes on specific lines, with many codes split across fields or placed conditionally based on which field is the first field of the picture. This field-conditional placement is intrinsic to the standard and is handled automatically by the encoder.
+Laserdisc VBI encoding is a **frame-level operation**: both fields of each frame carry codes on specific lines, with many codes split between the first field of the picture (field 1) and the remaining field (field 2). This field-conditional placement is intrinsic to the standard and is handled automatically by the encoder.
 
 ##### **Reserved VBI Address Ranges**
 
-The following VBI lines are reserved exclusively for laserdisc address/data signals. No other injection type may target lines within these ranges when a `laserdisc` injection is active in the same section:
+The following VBI lines are reserved exclusively for laserdisc address/data signals. When the project declares a `disc_type` (a laserdisc project), no project VITS entry may target lines within these ranges:
 
 | **Standard** | **Field** | **Reserved Line Range** | **Reference**    |
 | ------------ | --------- | ----------------------- | ---------------- |
 | PAL          | Field 1   | 6–18                    | IEC 60856 §9.1.4 |
 | PAL          | Field 2   | 319–331                 | IEC 60856 §9.1.4 |
-| NTSC         | Field 1   | 10–18                   | IEC 60857 §9.1.5 |
-| NTSC         | Field 2   | 273–281                 | IEC 60857 §9.1.5 |
+| NTSC / PAL-M | Field 1   | 10–18                   | IEC 60857 §9.1.5 |
+| NTSC / PAL-M | Field 2   | 273–281                 | IEC 60857 §9.1.5 |
 
 > **PAL note**: Lines 6–15 within the Field 1 reserved range are occupied by equalizing and vertical sync pulses and carry no biphase content. The active biphase insertion lines within the reserved range are **16–18** (Field 1) and **329–331** (Field 2).
 >
-> **NTSC note**: Lines 10–15 are within the reserved range; lines 10–11 and 273–274 additionally carry the 40-bit FM coded signal (see below). The active 24-bit biphase insertion lines are **16–18** (Field 1) and **279–281** (Field 2). Because the reserved range spans 10–18, **NTSC NTC-7 VITS types that target lines 17 and 280 cannot coexist with a laserdisc injection** in the same section and will fail validation.
+> **NTSC note**: Lines 10–15 are within the reserved range; lines 10–11 and 273–274 additionally carry the 40-bit FM coded signal (see below). The active 24-bit biphase insertion lines are **16–18** (Field 1) and **279–281** (Field 2). Because the reserved range spans 10–18, **NTSC NTC-7 VITS types that target lines 17 and 280 cannot be used in a laserdisc project** and will fail validation.
 
 ##### **Code Systems**
 
@@ -1438,41 +1427,36 @@ Two coding systems are defined:
 
 ##### **24-bit Biphase Code Types and Line Placement**
 
-Lines are assigned per code type and field identity. "First field of picture" is the field that carries the picture number (CAV) or programme time code (CLV); "second field of picture" is the other field.
+Lines are assigned per code type and field identity (`LinePlacementEngine`, `src/line_placement_engine.cpp`). Every output frame is one picture whose **first field is field 1**, so the codes IEC 60856/60857 clause 10 place in "the first field of the picture" go in field 1 and the codes for the remaining fields go in field 2. Field-1 lines are 16/17/18 for both standards; field-2 lines are 329/330/331 (PAL) and 279/280/281 (NTSC and PAL-M).
 
-**PAL — IEC 60856 §10.1 (as amended):**
+**Lead-in / lead-out (CAV and CLV):**
 
-| **Code Type**              | **First-Field Lines** | **Second-Field Lines** | **Priority / Notes**                                                                                     |
-| -------------------------- | --------------------- | ---------------------- | -------------------------------------------------------------------------------------------------------- |
-| Lead-in                    | 17, 18                | 330, 331               | Both fields; ≥ 1.5 mm of tracks before programme start. Code: `88FFFF`                                 |
-| Lead-out                   | 17, 18                | 330, 331               | Both fields; ≥ 2 mm of tracks after programme end. Code: `80EEEE`                                      |
-| Picture number (CAV)       | 17, 18                | —                      | First field only. Code: `FX₁X₂X₃X₄X₅`; max 99 999; auto-increments each frame.                        |
-| Picture stop (CAV)         | —                     | 329, 330               | Second field only (field after picture-number field). Code: `82CFFF`; overrides programme status on 329. |
-| Chapter number (CAV)       | 17, 18                | 330, 331               | Fields without picture number. Lines 17/330 are lower priority than picture stop. Code: `8X₁X₂DDD`; max 79. |
-| Programme time code (CLV)  | 17, 18                | —                      | First field only. Code: `FX₁DDX₂X₃`; X₁ = hours; X₂X₃ = minutes; auto-updates each frame.             |
-| CLV code                   | 17 or 330             | —                      | Fields without programme time code and CLV picture number. Code: `87FFFF`                               |
-| CLV picture number         | 16 or 329             | —                      | First field only (Amendment 2). Code: `8X₁EX₃X₄X₅`; auto-updates each frame.                          |
-| Chapter number (CLV)       | 18 or 331             | —                      | Fields without programme time code and CLV picture number. Same hex format as CAV.                      |
-| Programme status (CAV)     | 16, 329               | —                      | Every frame. Picture stop has priority on line 329. Code: `8DC/BAX₃X₄X₅` (see Appendix C).              |
-| Programme status (CLV)     | 16 or 329             | —                      | Same fields as CLV code insertion. Code: `8DC/BAX₃X₄X₅`                                                |
-| Users code                 | 16, 329               | —                      | Lead-in and/or lead-out area only. Code: `8X₁DX₃X₄X₅`                                                  |
+| **Line (F1 / PAL F2 / NTSC F2)** | **Code** | **Notes** |
+| -------------------------------- | -------- | --------- |
+| 16 / 329 / 279 | `users_code` | Only when the section declares it. Code: `8X₁DX₃X₄X₅` |
+| 17, 18 / 330, 331 / 280, 281 | `lead_in` (`88FFFF`) or `lead_out` (`80EEEE`) | Both fields. ≥ 1.5 mm (lead-in) / ≥ 2 mm (lead-out) of tracks. |
 
-**NTSC — IEC 60857 §10.1 (as amended):**
+**CAV programme area** — the picture field is field 1 when the section carries `picture_number`:
 
-| **Code Type**              | **First-Field Lines** | **Second-Field Lines** | **Priority / Notes**                                                                                      |
-| -------------------------- | --------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------- |
-| Lead-in                    | 17, 18                | 280, 281               | Both fields; ≥ 1.5 mm of tracks before programme start. Code: `88FFFF`                                  |
-| Lead-out                   | 17, 18                | 280, 281               | Both fields; ≥ 2 mm of tracks after programme end. Code: `80EEEE`                                       |
-| Picture number (CAV)       | 17, 18                | —                      | First field only. Code: `FX₁X₂X₃X₄X₅`; max 79 999 (Amendment 2); auto-increments each frame.           |
-| Picture stop (CAV)         | —                     | 279, 280               | Second field only (field after picture-number field). Code: `82CFFF`; overrides programme status on 279. |
-| Chapter number (CAV)       | 17, 18                | 280, 281               | Fields without picture number. Lines 17/280 are lower priority than picture stop. Code: `8X₁X₂DDD`; max 79. |
-| Programme time code (CLV)  | 17, 18                | —                      | First field only. Code: `FX₁DDX₂X₃`; auto-updates each frame.                                           |
-| CLV code                   | 17 or 280             | —                      | Fields without programme time code and CLV picture number. Code: `87FFFF`                                |
-| CLV picture number         | 16 or 279             | —                      | First field only (Amendment 2). Code: `8X₁EX₃X₄X₅`; auto-updates each frame.                           |
-| Chapter number (CLV)       | 18 or 281             | —                      | Fields without programme time code and CLV picture number.                                               |
-| Programme status (CAV)     | 16, 279               | —                      | Every frame. Picture stop has priority on line 279. Code: `8DC/BAX₃X₄X₅`                                |
-| Programme status (CLV)     | 16 or 279             | —                      | Same fields as CLV code insertion. Code: `8DC/BAX₃X₄X₅`                                                 |
-| Users code                 | 16, 279               | —                      | Lead-in and/or lead-out area only. Code: `8X₁DX₃X₄X₅`                                                   |
+| **Line** | **Field 1 (picture field)** | **Field 2** |
+| -------- | --------------------------- | ----------- |
+| 16 / 329 / 279 | `programme_status` (0.172H) | `picture_stop` > `programme_status` (0.172H) |
+| 17 / 330 / 280 | `picture_number` | `picture_stop` > `chapter_number` |
+| 18 / 331 / 281 | `picture_number` | `chapter_number` |
+
+Codes: picture number `FX₁X₂X₃X₄X₅` (max 99 999 PAL, 79 999 NTSC/PAL-M; auto-increments each frame); picture stop `82CFFF`; chapter `8X₁X₂DDD` (max 79); programme status `8DC/BAX₃X₄X₅` (Appendix C).
+
+**CLV programme area** — the picture field is field 1 when the section carries `programme_time_code` or `clv_picture_number`:
+
+| **Line** | **Field 1 (picture field)** | **Field 2** |
+| -------- | --------------------------- | ----------- |
+| 16 / 329 / 279 | `clv_picture_number` | `programme_status` (0.172H) |
+| 17 / 330 / 280 | `programme_time_code` | `clv_code` (0.172H on NTSC/PAL-M only) |
+| 18 / 331 / 281 | `programme_time_code` | `chapter_number` |
+
+Codes: programme time code `FX₁DDX₂X₃` (X₁ = hours, X₂X₃ = minutes); CLV picture number `8X₁EX₃X₄X₅` (Amendment 2; seconds + picture count); CLV code `87FFFF`. A field-1 line whose code is absent from the section stays empty.
+
+If a section carries none of the picture-field codes (for example a CAV section with only `chapter_number` and `programme_status`), no field is a picture field and the field-2 assignments are written in **both** fields. `users_code` is placed only in lead-in and lead-out sections.
 
 ##### **40-bit FM Coded Signal (NTSC only — IEC 60857 §10.2)**
 
@@ -1483,7 +1467,7 @@ This signal co-exists with the 24-bit biphase system and occupies separate lines
 | Lead-in white flag              | 11               | —                | Present for ≥ tracks corresponding to 1.5 mm before programme start.                               |
 | Lead-out white flag             | 11               | 274              | Present for ≥ 600 tracks after programme end.                                                       |
 | Picture numbers (CAV)           | 10               | 273              | Always both lines; picture number updated on second field of each picture; max 79 999 (Amendment 2); auto-increments. |
-| White flag (first-field marker) | 11 or 274        | —                | Line 11 = field that opens the picture; line 274 = the other field. Controls player still-picture logic. |
+| Programme-area white flag       | 11               | —                | Field 1, the field that opens every picture. Controls player still-picture logic. |
 | Programme time code (CLV)       | 10               | 273              | Always both lines; minutes and seconds; auto-updates each frame.                                    |
 
 ##### **Fields**
@@ -1514,13 +1498,13 @@ These five keys are the complete accepted set; any other key in a `codes[]` entr
 | ------------------ | ---------------- | ------------------------------------------------------------------------------------------------------ |
 | `lead_in`          | `88FFFF`         | Lead-in marker; inserted for ≥ 1.5 mm of tracks before programme start.                               |
 | `lead_out`         | `80EEEE`         | Lead-out marker; inserted for ≥ 2 mm of tracks after programme end.                                   |
-| `picture_number`   | `FX₁X₂X₃X₄X₅`   | Frame address; max 99 999 (PAL) / 79 999 (NTSC); auto-increments each frame, anchored by `start_value` where present. |
+| `picture_number`   | `FX₁X₂X₃X₄X₅`   | Frame address; max 99 999 (PAL) / 79 999 (NTSC, PAL-M); auto-increments each frame, anchored by `start_value` where present. |
 | `picture_stop`     | `82CFFF`         | Inserted in the field following the picture-number field to trigger player still-frame mode.           |
 | `chapter_number`   | `8X₁X₂DDD`       | Chapter identifier (0–79); uses the optional `chapter` field.                                          |
 | `programme_status` | `8DC/BAX₃X₄X₅`   | Audio/video channel use identification per Appendix C; requires `programme_status` field.             |
 | `users_code`       | `8X₁DX₃X₄X₅`    | Optional user identification; lead-in/lead-out only; requires `users_code` field.                     |
-| `fm_picture_number`| (40-bit FM)      | **NTSC only.** 40-bit FM coded picture number on lines 10/273; auto-increments alongside `picture_number`. |
-| `fm_white_flag`    | (100 IRE white)  | **NTSC only.** First-field white flag on line 11 or 274.                                               |
+| `fm_picture_number`| (40-bit FM)      | **NTSC/PAL-M only.** 40-bit FM coded picture number on lines 10/273; auto-increments alongside `picture_number`. |
+| `fm_white_flag`    | (100 IRE white)  | **NTSC/PAL-M only.** White flag on line 11 (lead-in, programme area) and also 274 (lead-out).          |
 
 ##### **Valid `code_type` Values — CLV**
 
@@ -1534,8 +1518,8 @@ These five keys are the complete accepted set; any other key in a `codes[]` entr
 | `chapter_number`        | `8X₁X₂DDD`      | Chapter identifier (0–79); uses the optional `chapter` field.                                          |
 | `programme_status`      | `8DC/BAX₃X₄X₅`  | Audio/video channel use identification per Appendix C; requires `programme_status` field.              |
 | `users_code`            | `8X₁DX₃X₄X₅`   | Optional user identification; lead-in/lead-out only; requires `users_code` field.                      |
-| `fm_programme_time`     | (40-bit FM)     | **NTSC only.** 40-bit FM coded programme time (minutes + seconds) on lines 10/273; auto-updates.       |
-| `fm_white_flag`         | (100 IRE white) | **NTSC only.** First-field white flag on line 11 or 274.                                               |
+| `fm_programme_time`     | (40-bit FM)     | **NTSC/PAL-M only.** 40-bit FM coded programme time (minutes + seconds) on lines 10/273; auto-updates.       |
+| `fm_white_flag`         | (100 IRE white) | **NTSC/PAL-M only.** White flag on line 11 (lead-in, programme area) and also 274 (lead-out).          |
 
 ##### **Example (PAL CAV)**
 
@@ -1580,6 +1564,8 @@ line_injections:
 ---
 
 #### **VITC (Vertical Interval Timecode)**
+
+> **Status**: target design only. The parser accepts `type: vitc` with `target_lines`, but the validator rejects it ("line injection type 'vitc' is not implemented in the current runtime"); the other fields below (`timecode`, `flags`, `crc`, `user_data`) are not accepted yet and are parse errors ("unsupported field").
 
 > **Note**: VITC is **incompatible with laserdisc biphase encoding**. Laserdisc discs use the IEC biphase system as their sole timecode and address mechanism; VITC is not used on laserdisc and must not be combined with a `laserdisc` injection in the same section. Doing so will fail validation.
 
@@ -1737,7 +1723,8 @@ For **4fsc sampling**, refer to:
 
 Current implementation status:
 
-- Only **locked `4fsc`** operation is implemented.
+- Generation always runs on the **`4fsc`** lattice. PAL, NTSC and PAL-M output is declared `STANDARD_STABLE_LOCKED`; SECAM (FM chroma, no Sc/H convention) is declared `STANDARD_STABLE_UNLOCKED` but is still generated at the standard 4fsc rate.
+- The `RAW_S16_28M`/`RAW_S16_40M` output encodings are produced by resampling the 4fsc frames in the output stage, not by a separate sample clock.
 - The current runtime does **not** implement a free-running mode.
 - The current runtime does **not** expose a separate NCO-driven sample-clock subsystem; instead it synthesizes carrier phase directly from the absolute sample index on the `4fsc` lattice. Because the carrier advances exactly $\pi/2$ per sample, the index is reduced modulo 4 before the phase is formed, which makes the phase exact for any render length instead of losing precision as the absolute index grows.
 
@@ -1780,9 +1767,9 @@ cvbs_presets:
 - **Current runtime**:
   - Generate complete frame batches directly at `4 × f_sc`.
   - Use absolute-sample-index carrier synthesis for PAL/NTSC burst and active-picture chroma.
-  - Reject non-locked and non-`4fsc` output requests during validation.
+  - Require the generated signal state for the standard (`STANDARD_STABLE_LOCKED`, or `STANDARD_STABLE_UNLOCKED` for SECAM) and a supported sample encoding preset during validation; raw presets are resampled from 4fsc at output.
 - **Future runtime extensions**:
-  - Add explicit unlocked and non-`4fsc` output modes behind a dedicated sample-clock abstraction.
+  - Add explicit free-running and native non-`4fsc` generation modes behind a dedicated sample-clock abstraction.
 
 ---
 
@@ -1832,7 +1819,7 @@ Current implementation status:
 | Laserdisc biphase — key code lines      | 16–18             | 279–281           | Active 24-bit biphase payload (within reserved range).                                                                       |
 | VITC                                    | 14–16             | 277–279           | **Incompatible with laserdisc biphase, and lines 14–16/277–279 fall within the NTSC laserdisc reserved range.** Must not appear in any section that contains a `laserdisc` injection. |
 | VIR signal                              | 19                | 282               | Mandatory on NTSC laserdisc per IEC 60857 §9.1.3; FCC Recommendation 73-699.                                               |
-| VITS (NTC-7 composite/combination)      | 17, 280           | —                 | **Conflicts with laserdisc reserved range.** NTC-7 types cannot coexist with a laserdisc injection in the same section.      |
+| VITS (NTC-7 composite/combination)      | 17, 280           | —                 | **Conflicts with laserdisc reserved range.** NTC-7 types cannot be used in a laserdisc project.      |
 | VITS (composite/combination test)       | 20                | 283               | Recommended by IEC 60857 §9.1.4; outside reserved range; compatible with laserdisc.                                        |
 | CEA-608 / closed caption                | 21                | 284 (first half)  | Per PBS Report E7709 (handicapped caption data).                                                                             |
 
@@ -1841,7 +1828,7 @@ Current implementation status:
 ### **Conflict Resolution**
 
 - **If injected lines overlap within a section, the YAML must fail validation.**
-- **When a `laserdisc` injection is active in a section, any other injection targeting lines within the reserved range for that standard must fail validation** (PAL: F1 6–18, F2 319–331; NTSC: F1 10–18, F2 273–281).
+- **When the project declares a `disc_type`, any project VITS entry targeting lines within the reserved range for that standard must fail validation** (PAL: F1 6–18, F2 319–331; NTSC/PAL-M: F1 10–18, F2 273–281).
 - **A `vitc` injection and a `laserdisc` injection must not appear in the same section.** Laserdisc does not use VITC; the biphase system is the sole timecode and address mechanism on laserdisc.
 ---
 
@@ -1870,8 +1857,9 @@ The runtime uses a **central pipeline module** to process sections and combine t
 
 - `VideoSynthPipeline::Run(options, observer, cancellation)` parses the YAML project file and delegates to `RunProject`. `VideoSynthPipeline::RunProject(project, options, observer, cancellation)` runs the pipeline for an already-parsed in-memory `Project` (validate → generate → noise → dropout → output); relative paths in the project are used as-is and must be resolved by the caller. The CLI uses `Run`; front-ends that hold an in-memory project (e.g. a GUI) use `RunProject`.
 - `observer` (optional, nullable) is an `IPipelineObserver` receiving stage transitions (`validate`, `generate`, `finalize`), per-batch frame progress (`frames_completed / frames_total`), validation warnings, and a terminal `PipelineRunStatus` (`kSucceeded` / `kCancelled` / `kFailed`) reported exactly once. Callbacks run synchronously on the pipeline's executing thread.
-- `cancellation` (optional, nullable) is a thread-safe one-shot `CancellationToken` polled between frame batches. On cancellation the pipeline aborts all in-progress artefacts — video/chroma/metadata via `IOutputStage::AbortWrite`, the WAV tracks via `AudioTrackGenerator::Abort`, and the dropout sidecar via `DropoutInjectionStage::Abort` — so a cancelled run leaves no partially-written output files, reports `kCancelled` (not an error), and returns `false`.
-- A whole pipeline run executes on a single thread, which may be a worker thread; there is no main-thread affinity. `ILogger`, `IProjectParser`, and `IProjectValidator` implementations are thread-safe; the stage collaborators are single-owner and NOT thread-safe, so a pipeline instance must not run concurrently with itself.
+- `cancellation` (optional, nullable) is a thread-safe one-shot `CancellationToken` polled between frame batches. On cancellation the pipeline aborts all in-progress artefacts — video/chroma/metadata via `IOutputStage::AbortWrite`, the WAV tracks and any EFM stream via `AudioTrackGenerator::Abort`, and the dropout sidecar via `DropoutInjectionStage::Abort` — so a cancelled run leaves no partially-written output files, reports `kCancelled` (not an error), and returns `false`.
+- A pipeline run is driven from one *run thread*, which may be a worker thread; there is no main-thread affinity. A pipeline instance must not run concurrently with itself, because the single-owner session state (the output stage's open files, the dropout sidecar session, the WAV/EFM writers) is not synchronised. `ILogger`, `IProjectParser`, and `IProjectValidator` implementations are thread-safe.
+- With `--threads` (`RunOptions::threads`) resolving to more than one worker, the run spawns a `FrameSynthesisPool`: `IGenerationStage::GenerateFrameBatch`, `NoiseInjectionStage::InjectNoise`, `DropoutInjectionStage::ComputeFrameDropouts` and `IOutputStage::EncodeFrame` execute concurrently on pool workers, one frame per job, while the encoded-frame writes, dropout sidecar commits, audio emission and observer callbacks stay on the run thread in frame order. With one thread the pipeline uses the sequential batched loop. Output is byte-identical either way. Cancellation is polled between batches (sequential) or by the pool between frames.
 
 ---
 
@@ -1901,7 +1889,7 @@ The runtime uses a **central pipeline module** to process sections and combine t
 Current implementation note:
 
 - VITS line injections are applied in the generation-stage runtime path on validated target lines.
-- Laserdisc biphase injection is applied in the generation-stage runtime path via BiphaseInjectionManager (24-bit biphase and 40-bit FM for NTSC).
+- Laserdisc biphase injection is resolved per frame by `BiphaseInjectionManager::ResolveFrame` during the schedule-enrichment pass of `BuildFrameSchedule` and rendered as a per-frame patch during synthesis (24-bit biphase, plus 40-bit FM and the white flag for NTSC/PAL-M).
 - Runtime synthesis/application for VITC and custom per-line content remains deferred.
 
 #### **3. Noise Injection Stage**
@@ -1913,7 +1901,7 @@ Current implementation note:
   2. Skip frames whose section has no noise configured.
   3. For each enabled frame:
      - Derive floor sigma (`σ_f_mV`) and proportional coefficient (`k`) from `noise_db` and `noise_spread_db`.
-     - Seed `std::mt19937_64` from a hash of `(section_index, global_frame_index)` for reproducible, batch-size-independent output.
+     - Seed `std::mt19937_64` per frame from a base seed mixed with `section_index` and `global_frame_index`, so output is independent of batch size and thread count. The base seed is the section's `noise_seed` when set (reproducible across runs); otherwise it is drawn once per run from `std::random_device`, so unseeded noise differs between runs.
      - For each sample position: draw a single noise value and add it to both Y and C buffers (correlated noise). The noise standard deviation at each sample is `sqrt(σ_f² + (k × Y_mV)²)`.
   4. Clamp all output samples to the legal fixed-point mV range for the standard.
 
@@ -1952,7 +1940,7 @@ Current implementation note:
 
 Current implementation note:
 
-- The output stage currently accepts only locked `4fsc` batches and does not perform a separate resampling or NCO-driven sampling step.
+- The output stage always receives 4fsc frames. For the 4fsc presets it encodes them directly; for `RAW_S16_28M`/`RAW_S16_40M` it linearly resamples each frame to the preset's frame span first. There is no NCO-driven sampling step.
 
 ---
 
@@ -1986,9 +1974,9 @@ To simulate **analogue output**, the generator must:
 
 The current validator enforces a narrower subset than the full design intent in this section:
 
-- Implemented: standard selection, locked `4fsc` preset constraints, output-path requirements (including `signal_type` validation and `.cvbsy`-suffix enforcement for Y/C mode), progressive source profile checks, accepted raster checks, NTSC black-setup constraints, and validator-side VITS/line-injection compatibility checks including overlap detection, laserdisc reserved-range conflicts, and VITC/laserdisc incompatibility.
-- Implemented: full laserdisc biphase validation including section_type/code_type matrix enforcement, IEC value range constraints (picture_number, chapter_number, users_code X₁, CLV picture number digits, programme time code BCD), CAV minimum duration checks (lead-in ≥ 938 frames, lead-out ≥ 1250 frames), minimum chapter length (30 tracks), the NTSC VIRS mandatory presence check (a `virs` entry in the project-level `line_injections.vits`), and VITS/biphase reserved-range line conflict detection.
-- Implemented: per-section noise parameter validation (range, spread floor, mutual dependency).
+- Implemented: standard selection, sample-encoding and signal-state preset constraints, output-path requirements (including `signal_type` validation and `.cvbsy`-suffix enforcement for Y/C mode), progressive source profile checks, accepted raster checks, NTSC/PAL-M black-setup constraints, and validator-side VITS/line-injection compatibility checks including overlap detection, laserdisc reserved-range conflicts, and VITC/laserdisc incompatibility (VITC itself is then rejected as not implemented).
+- Implemented: full laserdisc biphase validation including section_type/code_type matrix enforcement, IEC value range constraints (`picture_number`/`fm_picture_number` `start_value` against the standard's maximum — the start value only, not the incremented count — `chapter` 0–79, and the `users_code` X₁ 0–7 and D = `0xD` nibbles; the CLV clocks take no parameters), CAV minimum duration **warnings** (lead-in ≥ 938 frames, lead-out ≥ 1250 frames; skipped for `duration_frames: "all"`), a CAV-only minimum chapter length **warning** (`ValidateChapterLengths`: a chapter run shorter than 30 frames; runs containing a `duration_frames: "all"` section are skipped, and CLV discs are not checked), the NTSC/PAL-M VIRS mandatory presence check (a `virs` entry in the project-level `line_injections.vits`), and VITS/biphase reserved-range line conflict detection.
+- Implemented: per-section noise parameter validation (range, spread floor, mutual dependency), dropout validation (scale range, and an error for a `dropouts:` block that enables neither type), and audio validation (including an error when a tone sets both `ramp:` and `frequency`).
 - Implemented: disc-structure section ordering. When any section declares a `section_type`, the section sequence must be `[lead_in] programme_area... [lead_out]`: at most one `lead_in` (first) and one `lead_out` (last), no section may precede the `lead_in` or follow the `lead_out`, and every section after a `lead_in` or before a `lead_out` must be `programme_area`. Out-of-order sections would break monotonic picture-number and time-code generation (IEC 60856/60857). The GUI surfaces these errors through the shared validator in the validation issues dock.
 - Not yet implemented in the validator/runtime pair: VITC and custom per-line content runtime paths.
 
@@ -1999,14 +1987,14 @@ The rule set below remains the intended validation contract for VITC and custom 
 ### **Validation Rules**
 
 1. **CVBS Presets**:
-  - Only one `video_standard_preset` (PAL or NTSC) per project.
+  - Only one `video_standard_preset` (PAL, NTSC, PAL_M or SECAM) per project.
   - Only one `sample_encoding_preset` per project.
   - Only one `signal_state_preset` per project.
   - Output resolution is fixed by the standard (720x576 for PAL and SECAM, 720x486 for NTSC and PAL-M) and must not be specified in the project file.
-  - 4fsc generation requires a 4fsc `sample_encoding_preset` and a locked `signal_state_preset` (unlocked for SECAM).
-  - `pal_laserdisc_pilot_burst` can **only be enabled for PAL projects**. If enabled for NTSC, the YAML is considered **invalid**.
-  - `ntsc_laserdisc_vbi_burst` can **only be enabled for NTSC projects**. If enabled for PAL, the YAML is considered **invalid**.
-  - `ntsc_black_setup_ire` can **only be specified for NTSC projects**. If specified for PAL, the YAML is considered **invalid**.
+  - `sample_encoding_preset` must be a supported 4fsc or raw preset; `signal_state_preset` must be `STANDARD_STABLE_LOCKED` (`STANDARD_STABLE_UNLOCKED` for SECAM).
+  - `pal_laserdisc_pilot_burst` can **only be enabled for PAL projects**; any other standard is **invalid**. A warning is emitted when the preset cannot carry the burst's sub-sync trough.
+  - `ntsc_laserdisc_vbi_burst` can **only be enabled for NTSC projects**, and is rejected there as not implemented.
+  - `ntsc_black_setup_ire` can **only be specified for NTSC or PAL-M projects**. If specified for PAL or SECAM, the YAML is considered **invalid**.
   - `ntsc_black_setup_ire` must be either `7.5` or `0.0`.
 2. **Sections**:
   - Each section must have a valid `type` (`progressive`).
@@ -2030,7 +2018,7 @@ The rule set below remains the intended validation contract for VITC and custom 
   - `target_lines` must be within the valid range for the standard (1-625 for PAL, 1-525 for NTSC).
   - `target_lines` must **not** be specified for `laserdisc` injection types; specifying it is a validation error.
   - **If injected lines overlap within a section, the YAML must fail validation.**
-  - **When a `laserdisc` injection is active in a section, no other injection type may target lines within the laserdisc reserved ranges** (PAL: Field 1 lines 6–18, Field 2 lines 319–331; NTSC: Field 1 lines 10–18, Field 2 lines 273–281).
+  - **When the project declares a `disc_type` (a laserdisc project), no project VITS entry may target lines within the laserdisc reserved ranges** (PAL: Field 1 lines 6–18, Field 2 lines 319–331; NTSC/PAL-M: Field 1 lines 10–18, Field 2 lines 273–281).
   - **A `vitc` injection and a `laserdisc` injection must not appear in the same section.** Laserdisc does not use VITC.
 4. **Noise Parameters** (per-section `noise:` block):
   - `noise_db` must be in **[20.0, 61.0] dB** (error if outside this range).
@@ -2042,7 +2030,7 @@ The rule set below remains the intended validation contract for VITC and custom 
   - `random.scale` must be in **[0, 20]** (error if outside this range; `0` means disabled).
   - `scratch.scale` must be in **[0, 20]** (error if outside this range; `0` means disabled).
   - A `dropouts:` block where both `random.scale` and `scratch.scale` are `0` (or both sub-blocks are absent) is a **validation error** — omit the `dropouts:` key entirely to disable.
-  - If `scratch.scale > 0` and the derived maximum scratch lifespan (from `DeriveScratchDropoutParams(scale).max_dur_frames`) exceeds `section.duration_frames`, a **warning** is emitted indicating the scratch event will not complete its full triangle envelope within the section.
+  - If `scratch.scale > 0` and the derived maximum scratch lifespan (from `DeriveScratchDropoutParams(scale).max_dur_frames`) exceeds an integer `section.duration_frames` (sections with `"all"` are not checked), a **warning** is emitted indicating the scratch event will not complete its full triangle envelope within the section.
 6. **EFM Digital Audio** (`output.efm_audio:` block):
   - `pair` must be in **[0, 7]** (error if outside this range).
   - `video_standard_preset` must be `PAL` or `NTSC` — no other standard has a LaserDisc digital audio specification (error otherwise).
@@ -2055,28 +2043,29 @@ The rule set below remains the intended validation contract for VITC and custom 
 
 ### **Error Messages**
 
+Representative messages as emitted by the parser (`src/yaml_project_parser.cpp`) and validator (`src/project_validator.cpp`). Validator messages are prefixed with their category (`Project configuration error:`, `Line injection validation error:`, `Progressive section validation error:`, …).
 
 | **Error**                                  | **Message**                                                                                                                              |
 | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Invalid standard                           | "video_standard_preset must be 'PAL' or 'NTSC'."                                                                                         |
-| `resolution` field present                 | "`resolution` must not be specified; it is fixed by the standard."                                                                       |
-| Invalid sample rate                        | "Sample rate 10MSPS may not capture the full CVBS bandwidth (5.5 MHz for PAL)."                                                          |
-| Missing source file                        | "File '/nonexistent.mkv' not found."                                                                                                     |
-| Invalid line injection target lines        | "Line 700 is out of range for PAL (max 625)."                                                                                            |
-| Laserdisc `target_lines` specified         | "`target_lines` must not be specified for laserdisc injections; line placement is fixed by the standard."                                |
-| Laserdisc reserved range conflict          | "Injection type [type] targets line [n] which is within the laserdisc reserved range for [standard]; cannot coexist with laserdisc injection." |
-| VITC with laserdisc                        | "`vitc` injection cannot be used in the same section as a `laserdisc` injection; laserdisc does not use VITC."                              |
-| Overlapping target lines                   | "Overlapping target_lines in section: [section_name]."                                                                                   |
-| Invalid signal state preset                | "signal_state_preset must indicate a time-base stable, phase-locked state."                                                              |
-| Invalid pilot burst                        | "pal_laserdisc_pilot_burst can only be enabled for PAL projects."                                                                        |
-| Invalid VBI burst                          | "ntsc_laserdisc_vbi_burst can only be enabled for NTSC projects."                                                                        |
-| Invalid NTSC black setup scope             | "ntsc_black_setup_ire can only be specified for NTSC projects."                                                                          |
-| Invalid NTSC black setup value             | "ntsc_black_setup_ire must be 7.5 or 0.0."                                                                                               |
-| Invalid frame rate                         | "Input frame rate must match the output standard's frame rate (25 fps for PAL, ~29.97 fps for NTSC)."                                    |
-| Unsupported progressive source profile     | "Progressive source is not in a supported profile. Validate container, codec, chroma format, and bit depth against the supported profile list." |
-| Invalid progressive source dimensions      | "Progressive source dimensions are invalid for the selected standard. PAL requires 720x576; NTSC requires 720x486." |
-| Scaling requested or implied               | "Progressive source scaling is not supported. Source dimensions must already match PAL 720x576 or NTSC 720x486." |
-
+| Unknown key (e.g. a `resolution` field)    | "`<context>` contains unsupported field: '`<key>`' …" (parse error) |
+| Invalid standard                           | "Project configuration error: video_standard_preset must be 'PAL', 'NTSC', 'PAL_M', or 'SECAM'." |
+| Invalid sample encoding preset             | "Project configuration error: sample_encoding_preset must be one of the supported CVBS or raw presets." |
+| Invalid signal state preset                | "Project configuration error: signal_state_preset must be 'STANDARD_STABLE_LOCKED'." (`… 'STANDARD_STABLE_UNLOCKED' for SECAM projects.`) |
+| Invalid pilot burst                        | "Project configuration error: pal_laserdisc_pilot_burst can only be enabled for PAL projects." |
+| Invalid VBI burst                          | "Project configuration error: ntsc_laserdisc_vbi_burst can only be enabled for NTSC projects." |
+| VBI burst not implemented                  | "Project configuration error: ntsc_laserdisc_vbi_burst is parsed but not implemented in the current runtime." |
+| Invalid NTSC black setup scope             | "Project configuration error: ntsc_black_setup_ire can only be specified for NTSC or PAL-M projects." |
+| Unknown asset root                         | "…: unknown asset root '`<name>`' in `<field>`. Known roots: bundled, user, project, output." |
+| Invalid line injection target lines        | "Line injection validation error: VITS target line `<n>` is outside the valid frame-line range for `<standard>`." |
+| Laserdisc `target_lines` specified         | "Line injection validation error: target_lines must not be specified for laserdisc injections." |
+| Laserdisc reserved range conflict          | "Line injection validation error: VITS target line `<n>` conflicts with laserdisc reserved VBI ranges for `<standard>`." |
+| VITC with laserdisc                        | "Line injection validation error: vitc and laserdisc injections cannot appear in the same section." |
+| Overlapping target lines                   | "Line injection validation error: overlapping VITS target line `<n>` within the project VITS set." |
+| Unimplemented injection type               | "Project configuration error: line injection type '`<type>`' is not implemented in the current runtime." |
+| Missing NTSC/PAL-M VIRS                    | "Line injection validation error: NTSC and PAL-M laserdisc projects require a virs VITS injection for colour (IEC 60857 §9.1.3)." |
+| Invalid progressive source dimensions      | "Progressive section validation error: source raster must be 720x576 for PAL and 720x486 for NTSC or PAL-M." |
+| Invalid frame rate                         | "Progressive section validation error: source frame rate must match selected video standard." |
+| Variable frame rate                        | "Progressive section validation error: source has a variable frame rate; convert it to a constant frame rate first." |
 
 ---
 
@@ -2111,6 +2100,8 @@ videosynth --project project.yaml [options]
 | `--template-cache-mb <n>` | Frame template cache capacity in MiB; `0` disables the cache (see [Section 4](#4-generation-stage), Frame Template Cache). Output is byte-identical regardless of the capacity. | `512` |
 | `--log-level <level>` | Set the log level to `info`, `debug`, or `trace`. | `info` |
 | `--log-file <filename>` | Write log output to the specified file in addition to the console. | none |
+| `--asset-root <name>=<path>` | Map the `{name}` logical asset root to `<path>` (repeatable); overrides the built-in `bundled`/`user` roots. See [Asset Roots & Path Resolution](#asset-roots-path-resolution). | environment / install prefix |
+| `--output-root <path>` | Directory the `{output}` root resolves to (shorthand for `--asset-root output=<path>`). | `$VIDEOSYNTH_OUTPUT_DIR`, else the project file's directory |
 
 The output path is configured in YAML under `output.video_path`; the metadata sidecar and audio track are colocated with it.
 
@@ -2182,147 +2173,38 @@ videosynth-gui --log-level trace --log-file out/videosynth-gui.log
 
 ### **Build Environment**
 
-- **Language**: C++17.
-- **Build System**: Nix.
+- **Language**: C++17 (`CMAKE_CXX_STANDARD 17`, extensions off).
+- **Build System**: CMake ≥ 3.20 (Ninja in the Nix shell); single-config builds default to `Release`.
+- **Environment**: Nix. `flake.nix` provides the package (`packages.default`), the documentation site (`packages.docs`) and the development shell (`devShells.default`); `default.nix` re-exports the flake's default package.
 - **Dependencies**:
-  - **YAML Parsing**: [yaml-cpp](https://github.com/jbeder/yaml-cpp).
-  - **Image/Video Decoding**: [FFmpeg](https://ffmpeg.org/) (for the constrained progressive source profiles in Section 8.1).
-  - **Sample Rate Conversion**: [soxr](https://sourceforge.net/p/soxr/).
+  - **YAML parsing**: [yaml-cpp](https://github.com/jbeder/yaml-cpp).
   - **Logging**: [spdlog](https://github.com/gabime/spdlog).
-  - **Testing**: [Google Test](https://github.com/google/googletest).
+  - **Metadata sidecars**: SQLite3.
+  - **EXR stills**: OpenEXR (with zlib).
+  - **Video and audio decode**: the external `ffmpeg`/`ffprobe` programs, run as child processes (no FFmpeg libraries are linked).
+  - **GUI**: Qt 6 (Widgets, Svg), only when `VIDEOSYNTH_BUILD_GUI` is on.
+  - **Testing**: [Google Test](https://github.com/google/googletest), only when `VIDEOSYNTH_BUILD_TESTS` is on.
 
 ---
 
 ### **Nix Configuration**
 
-#### `**flake.nix` Example**
-
-```nix
-{
-  description = "VideoSynth - Analogue Video Format Generator";
-
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    flake-utils.url = "github:numtide/flake-utils";
-  };
-
-  outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
-      let
-        pkgs = import nixpkgs { inherit system; };
-      in {
-        packages.default = pkgs.stdenv.mkDerivation {
-          name = "videosynth";
-          src = ./.;
-
-          buildInputs = with pkgs; [
-            cmake
-            yaml-cpp
-            ffmpeg
-            soxr
-            spdlog
-            googletest
-          ];
-
-          cmakeFlags = [ "-DCMAKE_BUILD_TYPE=Release" ];
-
-          installPhase = ''
-            mkdir -p $out/bin
-            cp videosynth $out/bin/
-          '';
-        };
-      }
-    );
-}
-```
-
----
-
-#### `**default.nix` Example**
-
-```nix
-{ pkgs ? import <nixpkgs> {} }:
-
-pkgs.stdenv.mkDerivation {
-  name = "videosynth";
-  src = ./.;
-
-  buildInputs = with pkgs; [
-    cmake
-    yaml-cpp
-    ffmpeg
-    soxr
-    spdlog
-    googletest
-  ];
-
-  cmakeFlags = [ "-DCMAKE_BUILD_TYPE=Release" ];
-
-  installPhase = ''
-    mkdir -p $out/bin
-    cp videosynth $out/bin/
-  '';
-}
-```
+The flake's package derivation builds with CMake and Ninja (plus `pkg-config` and `qt6.wrapQtAppsHook`) against yaml-cpp, spdlog, gtest, sqlite, openexr, zlib, ffmpeg, qtbase and qtsvg. It passes `-DCMAKE_BUILD_TYPE=Release`, `-DPROJECT_VERSION_OVERRIDE=<version>`, `-DVIDEOSYNTH_ENABLE_CLANG_TIDY=OFF` and `-DVIDEOSYNTH_BUNDLED_ASSET_DIR=$out/share/videosynth/assets`, and its check phase runs only the unit lane (`ctest -L unit`). The development shell adds Python (with numpy), clang-tools, ccache and the MkDocs environment. Run project workflows inside it with `nix develop "path:$PWD" --command <command>`.
 
 ---
 
 ### **CMake Configuration**
 
-#### `**CMakeLists.txt` Example**
+`CMakeLists.txt` defines:
 
-```cmake
-cmake_minimum_required(VERSION 3.15)
-project(VideoSynth LANGUAGES CXX)
+| Target | Kind | Contents / links |
+| --- | --- | --- |
+| `videosynth_efm` | static library | `src/efm/*.cpp`; no dependency on `videosynth_core` |
+| `videosynth_core` | library | All non-GUI sources in `src/`; links `videosynth_efm`, yaml-cpp, `spdlog::spdlog`, `SQLite::SQLite3`, `OpenEXR::OpenEXR` |
+| `videosynth` | executable | `src/main.cpp` (the CLI); links `videosynth_core` |
+| `videosynth_gui_lib` / `videosynth-gui` | static library / executable | `src/gui/`; links `videosynth_core`, `Qt6::Widgets`, `Qt6::Svg` (when `VIDEOSYNTH_BUILD_GUI` is on and Qt 6 is found) |
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# Find dependencies
-find_package(yaml-cpp REQUIRED)
-find_package(FFmpeg REQUIRED)
-find_package(soxr REQUIRED)
-find_package(spdlog REQUIRED)
-
-# Add executable
-add_executable(videosynth
-    src/main.cpp
-    src/yaml_parser.cpp
-    src/yaml_parser.h
-    src/generation_stage.cpp
-    src/generation_stage.h
-    src/output_stage.cpp
-    src/output_stage.h
-    src/field_handler.cpp
-    src/field_handler.h
-    src/line_injection.cpp
-    src/line_injection.h
-    src/vits_generator.cpp
-    src/vits_generator.h
-    src/laserdisc_generator.cpp
-    src/laserdisc_generator.h
-    src/vitc_generator.cpp
-    src/vitc_generator.h
-    src/nco.cpp
-    src/nco.h
-    src/ramping.cpp
-    src/ramping.h
-)
-
-# Link libraries
-target_link_libraries(videosynth
-    yaml-cpp
-    avcodec
-    avformat
-    avutil
-    soxr
-    spdlog::spdlog
-    GTest::GTest
-)
-
-# Install
-install(TARGETS videosynth DESTINATION bin)
-```
+The version string comes from `PROJECT_VERSION_OVERRIDE` or, failing that, the short git commit hash with a `-dirty` suffix, and is written to the generated `videosynth_version.h`. `VIDEOSYNTH_BUNDLED_ASSET_DIR` (default: the in-tree `videosynth-assets/assets`) is compiled into `videosynth_core` as the `{bundled}` root; the `VIDEOSYNTH_ASSET_DIR` environment variable overrides it at runtime. `cmake --install` installs the binaries, the desktop metadata (GUI builds) and the bundled asset library to `share/videosynth/assets`. Tests are added from `tests/CMakeLists.txt` when `VIDEOSYNTH_BUILD_TESTS` is on.
 
 ---
 
@@ -2343,13 +2225,13 @@ The AppStream release entry is filled from the `VIDEOSYNTH_RELEASE_VERSION` and 
 
 ### **Packaging Build Options**
 
-Three CMake options separate the shipped artefacts from the development gates, so a packaging build never fails on tooling that only the dev shell pins:
+Three CMake options separate the shipped artefacts from the development gates, so a packaging build never fails on tooling that only the dev shell pins. (`VIDEOSYNTH_BUILD_GUI`, default `ON`, separately selects whether the Qt GUI is built.)
 
 | Option | Default | Packaging value |
 | --- | --- | --- |
 | `VIDEOSYNTH_BUILD_TESTS` | `ON` | `OFF` — skips the test suites and the Google Test dependency |
 | `VIDEOSYNTH_ENABLE_CLANG_FORMAT` | `ON` | `OFF` — the formatter version differs between environments |
-| `VIDEOSYNTH_ENABLE_CLANG_TIDY` | `ON` | `OFF` — see the note in Section 15 above |
+| `VIDEOSYNTH_ENABLE_CLANG_TIDY` | `ON` | `OFF` — packaged toolchains ship an unwrapped clang-tidy that cannot resolve the standard library headers |
 
 ### **Flatpak**
 
@@ -2357,7 +2239,7 @@ Three CMake options separate the shipped artefacts from the development gates, s
 
 - **Filesystem access**: `--filesystem=host`, plus `/media` and `/run/media`. Generation reads source media and writes multi-gigabyte sample files at user-chosen paths, so the sandbox is given unrestricted read/write access to the user's own filesystem rather than a portal-mediated subset.
 - **Bundled modules**: yaml-cpp, spdlog, Imath and OpenEXR are built into `/app` (the runtime carries neither), as is FFmpeg — Section 8.1's progressive video sources shell out to the `ffmpeg` and `ffprobe` programs, which no runtime provides. sqlite3 and zlib come from the runtime.
-- **Asset root**: `VIDEOSYNTH_BUNDLED_ASSET_DIR` is set to `/app/share/videosynth/assets`, so `{bundled}` (Section 9.1) resolves inside the sandbox.
+- **Asset root**: the manifest configures the build with `-DVIDEOSYNTH_BUNDLED_ASSET_DIR=/app/share/videosynth/assets`, so `{bundled}` (see [Asset Roots & Path Resolution](#asset-roots-path-resolution)) resolves inside the sandbox.
 - **Version metadata**: the build sandbox has no git metadata, so `scripts/prepare-flatpak-manifest.py` substitutes the release version and date into a generated copy of the manifest before the build.
 
 `.github/workflows/flatpak.yml` builds the bundle on every push and pull request and publishes it as a release asset only for `v*` tags. See `packaging/README.md` for the full packaging reference.
@@ -2376,84 +2258,60 @@ Three CMake options separate the shipped artefacts from the development gates, s
 ```
 videosynth/
 ├── CMakeLists.txt
-├── flake.nix
-├── default.nix
+├── flake.nix / flake.lock / default.nix
+├── mkdocs.yml
+├── AGENTS.md / TESTING.md / README.md
+├── include/videosynth/                  # Public headers of videosynth_core
+│   └── efm/                             # Public headers of videosynth_efm
 ├── src/
-│   ├── main.cpp
-│   ├── yaml_parser.cpp
-│   ├── yaml_parser.h
-│   ├── generation_stage.cpp
-│   ├── generation_stage.h
-│   ├── output_stage.cpp
-│   ├── output_stage.h
-│   ├── field_handler.cpp
-│   ├── field_handler.h
-│   ├── line_injection.cpp
-│   ├── line_injection.h
-│   ├── vits_generator.cpp
-│   ├── vits_generator.h
-│   ├── laserdisc_generator.cpp
-│   ├── laserdisc_generator.h
-│   ├── vitc_generator.cpp
-│   ├── vitc_generator.h
-│   ├── nco.cpp
-│   ├── nco.h
-│   ├── ramping.cpp
-│   ├── ramping.h
-│   ├── progressive_source.cpp
-│   ├── progressive_source.h
+│   ├── main.cpp                         # CLI entry point
+│   ├── pipeline.cpp, generation_stage.cpp, noise_injection_stage.cpp,
+│   │   dropout_injection_stage.cpp, output_stage.cpp, …   # Core stages
 │   ├── efm/                             # videosynth_efm module (no core dependencies)
-│   │   ├── audio_frame_assembler.cpp
-│   │   ├── circ_encoder.cpp
-│   │   ├── subcode_generator.cpp
-│   │   ├── efm_modulator.cpp
-│   │   └── efm_stream_encoder.cpp
-│   └── ...
+│   └── gui/                             # Qt 6 GUI (videosynth_gui_lib, videosynth-gui)
+├── assets/                              # Application logo and icons
+├── packaging/
+│   ├── linux/                           # .desktop and AppStream metainfo
+│   └── flatpak/                         # Flatpak manifest
 ├── docs/                                # MkDocs sources for the published site
 │   ├── .nav.yml
 │   ├── index.md
+│   ├── assets/
 │   ├── getting-started/
 │   ├── user-manual/
 │   ├── reference/
 │   └── misc/
 ├── docs-tech/
-│   ├── analogue-video-specifications/  (submodule)
-│   ├── cvbs-file-format-specification/ (submodule)
-│   ├── design/
-│   │   ├── high-level-design.md
-│   │   └── ...
-│   └── user/
-│       ├── biphase-design.md
-│       └── ...
-├── resources/
-│   └── doc-diagrams/
+│   ├── analogue-video-specifications/   (submodule)
+│   ├── cvbs-file-format-specification/  (submodule)
+│   ├── design/high-level-design.md
+│   ├── user/biphase-design.md
+│   └── media-sources-plan.md
 ├── videosynth-assets/
 │   └── assets/                          # Authoritative progressive source corpus
-│       ├── exr/
-│       │   ├── 720x576/
-│       │   └── 720x486/
-│       └── mkv/
-│           ├── 720x576/
-│           └── 720x486/
+│       ├── exr/{720x576,720x486}/
+│       └── mkv/{720x576,720x486}/
 ├── projects/                            # Hand-authored project fixtures (inputs only)
 │   ├── general/                         # Feature fixtures — composite
 │   ├── general-yc/                      # Feature fixtures — Y/C
 │   ├── stacking/                        # Disc-simulation / stacking fixtures
+│   ├── long-form/                       # Long-duration fixtures
+│   ├── benchmark/                       # Benchmark projects (scripts/benchmark.sh)
 │   └── variants.json                    # Rules for the build-time derived variants
 ├── scripts/
 │   ├── generate_test_projects.py        # Derives the Y/C and clean variants
 │   ├── run-projects.sh                  # Runs a fixture suite through the CLI
-│   └── ...
-├── tests/                               # Automated tests only — no YAML, no output
-│   ├── CMakeLists.txt                   # Owns every test target
-│   ├── support/                         # Shared helpers (fixture_paths.h, …)
-│   ├── unit/                            # Mocked and fast → ctest label "unit"
-│   ├── functional/                      # Filesystem/pipeline → label "functional"
-│   └── gui/
-│       ├── support/                     # Shared QCoreApplication entry point
-│       ├── unit/
-│       └── functional/
-└── README.md
+│   ├── benchmark.sh, output-hashes.sh   # Performance and output-hash baselines
+│   └── …
+└── tests/                               # Automated tests only — no YAML, no output
+    ├── CMakeLists.txt                   # Owns every test target
+    ├── support/                         # Shared helpers (fixture_paths.h, …)
+    ├── unit/                            # Mocked and fast → ctest label "unit"
+    ├── functional/                      # Filesystem/pipeline → label "functional"
+    └── gui/
+        ├── support/                     # Shared QCoreApplication entry point
+        ├── unit/
+        └── functional/
 ```
 
 ---
@@ -2473,8 +2331,10 @@ The following features are **reserved for future implementation**:
   - Support for embedding CEA-608 closed captions in the VBI (Line 21 for NTSC, Line 22 for PAL).
   - References:
     - [ANSI/CTA-608-E S-2019](../analogue-video-specifications/docs/video_metadata/ANSI-CTA-608-E-S-2019/ANSI-CTA-608-E-S-2019.md): Line 21 Data Services.
-2. **Multi-Threading**:
-  - Parallel processing of sections or frames for improved performance on multi-core systems.
+2. **VITC and custom per-line content**:
+  - Runtime synthesis for the `vitc` injection type (parsed today, rejected by the validator) and for custom per-line content.
+3. **NTSC laserdisc VBI burst**:
+  - Burst on equalizing and broad-sync pulses (`ntsc_laserdisc_vbi_burst`, IEC 60857 §9.1.2), parsed today and rejected by the validator.
 
 ---
 

@@ -17,7 +17,7 @@ Validation is what makes videosynth's strictness useful rather than annoying. A 
 
 **Warnings** do not block generation. They mean the project is legal but probably not what you intended — a scratch longer than the section it lives in, an EFM pair no section declares, a `duration_repeat` on a fixed-length section.
 
-In the GUI both appear in the **Issues** dock; double-clicking an issue selects the section it relates to. The status bar summarises as *Project valid* or *n error(s), m warning(s)*.
+In the GUI both appear in the **Issues** dock; double-clicking an issue selects the section it relates to, or opens **Edit Project…** for a project-level issue. The status bar summarises as *Project valid* or *n error(s), m warning(s)*.
 
 ## What gets checked
 
@@ -28,7 +28,7 @@ Unknown keys are rejected outright, at every level, naming the offending key and
 ### Presets
 
 - One video standard, one sample encoding, one signal state per project.
-- 4fsc generation requires a 4fsc encoding and the signal state the standard requires.
+- `sample_encoding_preset` must be one of the four 4fsc presets or `RAW_S16_28M` / `RAW_S16_40M`.
 - `signal_state_preset` must be `STANDARD_STABLE_LOCKED`, or `STANDARD_STABLE_UNLOCKED` for `SECAM`.
 - `SECAM` projects cannot use laserdisc line injections, `line_injections.disc_type` or laserdisc VITS placement; with VITS a warning notes that VITS chroma stays PAL-modulated. `secam_field_identification: false` on another standard is a warning.
 - `pal_laserdisc_pilot_burst` is PAL only; `ntsc_laserdisc_vbi_burst` is NTSC only and, being unimplemented, is an error if enabled at all.
@@ -50,51 +50,52 @@ Unknown keys are rejected outright, at every level, naming the offending key and
 
 ### Sections and disc structure
 
-- Every section needs a valid `type` (`progressive`) and either frame content or line injections.
+- Every section needs a valid `type` (`progressive`) and a `source`.
 - `duration_frames` must be a positive integer or `"all"` (an omitted `duration_frames` means `"all"`).
 - `start_frame` must be ≥ 0 and `end_frame` ≥ `start_frame`; both must lie inside the video source.
 - `end_frame` must not be combined with an integer `duration_frames`.
 - An EXR still takes neither `start_frame` nor `end_frame`, and needs an integer `duration_frames`.
-- Once any section declares a `section_type`, the sequence must be `[lead_in] programme_area… [lead_out]` — at most one of each, in that order, with nothing outside them.
-- CAV lead-in ≥ 938 frames; lead-out ≥ 1250 frames.
+- Once any section is a `lead_in` or `lead_out`, the sequence must be `[lead_in] programme_area… [lead_out]` — at most one of each, in that order, with nothing outside them.
+- *Warning*: on a CAV disc, a section carrying laserdisc codes that is a lead-in shorter than 938 frames or a lead-out shorter than 1250 frames.
 
 ### Line injections
 
 - `target_lines` must be within the standard's range (1–625 PAL, 1–525 NTSC/PAL-M).
 - `target_lines` must **not** be given for `laserdisc` injections.
-- Injected lines must not overlap within a section.
-- When a `laserdisc` injection is active, nothing else may target a line in the reserved address ranges (PAL 6–18 and 319–331; NTSC 10–18 and 273–281).
+- Injected lines must not overlap within a section, and VITS lines must not overlap within the project VITS set.
+- When `line_injections.disc_type` is set, no VITS may target a line in the reserved address ranges (PAL 6–18 and 319–331; NTSC/PAL-M 10–18 and 273–281).
 - `vitc` and `laserdisc` must not appear in the same section.
 - VITS `target_lines` are constrained by the `placement` policy — see [VITS](vits.md).
 
 ### Laserdisc codes
 
 - The code type must be valid for the disc format, and for the section type it appears in.
-- Picture numbers must not exceed 99,999 (PAL) or 79,999 (NTSC).
-- Chapter numbers are 0–79, with a minimum chapter length of 30 tracks.
-- `users_code` X₁ must be 0–7.
-- CLV picture number and programme time code digits must be in their permitted BCD ranges.
-- NTSC and PAL-M discs must carry a `virs` VITS entry.
+- A section declaring laserdisc codes needs `line_injections.disc_type` and a `section_type`.
+- `picture_number` `start_value` must be 0–99,999 (PAL) or 0–79,999 (NTSC/PAL-M); `fm_picture_number` `start_value` 0–79,999. Only the start value is checked.
+- Chapter numbers are 0–79.
+- `users_code` must be a hex value of at most 24 bits, with X₁ 0–7 and the D digit (bits 15–12) equal to `D`.
+- NTSC and PAL-M discs (any project with `disc_type` set) must carry a `virs` VITS entry.
+- *Warning*: a CAV chapter shorter than 30 frames. Chapters that include a `duration_frames: all` section, and CLV chapters, are not checked.
 
 ### Noise and dropouts
 
 - `noise_db` in 20.0–61.0; `noise_spread_db` ≥ 0; `noise_db − noise_spread_db` ≥ 20.0.
 - `noise_spread_db` without `noise_db` is an error.
-- Dropout `scale` values in 1–20; a `dropouts:` block that disables everything is an error — omit the block instead.
+- Dropout `scale` values in 0–20, with at least one of them 1–20; a `dropouts:` block that disables everything is an error — omit the block instead.
 - *Warning*: spread noise with no VITS on the White SNR measurement line.
 - *Warning*: scratch lifespan longer than the section.
 
 ### Audio and EFM
 
 - Channel pair numbers 0–7, unique within a section; each pair carries one kind of content — tones, `file` or `video_audio` (mixing them is a parse error).
-- Tone pairs: at least one of `left`/`right` present; frequencies within 0–22 000 Hz; amplitude 0.0–1.0. These rules are skipped for file and soundtrack pairs.
+- Tone pairs: at least one of `left`/`right` present; a known `waveform`; frequencies within 0–22 000 Hz; amplitude 0.0–1.0; `ramp` and `frequency` not both given; a ramp needs `start`, `end` and a known `mode`, and its `period` must not exceed the section. These rules are skipped for file and soundtrack pairs.
 - `file`: `path` set, ending in `.wav` or `.flac`; the file exists, can be read, and has one or two channels.
 - `video_audio`: `stream` ≥ 0; the section source is a video, not an EXR still, and has an audio stream at that index.
 - EFM requires PAL or NTSC, at most 79 programme-area sections.
 - *Warnings*: a non-repeating audio file shorter than its section (the rest is silent); EFM pair not declared by any section; a programme track under 4 s (6 s for the first); no lead-in, so no table of contents.
 - *Log notes* (information, not warnings): an audio file or soundtrack that is resampled to 48 kHz, and a soundtrack with more than two channels that is downmixed to stereo.
 
-Checks that read audio files or soundtrack streams run with the CLI, `--validate`, and generation in the GUI. The GUI's background validation checks only the structure, as it does for picture sources.
+Checks that read audio files or soundtrack streams run with the CLI, `--validate`, and generation in the GUI. The GUI's background validation, and **Project → Validate**, check only the structure, as they do for picture sources.
 
 ### On-screen display
 
@@ -107,8 +108,8 @@ Some of the intended design is described by the schema but has no runtime behavi
 
 | Feature | Status |
 |---------|--------|
-| `type: vitc` — vertical interval timecode | Error: *line injection type 'vitc' is not implemented in the current runtime* |
-| `type: line_content` — custom per-line content | Error, same message |
+| `type: vitc` — vertical interval timecode | Error: *line injection type 'vitc' is not implemented in the current runtime* (without `target_lines` it fails earlier, on the missing lines) |
+| `type: line_content` — custom per-line content | Error: *unsupported injection type 'line_content'* |
 | `ntsc_laserdisc_vbi_burst: true` | Error: *parsed but not implemented in the current runtime* |
 
 `laserdisc` is therefore the only usable section-level injection type today, and VITS remain project-level.
@@ -118,10 +119,10 @@ Some of the intended design is described by the schema but has no runtime behavi
 Validation messages name the rule and the value that broke it:
 
 ```text
-code_type 'picture_number' is not valid in section_type 'lead_in'
-lead_out section duration 500 frames is below minimum of 1250 frames
-VITS type 'ntc7-composite' targets line 17 which is within the NTSC laserdisc reserved range
-target_lines must not be specified for laserdisc injections
+Laserdisc injection validation error: code_type 'picture_number' is not allowed in 'lead_in' sections.
+Line injection validation error: VITS target line 17 conflicts with laserdisc reserved VBI ranges for NTSC.
+Line injection validation error: target_lines must not be specified for laserdisc injections.
+Laserdisc injection warning: CAV lead_out section has 500 frames; IEC 2 mm minimum at 1.6 um track pitch requires 1250.
 ```
 
 The [troubleshooting page](../misc/troubleshooting.md) works through the common ones and what to do about each.

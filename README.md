@@ -7,10 +7,10 @@ installation, user manual and the complete project-file reference.
 
 **videosynth** generates analogue composite (CVBS) and Y/C video signals as
 sample files, closely following the published analogue video standards
-(ITU-R BT.470/BT.1700, SMPTE 170M/244M, IEC 60856/60857, IEC 60461). It is
+(ITU-R BT.470/BT.1700, SMPTE 170M/244M, IEC 60856/60857). It is
 aimed at video engineers and media-preservation developers who need
 known-good, reproducible test signals — including laserdisc-style discs with
-VBI codes, noise, dropouts and player tracking errors — to exercise decoders,
+VBI codes, simulated disc skips, noise and dropouts — to exercise decoders,
 time base correctors and restoration tools.
 
 The project ships two front ends built from the same pipeline:
@@ -198,8 +198,8 @@ nix develop "path:$PWD" --command ./build/videosynth-gui
 `videosynth-gui` accepts the same `--log-level` and `--log-file` options, which
 override the persisted preferences for the session. It opens on a welcome page:
 create a project (the video standard is fixed at creation time), add sections,
-edit line injections, impairments and audio, preview frames in a detached
-preview window, then generate. Validation runs continuously in the background
+edit line injections, impairments and audio, preview frames in the preview
+dock, then generate. Validation runs continuously in the background
 and reports into the issues dock.
 
 ---
@@ -216,7 +216,7 @@ project:
   description: PAL VITS fixture
 
 cvbs_presets:
-  video_standard_preset: PAL          # PAL | PAL_M | NTSC
+  video_standard_preset: PAL          # PAL | PAL_M | NTSC | SECAM
   sample_encoding_preset: CVBS_TPG21_4FSC
   signal_state_preset: STANDARD_STABLE_LOCKED
 
@@ -278,7 +278,7 @@ Hand-authored projects live in [projects/](projects/):
 | Directory | Contents |
 |-----------|----------|
 | [projects/general/](projects/general/) | Feature examples — audio, EFM audio, VITS, progressive EXR/MKV sources, PAL pilot burst (composite) |
-| [projects/general-yc/](projects/general-yc/) | Feature examples with Y/C output |
+| [projects/general-yc/](projects/general-yc/) | PAL and NTSC audio examples with Y/C output |
 | [projects/stacking/](projects/stacking/) | Laserdisc disc simulation and multi-source stacking sets for PAL, PAL-M and NTSC |
 | [projects/long-form/](projects/long-form/) | Three-hour capture-sized PAL and NTSC examples (VITS, analogue stereo audio) for testing against realistic file sizes |
 | [projects/benchmark/](projects/benchmark/) | Fixed-length PAL/NTSC still, moving-source and noise projects used by [scripts/benchmark.sh](scripts/benchmark.sh) |

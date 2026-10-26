@@ -23,7 +23,7 @@ Once a project is open the window is laid out as:
 | Bottom dock | **Issues** — live validation results |
 | Bottom dock | **Log** — messages from a generation run (hidden by default) |
 
-Every dock can be hidden, floated or rearranged; **View → Panels** toggles them and the menu always reflects the current layout. The window layout is remembered between sessions.
+Every dock can be hidden, floated or rearranged; **View → Panels** toggles them and the menu always reflects the current layout. The window's size and position are remembered between sessions; the dock arrangement is not.
 
 ## Menus
 
@@ -40,7 +40,7 @@ Every dock can be hidden, floated or rearranged; **View → Panels** toggles the
 
 ### Edit
 
-**Undo** (++ctrl+z++) and **Redo** (++ctrl+shift+z++) cover every project mutation, and name the action they will reverse — *Undo Remove sections*, *Redo Set duration*. Multi-section operations undo as one step. **Preferences…** is described below.
+**Undo** (++ctrl+z++) and **Redo** (++ctrl+shift+z++) cover every project mutation, and name the action they will reverse — *Undo Remove sections*, *Redo Edit section*. Multi-section operations undo as one step. **Preferences…** is described below.
 
 ### Project
 
@@ -66,7 +66,7 @@ Every dock can be hidden, floated or rearranged; **View → Panels** toggles the
 **New Project…** opens the full project settings editor in a dialog, so all project-wide settings are decided before the project exists:
 
 - **Project** — name, version, description.
-- **CVBS Presets** — video standard, sample encoding, signal state, and the standard-specific options (PAL pilot burst, NTSC VBI burst, NTSC black setup override, SECAM field identification). The signal state follows the standard: `STANDARD_STABLE_UNLOCKED` for [SECAM](video-signal.md#secam-chroma), `STANDARD_STABLE_LOCKED` otherwise. Options that do not apply to the selected standard are disabled rather than hidden.
+- **CVBS Presets** — video standard, sample encoding, signal state, and the standard-specific options (PAL pilot burst, NTSC VBI burst, NTSC black setup override, SECAM field identification). The NTSC VBI burst is not implemented yet: ticking it makes the project fail validation. The signal state follows the standard: `STANDARD_STABLE_UNLOCKED` for [SECAM](video-signal.md#secam-chroma), `STANDARD_STABLE_LOCKED` otherwise. Options that do not apply to the selected standard are disabled rather than hidden.
 - **Output** — video path and signal type, plus the optional EFM digital audio channel-pair selection.
 - **Laserdisc & VITS** — disc format (CAV/CLV), VITS placement policy and the VITS set. SECAM projects have no laserdisc format, so the disc format and laserdisc placement are disabled.
 
@@ -131,14 +131,12 @@ The preview synthesises frames on demand through the same generation code the pi
 
 **Navigator** — a frame spinner over the whole output, showing which section the current frame belongs to. Sections that contribute no output frames say so rather than showing a stale picture.
 
-**Mode**
+**Source** and **Encoded** tabs:
 
 - **Source** — the decoded source frame, before encoding.
-- **Encoded** — the woven full-frame composite raster including the VBI. This is the default.
+- **Encoded** — the woven full-frame raster including the VBI. This is the default. Its **Mode** shows **Composite**, **Y** or **C**, and its **Zoom** is **Fit**, **100%** or **200%**.
 
-**Trace** — for encoded mode, **Composite** or a **Y+C overlay**.
-
-**Zoom** — **Fit**, **100%** or **200%**.
+**Trace** — what the Line Scope plots: **Composite**, **Y**, **C** or a **Y+C overlay**.
 
 **Line** — the line the scope is showing. Drag the crosshair on the picture to move it, or type a line number.
 
@@ -157,7 +155,7 @@ Frames are cached, so scrubbing back and forth is cheap. When a project edit inv
 
 Validation runs continuously in the background, debounced so typing does not trigger a run per keystroke. The Issues dock lists every error and warning; the status bar summarises as *Project valid* or *n error(s), m warning(s)*.
 
-Double-clicking an issue selects the section it relates to, or reports that it is a project-level issue.
+Double-clicking an issue selects the section it relates to; for a project-level issue it opens **Edit Project…**.
 
 Errors block generation. Warnings do not — they flag things that are legal but probably not what you meant, such as a scratch whose lifespan is longer than the section it lives in.
 

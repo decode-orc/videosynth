@@ -1589,6 +1589,24 @@ TEST(ProjectValidatorTest, RejectsOsdOverlayWithUnknownToken) {
   EXPECT_NE(result.errors[0].find("unknown_token"), std::string::npos);
 }
 
+TEST(ProjectValidatorTest, UnknownTokenErrorListsEverySupportedToken) {
+  Project project = MakeValidProject();
+  OsdOverlay overlay;
+  overlay.text = "{unknown_token}";
+  overlay.scale = 1;
+  overlay.fg_level = OsdFgLevel::kWhite;
+  overlay.bg_level = OsdBgLevel::kTransparent;
+  project.sections[0].osd.overlays.push_back(overlay);
+
+  ProjectValidator validator;
+  const ValidationResult result = validator.Validate(project);
+  ASSERT_FALSE(result.errors.empty());
+  for (const char* token : {"{picture_number}", "{biphase_hex}", "{phase_id}",
+                            "{section_name}", "{timecode}", "{frame_number}"}) {
+    EXPECT_NE(result.errors[0].find(token), std::string::npos) << token;
+  }
+}
+
 TEST(ProjectValidatorTest, AcceptsAllFourSupportedTokens) {
   Project project = MakeValidProject();
   OsdOverlay overlay;
@@ -1779,6 +1797,24 @@ TEST(ProjectValidatorTest, RejectsRampMissingEndFrequency) {
 
   EXPECT_FALSE(result.is_valid);
   ASSERT_FALSE(result.errors.empty());
+}
+
+TEST(ProjectValidatorTest, RejectsRampWithFixedFrequency) {
+  Project project = MakeValidProject();
+  AudioParameters& audio = InstallLeftChannel(project);
+  audio.frequency_specified = true;
+  audio.ramp_enabled = true;
+  audio.ramp_start_specified = true;
+  audio.ramp_end_specified = true;
+  audio.ramp_start_hz = 100.0;
+  audio.ramp_end_hz = 200.0;
+
+  ProjectValidator validator;
+  const ValidationResult result = validator.Validate(project);
+
+  EXPECT_FALSE(result.is_valid);
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors[0].find("mutually exclusive"), std::string::npos);
 }
 
 TEST(ProjectValidatorTest, RejectsUnknownRampMode) {

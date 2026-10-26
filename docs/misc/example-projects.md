@@ -7,7 +7,7 @@ The repository ships a set of hand-authored projects under `projects/`, covering
 | Directory | Contents |
 |-----------|----------|
 | `projects/general/` | Feature examples — audio, EFM audio, VITS, progressive EXR and MKV sources, the PAL pilot burst |
-| `projects/general-yc/` | The same features with Y/C output |
+| `projects/general-yc/` | PAL and NTSC audio examples with Y/C output |
 | `projects/stacking/` | Laserdisc disc simulation and multi-source stacking sets for PAL, PAL-M and NTSC |
 | `projects/long-form/` | Three-hour capture-sized PAL and NTSC examples, for testing against realistic file sizes |
 | `projects/benchmark/` | Fixed-length PAL/NTSC still, moving-source and noise projects used by the benchmark script |
@@ -84,3 +84,4 @@ scripts/output-hashes.sh
 | `scripts/convert_progressive_raw_to_exr.py` | Convert raw `yuv422p10le` stills to OpenEXR fixtures |
 | `scripts/run_stage1_raw_to_exr_conversion.sh` | Run the EXR conversion in an ad-hoc Nix shell |
 | `scripts/render-icons.sh` | Render the application icon PNG set from the logo SVG |
+| `scripts/prepare-flatpak-manifest.py` | Write a copy of the Flatpak manifest with the release version and date filled in |

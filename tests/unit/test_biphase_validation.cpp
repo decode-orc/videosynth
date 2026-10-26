@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <string>
 
 #include "videosynth/project_validator.h"
@@ -119,6 +120,64 @@ TEST(BiphaseValidationTest, AcceptsSectionTypeLeadOutWithDiscType) {
   ProjectValidator v;
   const auto r = v.Validate(p);
   EXPECT_TRUE(r.is_valid) << (!r.errors.empty() ? r.errors[0] : "");
+}
+
+// ─── Minimum chapter length (IEC 60856/60857 §10.1.5) ───────────────────────
+
+Section MakeChapterSection(int frames, bool chapter_specified, int chapter) {
+  Section s = MakeSection(SectionType::kProgrammeArea, frames);
+  auto inj = MakeLaserdiscInjection();
+  inj.codes.push_back(MakeCode("picture_number"));
+  Section::LineInjectionCode code = MakeCode("chapter_number");
+  code.chapter_specified = chapter_specified;
+  code.chapter = chapter;
+  inj.codes.push_back(code);
+  s.line_injections.push_back(inj);
+  return s;
+}
+
+bool HasChapterWarning(const ValidationResult& r) {
+  return std::any_of(r.warnings.begin(), r.warnings.end(),
+                     [](const std::string& w) {
+                       return w.find("CAV chapter") != std::string::npos;
+                     });
+}
+
+TEST(BiphaseValidationTest, WarnsWhenCavChapterIsShorterThan30Frames) {
+  Project p = MakeBasePalProject();
+  p.line_injections.disc_type = "CAV";
+  p.sections.push_back(MakeChapterSection(29, true, 1));
+  p.sections.push_back(MakeChapterSection(100, true, 2));
+
+  ProjectValidator v;
+  const auto r = v.Validate(p);
+  EXPECT_TRUE(r.is_valid) << (!r.errors.empty() ? r.errors[0] : "");
+  ASSERT_TRUE(HasChapterWarning(r));
+}
+
+TEST(BiphaseValidationTest, ContinuedChapterCountsEverySection) {
+  // A section without `chapter` continues the previous chapter, so two
+  // 20-frame sections form one 40-frame chapter.
+  Project p = MakeBasePalProject();
+  p.line_injections.disc_type = "CAV";
+  p.sections.push_back(MakeChapterSection(20, true, 1));
+  p.sections.push_back(MakeChapterSection(20, false, 0));
+
+  ProjectValidator v;
+  EXPECT_FALSE(HasChapterWarning(v.Validate(p)));
+}
+
+TEST(BiphaseValidationTest, ClvChapterLengthIsNotChecked) {
+  Project p = MakeBasePalProject();
+  p.line_injections.disc_type = "CLV";
+  Section s = MakeSection(SectionType::kProgrammeArea, 10);
+  auto inj = MakeLaserdiscInjection();
+  inj.codes.push_back(MakeCode("chapter_number"));
+  s.line_injections.push_back(inj);
+  p.sections.push_back(s);
+
+  ProjectValidator v;
+  EXPECT_FALSE(HasChapterWarning(v.Validate(p)));
 }
 
 // ─── Task 5.4: code_type / section_type compatibility matrix ─────────────────

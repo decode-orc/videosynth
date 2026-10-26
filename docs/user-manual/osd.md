@@ -59,7 +59,7 @@ Tokens are resolved from the state the biphase encoder captured for that exact f
 
 `{picture_number}` and `{biphase_hex}` come from the VBI codes, so they follow whatever the disc is doing — they restart or jump when a section re-anchors `start_value`, and they read all zeros on a project with no laserdisc codes.
 
-`{frame_number}` and `{timecode}` are **positional**. They count from the start of the generated output and are never re-anchored by a section. `{timecode}` runs continuously at the standard's CLV frame rate (25 fps PAL, 30 fps NTSC) on any CLV disc, regardless of which codes a particular section injects, and reads `00:00:00:00` on non-CLV projects.
+`{frame_number}` and `{timecode}` are **positional**. They count from the start of the generated output and are never re-anchored by a section. `{timecode}` runs continuously at the standard's CLV frame rate (25 fps PAL, 30 fps NTSC and PAL-M) on any CLV disc, regardless of which codes a particular section injects, and reads `00:00:00:00` on non-CLV projects.
 
 Putting both on screen is the quickest way to see where a disc's addressing diverges from its physical position — exactly the situation a player skip or a replayed passage creates.
 

@@ -4,7 +4,7 @@ Welcome to the videosynth documentation. Here you will find the user manual and 
 
 # What is videosynth?
 
-**videosynth** is a video signal synthesizer for PAL, PAL-M, NTSC and SECAM. It generates analogue composite (CVBS) and Y/C video signals as sample files, built in the time domain from the published analogue video standards — ITU-R BT.470/BT.1700, SMPTE 170M/244M, IEC 60856/60857 and IEC 60461.
+**videosynth** is a video signal synthesizer for PAL, PAL-M, NTSC and SECAM. It generates analogue composite (CVBS) and Y/C video signals as sample files, built in the time domain from the published analogue video standards — ITU-R BT.470/BT.1700, SMPTE 170M/244M and IEC 60856/60857.
 
 It exists to produce **known-good, reproducible test signals**: material whose every sample you can predict, so that decoders, time base correctors and restoration tools can be exercised against a signal whose correct answer is already known. That includes laserdisc-style discs carrying VBI address codes, deliberately degraded signals with noise and dropouts, and multi-source "stacking" sets that model repeated captures of the same disc.
 

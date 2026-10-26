@@ -14,7 +14,7 @@ sections:
 
 | Root | Meaning | Resolves to | Override |
 |------|---------|-------------|----------|
-| `{bundled}` | Read-only assets shipped with the application | `$VIDEOSYNTH_ASSET_DIR`, else the installed `share/videosynth/assets` (found via XDG data dirs — includes Flatpak `/app/share`), else the development `videosynth-assets/assets` directory | `--asset-root bundled=<path>` |
+| `{bundled}` | Read-only assets shipped with the application | **CLI**: `$VIDEOSYNTH_ASSET_DIR`, else the directory compiled into the build (the development `videosynth-assets/assets` by default; packaged builds set the installed location). **GUI**: an installed `videosynth/assets` found on the XDG data dirs (includes Flatpak `/app/share`) first, then as for the CLI | `--asset-root bundled=<path>` (CLI) |
 | `{user}` | The user's own writable asset library | `$XDG_DATA_HOME/videosynth/assets`, else `~/.local/share/videosynth/assets` | `--asset-root user=<path>` |
 | `{project}` | The project file's own directory | The directory containing the `.yaml` | — |
 | `{output}` | Where this run's generated media is written | `$VIDEOSYNTH_OUTPUT_DIR` or `--output-root <path>`, else the project file's directory | `--output-root <path>` |

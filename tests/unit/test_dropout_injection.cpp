@@ -326,22 +326,36 @@ TEST(DropoutInjectionTest, ValidatorRejectsScratchScaleAbove20) {
   EXPECT_NE(result.errors[0].find("scratch.scale"), std::string::npos);
 }
 
+TEST(DropoutInjectionTest, ParserRecordsDropoutBlockPresence) {
+  const std::string yaml = kPalYamlPrefix +
+                           "sections:\n"
+                           "  - name: S\n"
+                           "    type: progressive\n"
+                           "    source: f.exr\n"
+                           "    duration_frames: 8\n"
+                           "    dropouts: {}\n";
+
+  YamlProjectParser parser;
+  const ParseResult result = parser.ParseString(yaml);
+  ASSERT_TRUE(result.ok);
+  EXPECT_TRUE(result.project.sections[0].dropouts.block_present);
+}
+
 TEST(DropoutInjectionTest, ValidatorRejectsAllZeroDropoutBlock) {
+  // A dropouts: block whose sub-blocks are absent or at scale 0 enables
+  // nothing, which is reported rather than silently ignored.
   Project project = MakeDropoutProject(0, 0);
-  // Manually set a scale of 0 with enabled=true to trigger the all-zero check.
-  project.sections[0].dropouts.random.scale = 0;
-  project.sections[0].dropouts.random.enabled = false;
-  project.sections[0].dropouts.scratch.scale = 0;
-  project.sections[0].dropouts.scratch.enabled = false;
-  // The validator only fires if at least one field is non-zero or enabled.
-  // Simulate the case where a dropouts block was present but both are 0:
-  // we do this by setting both scales to 0 but having the validator check
-  // triggered. In practice the parser triggers this case via scale: 0.
-  // We skip this test path because scale=0 / enabled=false leaves the block
-  // inert and the validator skips it — that is correct behaviour.
-  // The validator only complains if scale > 0 → enabled = true, but nothing
-  // is effective. Test that scenario is already covered by ParserScaleZero.
-  SUCCEED();
+  project.sections[0].dropouts.block_present = true;
+  ProjectValidator validator;
+  const ValidationResult result = validator.Validate(project);
+  EXPECT_FALSE(result.is_valid);
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors[0].find("no active type"), std::string::npos);
+}
+
+TEST(DropoutInjectionTest, ValidatorAcceptsSectionWithoutDropoutBlock) {
+  ProjectValidator validator;
+  EXPECT_TRUE(validator.Validate(MakeDropoutProject(0, 0)).is_valid);
 }
 
 TEST(DropoutInjectionTest, ValidatorWarnsScratchLifespanExceedsSection) {

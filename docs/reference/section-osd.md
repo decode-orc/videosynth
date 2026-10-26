@@ -17,7 +17,7 @@ On-screen display overlays burnt into the picture. Optional.
 
 | Key | Type | Required | Description |
 |-----|------|----------|-------------|
-| `overlays` | list | Yes | One entry per text overlay |
+| `overlays` | list | No | One entry per text overlay. An `osd:` block without it draws nothing |
 
 No other key is accepted. A section may carry any number of overlays.
 
@@ -25,7 +25,7 @@ No other key is accepted. A section may carry any number of overlays.
 
 | Key | Type | Required | Range / Values | Default |
 |-----|------|----------|----------------|---------|
-| `text` | string | Yes | Literal text, optionally with tokens | — |
+| `text` | string | No | Literal text, optionally with tokens | empty (draws nothing) |
 | `x` | int | No | Active-area pixels | `0` |
 | `y` | int | No | Active-area pixels | `0` |
 | `scale` | int | No | 1–4 | `1` |
@@ -52,14 +52,20 @@ Only the **luma** channel is written; chroma is untouched, so overlays are monoc
 |-------|-------------|------------------|
 | `{picture_number}` | CAV picture number for this frame, 5 digits zero-padded | `00000` |
 | `{biphase_hex}` | 6-digit uppercase hex biphase code words, space separated | `000000` |
-| `{phase_id}` | Colour-frame sequence index (0–3 PAL, 0–1 NTSC) | — |
+| `{phase_id}` | Colour-frame sequence index (0–3 PAL and PAL-M, 0–1 NTSC and SECAM) | — |
 | `{section_name}` | The section's `name:` verbatim | — |
 | `{timecode}` | CLV programme timecode `HH:MM:SS:FF` | `00:00:00:00` |
 | `{frame_number}` | 1-based position in the whole output, 5 digits zero-padded | — |
 
 Unavailable values render at the **same width** as a real value, so overlay layout never shifts between frames.
 
-An unknown token name is a validation error rather than being rendered literally.
+An unknown token name is a validation error rather than being rendered literally:
+
+```text
+OSD validation error in section 'Programme': overlay text contains unknown
+token '{pn}'. Supported tokens: {picture_number}, {biphase_hex}, {phase_id},
+{section_name}, {timecode}, {frame_number}.
+```
 
 ### Token sources
 

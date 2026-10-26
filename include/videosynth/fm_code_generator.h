@@ -158,47 +158,4 @@ class FmProgrammeTimeGenerator {
   int frozen_seconds_;
 };
 
-// Tracks white flag (100 IRE) emission state for NTSC LaserDisc VBI lines.
-//
-// White flag line placement rules (IEC 60857 §10.2.1, §10.2.2):
-//   kLeadIn:        line 11 only (field 1 line); line 274 not used in lead-in.
-//   kProgrammeArea: line 11 (field 1) or line 274 (field 2) depending on field.
-//   kLeadOut:       both lines 11 and 274 throughout the lead-out duration.
-//
-// Automatic placement for duplicate fields (IEC 60857 §10.2.1):
-//   When consecutive fields are identical (same photographic source or
-//   electronic processing), the white flag must be placed on the first field
-//   of the NEXT picture rather than the current one. Call ShouldEmit() with
-//   fields_are_identical=true to activate this deferral logic.
-//
-// NTSC only (lines 11 and 274).
-//
-// Thread-safety: NOT thread-safe (mutable state).
-class WhiteFlagTracker {
- public:
-  // NTSC VBI line numbers for the white flag signal.
-  static constexpr int kFieldOneLine = 11;
-  static constexpr int kFieldTwoLine = 274;
-
-  WhiteFlagTracker();
-
-  // Returns true if the white flag should be emitted on this field.
-  //   field_one:          true = field 1 (line 11), false = field 2 (line 274).
-  //   section_type:       determines placement rules per section.
-  //   fields_are_identical: when true in kProgrammeArea, defers emission to
-  //     the first field of the next picture (IEC 60857 §10.2.1).
-  bool ShouldEmit(bool field_one, SectionType section_type,
-                  bool fields_are_identical = false);
-
-  // Returns the VBI line number for the white flag, or -1 if not applicable
-  // for the given field and section combination.
-  static int GetLine(bool field_one, SectionType section_type);
-
-  // Resets deferral state.
-  void Reset();
-
- private:
-  bool deferred_;  // true when white flag emission is deferred to next field-1
-};
-
 }  // namespace videosynth

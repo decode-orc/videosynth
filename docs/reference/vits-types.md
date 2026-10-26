@@ -2,7 +2,12 @@
 
 Every `vits_type` accepted in the project-level [`line_injections.vits`](line-injections.md) list.
 
-Valid values depend on the video standard: PAL types are rejected in an NTSC project and vice versa. PAL-M projects use the NTSC catalogue.
+Valid values depend on the video standard: PAL types are rejected in an NTSC project and vice versa. PAL-M projects use the NTSC catalogue. SECAM projects use the PAL catalogue, and any VITS on a SECAM project produces a warning:
+
+```text
+SECAM warning: VITS test signals are rendered with their PAL definitions,
+including any PAL-modulated chroma packets.
+```
 
 Line numbers are 1-based and sequential across the whole frame, so PAL field 2 lines are 313–625 and NTSC field 2 lines are 263–525.
 
@@ -25,7 +30,7 @@ Line numbers are 1-based and sequential across the whole frame, so PAL field 2 l
 | `fcc-multiburst` | FCC multi-burst insertion test signal | 18 (field 1) | FCC Part 73 / EIA RS-498 |
 | `ntc7-combination` | NTC-7 combination insertion test signal | 280 (field 2) | EIA RS-498 / SMPTE RP 168 |
 | `fcc-composite` | FCC composite insertion test signal | 281 (field 2) | FCC Part 73 / EIA RS-498 |
-| `virs` | Video Index Reference Signal — format identification and level calibration | 19 / 282 | SMPTE RP 168 / EIA RS-498 |
+| `virs` | Video Index Reference Signal — format identification and level calibration | 19 / 282 (not enforced) | SMPTE RP 168 / EIA RS-498 |
 
 ## Placement
 
@@ -33,11 +38,11 @@ The `placement` policy decides which lines are accepted:
 
 ### `standard` (default)
 
-Each type must sit on its recommended line, as listed above. Any other line is rejected.
+Each type must sit on its recommended line, as listed above. Any other line is rejected. `virs` is the exception: it has no single recommended line, so `standard` placement accepts it on any valid line.
 
 ### `laserdisc`
 
-VITS must sit on the laserdisc VBI lines, which are clear of the address-code ranges:
+VITS must sit on the laserdisc VBI lines, which are clear of the address-code ranges. Not available for `SECAM` projects.
 
 | Standard | Permitted lines | Reference |
 |----------|-----------------|-----------|
@@ -57,7 +62,7 @@ Any valid VBI line. The overlap and reserved-range rules still apply.
 
 ## Compatibility with laserdisc codes
 
-When any section carries a `laserdisc` injection, no VITS may target a line in the reserved address-code ranges — PAL 6–18 and 319–331, NTSC/PAL-M 10–18 and 273–281. That rules out most of the broadcast lines.
+When `line_injections.disc_type` is set, no VITS may target a line in the reserved address-code ranges — PAL 6–18 and 319–331, NTSC/PAL-M 10–18 and 273–281. That rules out most of the broadcast lines.
 
 ### PAL
 
@@ -81,7 +86,12 @@ When any section carries a `laserdisc` injection, no VITS may target a line in t
 | `virs` | 19, 282 | **Required** |
 
 !!! important "NTSC discs must carry VIRS"
-    IEC 60857 §9.1.3 makes the Video Index Reference Signal mandatory on NTSC laserdiscs. An NTSC or PAL-M project with laserdisc injections and no `virs` entry fails validation.
+    IEC 60857 §9.1.3 makes the Video Index Reference Signal mandatory on NTSC laserdiscs. An NTSC or PAL-M project that sets `disc_type` and has no `virs` entry fails validation:
+
+    ```text
+    Line injection validation error: NTSC and PAL-M laserdisc projects require
+    a virs VITS injection for colour (IEC 60857 §9.1.3).
+    ```
 
 ## Noise measurement lines
 

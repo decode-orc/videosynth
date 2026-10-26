@@ -80,6 +80,13 @@ cvbs_presets:
   pal_laserdisc_pilot_burst:
   ntsc_laserdisc_vbi_burst:
   ntsc_black_setup_ire:
+  secam_field_identification:
+
+output:
+  video_path:
+  signal_type:
+  efm_audio:
+    pair:
 
 line_injections:
   disc_type:
@@ -87,12 +94,6 @@ line_injections:
   vits:
     - vits_type:
       target_lines:
-
-output:
-  video_path:
-  signal_type:
-  efm_audio:
-    pair:
 
 sections:
   - name:
@@ -102,6 +103,7 @@ sections:
     duration_repeat:
     section_type:
     start_frame:
+    end_frame:
     line_injections:
       - type:
         target_lines:
@@ -144,9 +146,16 @@ sections:
               mode:
               period:
           right:
+          file:
+            path:
+            repeat:
+          video_audio:
+            stream:
 ```
 
-Only explicitly-set optional blocks are emitted, so a saved file stays minimal. Emit → parse is lossless: a saved project parses back to an identical project, which is the contract that keeps GUI-saved projects loadable by the CLI and vice versa.
+A channel pair carries only one of `left`/`right`, `file` or `video_audio`.
+
+Only explicitly-set optional blocks are emitted, so a saved file stays minimal. Emit → parse is lossless: a saved project parses back to an identical project (the one exception is a `duration_repeat` alongside an integer `duration_frames`, which has no effect and is not written), which is the contract that keeps GUI-saved projects loadable by the CLI and vice versa.
 
 ## Unknown keys are errors
 

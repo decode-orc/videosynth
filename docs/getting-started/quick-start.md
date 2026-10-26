@@ -14,7 +14,7 @@ You can follow it in the GUI, on the command line, or both — the project file 
 
 Project-wide: CAV addressing, the PAL 3.75 MHz pilot burst on every sync pulse, and the UK national ITS plus the ITS-2 chrominance reference on the laserdisc VITS lines.
 
-The 938- and 1250-frame lead-in and lead-out durations are not arbitrary — IEC 60856 requires at least 1.5 mm of track before the programme and 2 mm after it, which at the 1.6 µm track pitch works out at those frame counts. videosynth's validator enforces them.
+The 938- and 1250-frame lead-in and lead-out durations are not arbitrary — IEC 60856 requires at least 1.5 mm of track before the programme and 2 mm after it, which at the 1.6 µm track pitch works out at those frame counts. On a CAV disc the validator warns about a shorter lead-in or lead-out.
 
 Total output is 2438 frames — about 3.5 GB of samples, generated in a few seconds on a modern machine.
 
@@ -39,7 +39,7 @@ In the **CVBS Presets** group:
 - **Video standard**: `PAL`.
 - **Sample encoding**: `CVBS_S16_4FSC`. This is a *signed* preset, which matters here: the laserdisc pilot burst swings to −600 mV, below the −300 mV floor the unsigned `CVBS_U10_4FSC` preset can represent. With an unsigned preset the burst trough is clipped, and videosynth warns you about it.
 - **Signal state**: `STANDARD_STABLE_LOCKED`.
-- Tick **PAL laserdisc pilot burst (IEC 60856 §9.1.2)**. The tick box is only enabled for PAL projects — the equivalent NTSC VBI burst option is enabled only for NTSC.
+- Tick **PAL laserdisc pilot burst (IEC 60856 §9.1.2)**. The tick box is only enabled for PAL projects. The NTSC VBI burst option beside it is enabled only for NTSC, but it is not implemented yet: ticking it makes the project fail validation, so leave it clear.
 
 !!! warning "The video standard is fixed at creation time"
     You can change the standard freely in this dialog, but once the project is created the control is disabled. Too much of the signal geometry, VBI line allocation and code validity depends on it. If you pick the wrong one, create a new project.
@@ -66,7 +66,7 @@ The **Sections** dock holds the section list, with **Add**, **Remove**, **Duplic
 Add two more sections so there are three, then arrange them as `LeadIn`, `Programme`, `LeadOut` using **Up** and **Down**.
 
 !!! note "Section order is validated"
-    Once any section declares a disc section type, the sequence must be `[lead_in] programme_area… [lead_out]`: at most one lead-in and it must come first, at most one lead-out and it must come last. Out-of-order sections would break monotonic picture-number generation, so this is an error rather than a warning.
+    Once any section is a lead-in or lead-out, the sequence must be `[lead_in] programme_area… [lead_out]`: at most one lead-in and it must come first, at most one lead-out and it must come last. Out-of-order sections would break monotonic picture-number generation, so this is an error rather than a warning.
 
 ### 3. Configure the programme section
 
@@ -110,9 +110,9 @@ The available tokens are listed beneath the text field. `{picture_number}` resol
 Select the first section:
 
 - **Name**: `LeadIn`, **Disc section type**: `lead_in`.
-- **Duration**: `938` frames — the IEC 60856 minimum (1.5 mm of track at the 1.6 µm pitch). A shorter lead-in is a validation error.
+- **Duration**: `938` frames — the IEC 60856 minimum (1.5 mm of track at the 1.6 µm pitch). A shorter lead-in produces a validation warning.
 - Source: `PLUGE.exr`, so the lead-in is visually distinct.
-- In the line injections checklist, the `lead_in` code is the only code type on offer; leave it ticked.
+- In the line injections checklist, leave the `lead_in` code ticked. The only other code offered is `users_code`, which this disc does not need.
 
 Then the last section:
 
@@ -123,8 +123,8 @@ Then the last section:
 
 The **Preview** dock on the right synthesises the selected section's frames on demand; the **Line Scope** dock beneath it shows one line of that frame as a waveform. If either is hidden, bring it back from **View → Panels**.
 
-- Switch **Mode** to **Encoded** to see the woven full-frame composite raster, including the VBI lines carrying the biphase codes.
-- Drag the crosshair to a VBI line — 17 or 18 for the picture number, 16 for the programme status — and the **Line Scope** shows the actual waveform for that line, with sample position, time in microseconds and level in millivolts under the cursor.
+- Switch to the **Encoded** tab to see the woven full-frame composite raster, including the VBI lines carrying the biphase codes.
+- Drag the crosshair to a VBI line — 17 or 18 for the picture number (field 1), 330 or 331 for the chapter (field 2), 16 for the programme status — and the **Line Scope** shows the actual waveform for that line, with sample position, time in microseconds and level in millivolts under the cursor.
 - Set the scope's vertical **Range** to **Sub-sync** to see the pilot burst excursions below sync.
 
 ### 6. Validate and generate
@@ -250,14 +250,14 @@ quickstart_pal_cav.cvbs     3.5 GB   composite samples, 2438 frames
 quickstart_pal_cav.meta      12 KB   SQLite metadata sidecar
 ```
 
-The `.cvbs` file is a flat stream of 4fsc composite samples — 1135 samples per line, 625 lines per frame for PAL. The `.meta` sidecar is a SQLite database describing the file: field order, standard, frame index and per-field metadata. Both are the input format that decode-orc and the ld-decode tool chain expect.
+The `.cvbs` file is a flat stream of 4fsc composite samples — 1135 samples per line, 625 lines per frame for PAL. The `.meta` sidecar is a SQLite database describing the file as a whole: standard, sample encoding, signal state, frame count, black level and the build that produced it. Both are the input format that decode-orc and the ld-decode tool chain expect.
 
 Because generation is deterministic, running the same project again — on a different machine, with a different thread count — produces byte-identical files.
 
 ## Where to go next
 
 - Swap `disc_type: CAV` for `CLV` and replace `picture_number` with `programme_time_code`, `clv_code` and `clv_picture_number` — see [Laserdisc discs](../user-manual/laserdisc.md).
-- Build the NTSC equivalent. NTSC discs additionally require the 40-bit FM codes on lines 10/11/273/274 and a mandatory `virs` VITS on lines 19/282.
+- Build the NTSC equivalent. A compliant NTSC disc also carries the 40-bit FM codes on lines 10/273 with the white flag on line 11, and the validator requires a `virs` VITS (conventionally on lines 19/282).
 - Add [noise and dropouts](../user-manual/impairments.md) to make the disc look like a real, imperfect capture.
 - Add [audio](../user-manual/audio.md) — analogue channel pairs, or EFM digital audio with a proper table of contents.
 - Read the [Project File Reference](../reference/overview.md) for the exact meaning of every key.

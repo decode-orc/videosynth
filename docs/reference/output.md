@@ -35,7 +35,7 @@ The derived paths:
 
 | Artefact | Derivation |
 |----------|------------|
-| `.meta` | `video_path` with `.cvbs`/`.cvbsy` replaced by `.meta` |
+| `.meta` | `video_path` with `.cvbs`/`.cvbsy` replaced by `.meta` (any other extension is replaced too; with none, `.meta` is appended) |
 | `.dropouts.meta` | The metadata path with `.meta` replaced by `.dropouts.meta` |
 | `_audio_<pair>.wav` | `video_path` with `.cvbs`/`.cvbsy` stripped, plus `_audio_<pair>.wav` |
 | `.efm`, `.efm.meta` | `video_path` with `.cvbs`/`.cvbsy` stripped, plus the suffix |

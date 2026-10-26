@@ -102,7 +102,7 @@ LineCodeAssignment LinePlacementEngine::GetAssignment(int line_number,
   }
 
   if (standard_ == Standard::kPal) {
-    return GetPalAssignment(line_number);
+    return GetPalAssignment(line_number, field_one);
   }
   return GetNtscAssignment(line_number, field_one);
 }
@@ -111,17 +111,18 @@ LineCodeAssignment LinePlacementEngine::GetAssignment(int line_number,
 // PAL dispatch
 // ---------------------------------------------------------------------------
 
-LineCodeAssignment LinePlacementEngine::GetPalAssignment(int line) const {
+LineCodeAssignment LinePlacementEngine::GetPalAssignment(int line,
+                                                         bool field_one) const {
   if (section_type_ == SectionType::kLeadIn ||
       section_type_ == SectionType::kLeadOut) {
     return GetPalLeadInOut(line);
   }
   if (section_type_ == SectionType::kProgrammeArea) {
     if (disc_type_ == DiscType::kCAV) {
-      return GetPalCavProgramme(line);
+      return GetPalCavProgramme(line, field_one);
     }
     if (disc_type_ == DiscType::kCLV) {
-      return GetPalClvProgramme(line);
+      return GetPalClvProgramme(line, field_one);
     }
   }
   return None();
@@ -156,36 +157,56 @@ LineCodeAssignment LinePlacementEngine::GetPalLeadInOut(int line) const {
 }
 
 // ---------------------------------------------------------------------------
-// PAL CAV programme_area
+// Picture fields
 //
-// IEC 60856 §10.1 line assignments (field 1 / field 2 mirror):
-//   Line 16/329:  picture_stop > programme_status (0.172H offset)
-//   Line 17/330:  picture_number > picture_stop > chapter_number
-//   Line 18/331:  picture_number > chapter_number
+// Every output frame is one picture whose first field is field 1, so the
+// codes IEC 60856/60857 place in "the first field of the picture" go in
+// field 1 and the codes placed in the remaining fields go in field 2. When a
+// section carries none of the first-field codes, no field is a picture field
+// and the remaining-field codes are written in both fields.
 // ---------------------------------------------------------------------------
 
-LineCodeAssignment LinePlacementEngine::GetPalCavProgramme(int line) const {
-  // Normalise field-2 line to its field-1 equivalent for table lookup.
-  // PAL field-2 active biphase lines: 329→16, 330→17, 331→18.
-  const int canonical = (line >= 329) ? (line - 313) : line;
+bool LinePlacementEngine::IsPictureField(bool field_one) const {
+  if (!field_one) {
+    return false;
+  }
+  if (disc_type_ == DiscType::kCAV) {
+    return Has("picture_number");
+  }
+  return Has("programme_time_code") || Has("clv_picture_number");
+}
+
+// ---------------------------------------------------------------------------
+// CAV programme_area biphase (IEC 60856 §10.1.4-10.1.7, IEC 60857 same):
+//   Picture field, lines 16/17/18:  programme_status / picture_number x2
+//   Other field,   line 16:         picture_stop > programme_status
+//                  line 17:         picture_stop > chapter_number
+//                  line 18:         chapter_number
+// programme_status uses the 0.172H offset. `canonical` is the field-1 line.
+// ---------------------------------------------------------------------------
+
+LineCodeAssignment LinePlacementEngine::GetCavProgrammeBiphase(
+    int canonical, bool field_one) const {
+  const bool picture_field = IsPictureField(field_one);
 
   switch (canonical) {
     case 16:
-      if (Has("picture_stop")) return Biphase("picture_stop");
+      if (!picture_field && Has("picture_stop")) {
+        return Biphase("picture_stop");
+      }
       if (Has("programme_status")) return Biphase("programme_status", true);
       return None();
 
     case 17:
-      // IEC 60856: chapter cannot share lines with picture_number;
-      // picture_stop has priority over chapter on this conflict line.
-      if (Has("picture_number")) return Biphase("picture_number");
+      if (picture_field) return Biphase("picture_number");
+      // IEC 60856 §10.1.6: picture stop has priority over chapter on line 17.
       if (Has("picture_stop")) return Biphase("picture_stop");
       if (Has("chapter_number")) return Biphase("chapter_number");
       return None();
 
     case 18:
+      if (picture_field) return Biphase("picture_number");
       if (Has("chapter_number")) return Biphase("chapter_number");
-      if (Has("picture_number")) return Biphase("picture_number");
       return None();
 
     default:
@@ -194,40 +215,60 @@ LineCodeAssignment LinePlacementEngine::GetPalCavProgramme(int line) const {
 }
 
 // ---------------------------------------------------------------------------
-// PAL CLV programme_area
-//
-// IEC 60856 §10.1 line assignments (field 1 / field 2 mirror):
-//   Line 16/329:  clv_picture_number > programme_status (0.172H offset)
-//   Line 17/330:  programme_time_code > clv_code
-//   Line 18/331:  programme_time_code > chapter_number
+// CLV programme_area biphase (IEC 60856 §10.1.6-10.1.11, IEC 60857 same):
+//   Picture field, line 16:      clv_picture_number
+//                  lines 17/18:  programme_time_code
+//   Other field,   line 16:      programme_status (0.172H offset)
+//                  line 17:      clv_code (0.172H offset on NTSC only)
+//                  line 18:      chapter_number
 // ---------------------------------------------------------------------------
 
-LineCodeAssignment LinePlacementEngine::GetPalClvProgramme(int line) const {
-  const int canonical = (line >= 329) ? (line - 313) : line;
+LineCodeAssignment LinePlacementEngine::GetClvProgrammeBiphase(
+    int canonical, bool field_one) const {
+  const bool picture_field = IsPictureField(field_one);
 
   switch (canonical) {
     case 16:
-      if (Has("clv_picture_number")) return Biphase("clv_picture_number");
+      if (picture_field) {
+        if (Has("clv_picture_number")) return Biphase("clv_picture_number");
+        return None();
+      }
       if (Has("programme_status")) return Biphase("programme_status", true);
       return None();
 
     case 17:
-      // IEC 60856: programme_time_code takes precedence over clv_code.
-      // clv_code is only placed where no programme_time_code is present.
-      if (Has("programme_time_code")) return Biphase("programme_time_code");
-      if (Has("clv_code")) return Biphase("clv_code");
+      if (picture_field) {
+        if (Has("programme_time_code")) return Biphase("programme_time_code");
+        return None();
+      }
+      // IEC 60857 Figure 11: NTSC clv_code uses 0.172H horizontal offset.
+      if (Has("clv_code")) {
+        return Biphase("clv_code", standard_ != Standard::kPal);
+      }
       return None();
 
     case 18:
-      // chapter_number claims line 18 exclusively; programme_time_code fills
-      // line 18 only as a redundant copy when no chapter is present.
+      if (picture_field) {
+        if (Has("programme_time_code")) return Biphase("programme_time_code");
+        return None();
+      }
       if (Has("chapter_number")) return Biphase("chapter_number");
-      if (Has("programme_time_code")) return Biphase("programme_time_code");
       return None();
 
     default:
       return None();
   }
+}
+
+LineCodeAssignment LinePlacementEngine::GetPalCavProgramme(
+    int line, bool field_one) const {
+  // PAL field-2 biphase lines 329-331 map to field-1 lines 16-18.
+  return GetCavProgrammeBiphase((line >= 329) ? (line - 313) : line, field_one);
+}
+
+LineCodeAssignment LinePlacementEngine::GetPalClvProgramme(
+    int line, bool field_one) const {
+  return GetClvProgrammeBiphase((line >= 329) ? (line - 313) : line, field_one);
 }
 
 // ---------------------------------------------------------------------------
@@ -314,10 +355,7 @@ LineCodeAssignment LinePlacementEngine::GetNtscLeadInOut(int line,
 //   Line 11:      fm_white_flag (100 IRE, first field only — §10.2.4)
 //   Line 274:     (not used — white flag is first-field only in programme area)
 //
-// 24-bit biphase (field 1 / field 2 mirror):
-//   Line 16/279:  picture_stop > programme_status (0.172H offset)
-//   Line 17/280:  picture_number > picture_stop > chapter_number
-//   Line 18/281:  picture_number > chapter_number
+// 24-bit biphase on lines 16-18 / 279-281: see GetCavProgrammeBiphase.
 // ---------------------------------------------------------------------------
 
 LineCodeAssignment LinePlacementEngine::GetNtscCavProgramme(
@@ -336,31 +374,8 @@ LineCodeAssignment LinePlacementEngine::GetNtscCavProgramme(
     return None();
   }
 
-  // Normalise field-2 biphase line → field-1 canonical.
-  // NTSC field-2 active biphase: 279→16, 280→17, 281→18.
-  const int canonical = (line >= 279) ? (line - 263) : line;
-
-  switch (canonical) {
-    case 16:
-      if (Has("picture_stop")) return Biphase("picture_stop");
-      if (Has("programme_status")) return Biphase("programme_status", true);
-      return None();
-
-    case 17:
-      if (Has("picture_number")) return Biphase("picture_number");
-      if (Has("picture_stop")) return Biphase("picture_stop");
-      if (Has("chapter_number")) return Biphase("chapter_number");
-      return None();
-
-    case 18:
-      if (Has("chapter_number")) return Biphase("chapter_number");
-      if (Has("picture_number")) return Biphase("picture_number");
-      return None();
-
-    default:
-      (void)field_one;
-      return None();
-  }
+  // NTSC field-2 biphase lines 279-281 map to field-1 lines 16-18.
+  return GetCavProgrammeBiphase((line >= 279) ? (line - 263) : line, field_one);
 }
 
 // ---------------------------------------------------------------------------
@@ -371,10 +386,7 @@ LineCodeAssignment LinePlacementEngine::GetNtscCavProgramme(
 //   Line 11:      fm_white_flag (100 IRE, first field only — §10.2.4)
 //   Line 274:     (not used — white flag is first-field only in programme area)
 //
-// 24-bit biphase (field 1 / field 2 mirror):
-//   Line 16/279:  clv_picture_number > programme_status (0.172H offset)
-//   Line 17/280:  programme_time_code > clv_code (0.172H offset, NTSC only)
-//   Line 18/281:  programme_time_code > chapter_number
+// 24-bit biphase on lines 16-18 / 279-281: see GetClvProgrammeBiphase.
 // ---------------------------------------------------------------------------
 
 LineCodeAssignment LinePlacementEngine::GetNtscClvProgramme(
@@ -393,32 +405,8 @@ LineCodeAssignment LinePlacementEngine::GetNtscClvProgramme(
     return None();
   }
 
-  // Normalise field-2 biphase line → field-1 canonical.
-  const int canonical = (line >= 279) ? (line - 263) : line;
-
-  switch (canonical) {
-    case 16:
-      if (Has("clv_picture_number")) return Biphase("clv_picture_number");
-      if (Has("programme_status")) return Biphase("programme_status", true);
-      return None();
-
-    case 17:
-      if (Has("programme_time_code")) return Biphase("programme_time_code");
-      // IEC 60857 Figure 11: NTSC clv_code uses 0.172H horizontal offset.
-      if (Has("clv_code")) return Biphase("clv_code", true);
-      return None();
-
-    case 18:
-      // chapter_number claims line 18 exclusively; programme_time_code fills
-      // line 18 only as a redundant copy when no chapter is present.
-      if (Has("chapter_number")) return Biphase("chapter_number");
-      if (Has("programme_time_code")) return Biphase("programme_time_code");
-      return None();
-
-    default:
-      (void)field_one;
-      return None();
-  }
+  // NTSC field-2 biphase lines 279-281 map to field-1 lines 16-18.
+  return GetClvProgrammeBiphase((line >= 279) ? (line - 263) : line, field_one);
 }
 
 }  // namespace videosynth

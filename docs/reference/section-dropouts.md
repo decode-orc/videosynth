@@ -27,7 +27,7 @@ Surface and media degradation, modelled as a Poisson process — short losses sc
 
 | Key | Type | Required | Range | Description |
 |-----|------|----------|-------|-------------|
-| `scale` | int | Yes | 1–20 | Severity. `0` disables, equivalent to omitting the block |
+| `scale` | int | No | 0–20 | Severity, default `0`. `0` disables, equivalent to omitting the block |
 | `seed` | int | No | any int64 | Fixed RNG seed. Omit for a run-specific seed |
 
 ### `scratch`
@@ -36,28 +36,37 @@ A persistent physical defect: it appears, grows to a peak severity and fades awa
 
 | Key | Type | Required | Range | Description |
 |-----|------|----------|-------|-------------|
-| `scale` | int | Yes | 1–20 | Severity. `0` disables |
+| `scale` | int | No | 0–20 | Severity, default `0`. `0` disables |
 | `seed` | int | No | any int64 | Fixed RNG seed |
 
 ## Severity scale
 
-`scale` is a severity level, not a physical unit. The mapping is exponential:
+`scale` is a severity level, not a physical unit. The mapping is exponential in t = (scale − 1) / 19:
 
-| Parameter | Scale 1 | Scale 10 | Scale 20 |
-|-----------|---------|----------|----------|
-| Random events per frame | 0.05 | ~2.8 | 100 |
-| Random maximum duration (samples) | 5 | ~282 | 2000 |
-| Scratch count | 1 | 8 | 15 |
-| Scratch maximum lifespan (frames) | 2 | ~113 | 500 |
-| Scratch maximum peak width (samples) | 5 | ~282 | 2000 |
+| Parameter | Formula | Scale 1 | Scale 10 | Scale 20 |
+|-----------|---------|---------|----------|----------|
+| Random events per frame (Poisson mean) | 0.5 × 400^t | 0.5 | ~8.5 | 200 |
+| Random minimum duration (samples) | 5 × 10^t | 5 | ~15 | 50 |
+| Random maximum duration (samples) | 50 × 8^t | 50 | ~134 | 400 |
+| Scratch count | 2 × 20^t, at least 2 | 2 | 8 | 40 |
+| Scratch maximum lifespan (frames) | 2 × 250^t | 2 | ~27 | 500 |
+| Scratch maximum peak width (samples) | 5 × 400^t | 5 | ~85 | 2000 |
+
+Values are rounded to whole numbers except the event rate. A random dropout's duration is drawn uniformly between its minimum and maximum.
 
 ## Rules
 
 | Rule | Severity |
 |------|----------|
-| `scale` outside 1–20 | Error |
-| A `dropouts:` block with both scales at 0, or with neither sub-block present | Error — omit the block instead |
-| Derived maximum scratch lifespan longer than `duration_frames` | Warning: scratch events may never reach peak amplitude |
+| `scale` outside 0–20 | Error |
+| A `dropouts:` block that enables nothing — `dropouts: {}`, or both scales 0 or absent | Error — omit the block instead |
+| Derived maximum scratch lifespan longer than an integer `duration_frames` | Warning: the scratch envelope is truncated |
+
+```text
+Dropout validation error in section 'Programme': dropouts block has no active
+type (both random.scale and scratch.scale are 0). Remove the dropouts block or
+set at least one scale to 1–20.
+```
 
 The "disable by omission, not by zeroing" rule exists so that a block that looks like it configures something always does.
 

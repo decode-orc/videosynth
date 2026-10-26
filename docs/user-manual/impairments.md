@@ -82,19 +82,19 @@ Both take a `scale` from 1 to 20. It is a severity level, not a physical unit; t
 
 | Parameter | Scale 1 | Scale 10 | Scale 20 |
 |-----------|---------|----------|----------|
-| Random events per frame | 0.05 | ~2.8 | 100 |
-| Random maximum duration (samples) | 5 | ~282 | 2000 |
-| Scratch count | 1 | 8 | 15 |
-| Scratch maximum lifespan (frames) | 2 | ~113 | 500 |
-| Scratch maximum peak width (samples) | 5 | ~282 | 2000 |
+| Random events per frame (mean) | 0.5 | ~8.5 | 200 |
+| Random duration range (samples) | 5–50 | 15–134 | 50–400 |
+| Scratch count | 2 | 8 | 40 |
+| Scratch maximum lifespan (frames) | 2 | 27 | 500 |
+| Scratch maximum peak width (samples) | 5 | 85 | 2000 |
 
 Scale 1 is a couple of brief, narrow events; scale 20 is a disc you would throw away.
 
 ### Rules
 
 - A `dropouts:` block with both scales at 0, or with neither sub-block present, is a **validation error** — omit the whole block to disable dropouts rather than zeroing it.
-- `scale` outside 1–20 is an error.
-- If the derived maximum scratch lifespan is longer than the section, a **warning** is emitted: scratch events may never reach their peak amplitude before the section ends. That is legal — it is how you model a scratch that starts mid-way — but it is worth knowing you asked for it.
+- `scale` outside 0–20 is an error; `0` turns that kind off while the other stays active.
+- If the derived maximum scratch lifespan is longer than a fixed-length section, a **warning** is emitted: scratch events may be cut off before they reach their peak amplitude. That is legal — it is how you model a scratch that starts mid-way — but it is worth knowing you asked for it.
 
 ### The dropout sidecar
 

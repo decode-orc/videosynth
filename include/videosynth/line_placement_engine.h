@@ -49,16 +49,19 @@ struct LineCodeAssignment {
 // Line ranges queried outside the biphase-reserved VBI range always return
 // an unassigned result (assigned=false).
 //
-// Priority rules (highest to lowest) per IEC 60856/60857:
+// Placement rules per IEC 60856/60857 clause 10:
 //   1. lead_in / lead_out codes have absolute priority in their sections.
-//   2. picture_stop > programme_status on all lines (CAV).
-//   3. picture_number > picture_stop > chapter_number on conflict lines (CAV).
-//   4. picture_number > chapter_number on remaining lines (CAV).
-//   5. clv_picture_number > chapter_number on lines 16/279/329 (CLV).
-//   6. programme_time_code > clv_code > nothing on lines 17/280/330 (CLV).
-//   7. programme_time_code > chapter_number on lines 18/281/331 (CLV).
-//   8. fm_picture_number / fm_programme_time occupy FM lines 10/273 (NTSC).
-//   9. fm_white_flag occupies lines 11/274 (NTSC); placement varies by section.
+//   2. Every output frame is one picture whose first field is field 1. That
+//      field carries picture_number (CAV) or programme_time_code and
+//      clv_picture_number (CLV); the other field carries picture_stop,
+//      chapter_number, clv_code and programme_status (CAV programme_status
+//      is written in both fields). A section with none of the first-field
+//      codes writes the other-field codes in both fields.
+//   3. picture_stop > programme_status on line 16/279/329 (CAV).
+//   4. picture_stop > chapter_number on line 17/280/330 (CAV).
+//   5. fm_picture_number / fm_programme_time occupy FM lines 10/273 (NTSC).
+//   6. fm_white_flag occupies line 11 in lead-in and the programme area, and
+//      lines 11 and 274 in lead-out (NTSC).
 //
 // Thread-safety: LinePlacementEngine is immutable after construction and may be
 // called concurrently from multiple threads once constructed.
@@ -80,7 +83,8 @@ class LinePlacementEngine {
   //   field_one:    true when line_number is in field 1.  Typically derived
   //                 from IsFieldOne(); accepted as a parameter so callers can
   //                 pass a precomputed value or override for testing.
-  //                 Only material for NTSC white_flag placement.
+  //                 Decides which field carries the picture's first-field
+  //                 codes in the programme area.
   //
   // Returns an assignment with assigned=false if no biphase or FM code should
   // be injected on this line (line is outside reserved range, or the section
@@ -115,16 +119,26 @@ class LinePlacementEngine {
   static LineCodeAssignment None();
 
   // Per-standard dispatch.
-  LineCodeAssignment GetPalAssignment(int line) const;
+  LineCodeAssignment GetPalAssignment(int line, bool field_one) const;
   LineCodeAssignment GetNtscAssignment(int line, bool field_one) const;
 
   // Section-type and disc-type handlers.
   LineCodeAssignment GetPalLeadInOut(int line) const;
   LineCodeAssignment GetNtscLeadInOut(int line, bool field_one) const;
-  LineCodeAssignment GetPalCavProgramme(int line) const;
-  LineCodeAssignment GetPalClvProgramme(int line) const;
+  LineCodeAssignment GetPalCavProgramme(int line, bool field_one) const;
+  LineCodeAssignment GetPalClvProgramme(int line, bool field_one) const;
   LineCodeAssignment GetNtscCavProgramme(int line, bool field_one) const;
   LineCodeAssignment GetNtscClvProgramme(int line, bool field_one) const;
+
+  // True when field_one is the picture's first field and the section carries
+  // a code placed only there.
+  bool IsPictureField(bool field_one) const;
+
+  // Programme-area biphase for the field-1 line `canonical` (16-18).
+  LineCodeAssignment GetCavProgrammeBiphase(int canonical,
+                                            bool field_one) const;
+  LineCodeAssignment GetClvProgrammeBiphase(int canonical,
+                                            bool field_one) const;
 };
 
 }  // namespace videosynth

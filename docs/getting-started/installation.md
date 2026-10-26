@@ -20,7 +20,7 @@ flatpak run --command=videosynth io.github.decode_orc.VideoSynth --help
 The bundle carries the media assets, so `{bundled}` source paths resolve without a source checkout, and it is granted read/write access to the host filesystem so it can read source media and write generated output.
 
 !!! note "Generated files are large"
-    A single frame of 4fsc PAL composite is about 1.2 MB. A three-hour PAL project is several hundred gigabytes. Point the output at storage that can hold the result — see [`{output}`](../reference/asset-roots.md).
+    A single frame of 4fsc PAL composite is about 1.4 MB. A three-hour PAL project is several hundred gigabytes. Point the output at storage that can hold the result — see [`{output}`](../reference/asset-roots.md).
 
 ## Building from source
 
@@ -31,7 +31,7 @@ git clone --recurse-submodules https://github.com/decode-orc/videosynth
 cd videosynth
 ```
 
-The submodules provide the specification documents under `docs/`. The media assets in `videosynth-assets/` are vendored directly into the repository and need no extra checkout step. If you already cloned without the submodules:
+The submodules provide the specification documents under `docs-tech/`. The media assets in `videosynth-assets/` are vendored directly into the repository and need no extra checkout step. If you already cloned without the submodules:
 
 ```bash
 git submodule update --init --recursive

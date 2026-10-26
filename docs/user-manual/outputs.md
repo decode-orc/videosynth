@@ -25,8 +25,9 @@ The `.cvbs` (or `.cvbsy`/`.cvbsc`) file is a flat, headerless stream of samples 
 
 | Standard | Samples per frame at 4fsc |
 |----------|---------------------------|
-| PAL | 709,379 (1135 nominal per line, four lines per frame at 1134) |
-| NTSC / PAL-M | 477,750 (910 × 525, orthogonal) |
+| PAL / SECAM | 709,379 (1135 per line, plus two extra samples on each of lines 313 and 625) |
+| NTSC | 477,750 (910 × 525, orthogonal) |
+| PAL-M | 477,225 (909 × 525) |
 
 At 16 bits per sample that is roughly 1.4 MB per PAL frame and 0.95 MB per NTSC frame — so about 2.1 GB per minute of PAL. Plan storage accordingly, and use `--output-root` to send bulk runs somewhere with room.
 

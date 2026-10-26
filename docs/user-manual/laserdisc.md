@@ -24,9 +24,9 @@ A disc is expressed as sections carrying a `section_type`:
 | `programme_area` | The content | — |
 | `lead_out` | After the programme; signals the end of the disc | 1250 frames |
 
-The minimum durations come from the track pitch: IEC requires 1.5 mm of track before the programme and 2 mm after it, which at 1.6 µm per track works out at 938 and 1250 frames. videosynth enforces them.
+The minimum durations come from the track pitch: IEC requires 1.5 mm of track before the programme and 2 mm after it, which at 1.6 µm per track works out at 938 and 1250 frames. On a CAV disc carrying laserdisc codes, a shorter lead-in or lead-out is a validation **warning**: the project still generates, but the disc is shorter than the standard allows. CLV track density varies, so CLV sections are not checked.
 
-Section order is validated. Once any section declares a `section_type`, the sequence must be `[lead_in] programme_area… [lead_out]`:
+Section order is validated. Once any section is a `lead_in` or `lead_out`, the sequence must be `[lead_in] programme_area… [lead_out]`:
 
 - at most one `lead_in`, and nothing may precede it;
 - at most one `lead_out`, and nothing may follow it;
@@ -160,7 +160,7 @@ This is handled automatically.
 
 ## Chapters
 
-Chapters are numbered 0–79, with a minimum length of 30 tracks (30 frames on CAV). One chapter marker per programme-area section.
+Chapters are numbered 0–79. IEC 60856/60857 require a chapter to last at least 30 tracks (30 frames on CAV); a shorter CAV chapter is a validation **warning**. Chapters that include a `duration_frames: all` section have no statically known length and are not checked, and nor are CLV chapters.
 
 ```yaml
 - code_type: chapter_number
@@ -207,7 +207,7 @@ NTSC discs carry two parallel encoding systems, and a compliant disc has both:
 | System | Lines | Carries |
 |--------|-------|---------|
 | 24-bit biphase | 16–18 (field 1), 279–281 (field 2) | The primary address and control codes, shared with PAL |
-| 40-bit FM | 10, 273 (data); 11, 274 (white flag) | Picture number or programme time, independently |
+| 40-bit FM | 10, 273 (data); 11, and 274 in the lead-out (white flag) | Picture number or programme time, independently |
 
 To enable it, add the FM code types alongside the 24-bit ones:
 
@@ -223,61 +223,44 @@ or, on a CLV disc, `fm_programme_time` in place of `fm_picture_number`.
 
 ### The white flag
 
-`fm_white_flag` is a constant 100 IRE signal on line 11 or 274 marking the start of each new picture — the player uses it to decide what a "frame" is when holding a still. It is placed on the field that opens the picture, and **deferred automatically** when consecutive fields are identical (as with telecine or a freeze), so it always marks a genuinely new picture. Nothing about this needs configuring.
+`fm_white_flag` is a constant 100 IRE signal marking the start of each new picture — the player uses it to decide what a "frame" is when holding a still. Every output frame is one picture starting on field 1, so the flag is on line 11 in the lead-in and the programme area, and on lines 11 and 274 in the lead-out. Nothing about this needs configuring.
 
 ## Line placement
 
 For reference, this is where each code type actually lands. You do not configure any of it.
 
-### PAL CAV
+Placement is field-aware, per IEC 60856/60857 clause 10. Every output frame is one picture whose first field is field 1, so the codes the standards place in "the first field of the picture" go in field 1 and the remaining codes go in field 2. Lines are given as frame lines; field 2 lines are PAL 329–331 and NTSC/PAL-M 279–281.
 
-| Code type | Field 1 | Field 2 |
-|-----------|---------|---------|
-| `picture_number` | 17, 18 | 330, 331 |
-| `picture_stop` | 16, 17 | 329, 330 |
-| `chapter_number` | 17, 18 (where no picture number) | 330, 331 |
-| `programme_status` | 16 | 329 |
-| `users_code` | 16 | 329 |
+### CAV programme area
 
-### PAL CLV
+| Line (field 1 / PAL field 2 / NTSC field 2) | Field 1 | Field 2 |
+|---------------------------------------------|---------|---------|
+| 16 / 329 / 279 | `programme_status` | `picture_stop`, else `programme_status` |
+| 17 / 330 / 280 | `picture_number` | `picture_stop`, else `chapter_number` |
+| 18 / 331 / 281 | `picture_number` | `chapter_number` |
 
-| Code type | Field 1 | Field 2 |
-|-----------|---------|---------|
-| `programme_time_code` | 17, 18 | 330, 331 |
-| `clv_code` | 17 | 330 |
-| `clv_picture_number` | 16 | 329 |
-| `chapter_number` | 18 | 331 |
-| `programme_status` | 16 | 329 |
-| `users_code` | 16 | 329 |
+### CLV programme area
 
-### NTSC CAV
+| Line (field 1 / PAL field 2 / NTSC field 2) | Field 1 | Field 2 |
+|---------------------------------------------|---------|---------|
+| 16 / 329 / 279 | `clv_picture_number` | `programme_status` |
+| 17 / 330 / 280 | `programme_time_code` | `clv_code` |
+| 18 / 331 / 281 | `programme_time_code` | `chapter_number` |
 
-| Code type | Field 1 | Field 2 |
-|-----------|---------|---------|
-| `fm_picture_number` | 10 | 273 |
-| `fm_white_flag` | 11 | 274 |
-| `picture_number` | 17, 18 | 280, 281 |
-| `picture_stop` | 16, 17 | 279, 280 |
-| `chapter_number` | 17, 18 | 280, 281 |
-| `programme_status` | 16 | 279 |
-| `users_code` | 16 | 279 |
+If a section carries none of the first-field codes — `picture_number` on CAV, or `programme_time_code` / `clv_picture_number` on CLV — there is nothing to put in field 1, and the field 2 codes are written in both fields.
 
-### NTSC CLV
+### Lead-in and lead-out
 
-| Code type | Field 1 | Field 2 |
-|-----------|---------|---------|
-| `fm_programme_time` | 10 | 273 |
-| `fm_white_flag` | 11 | 274 |
-| `programme_time_code` | 17, 18 | 280, 281 |
-| `clv_code` | 17 | 280 |
-| `clv_picture_number` | 16 | 279 |
-| `chapter_number` | 18 | 281 |
-| `programme_status` | 16 | 279 |
-| `users_code` | 16 | 279 |
+In both fields, line 16 (329 PAL, 279 NTSC) carries `users_code` when the section has one, and lines 17–18 (330–331 PAL, 280–281 NTSC) carry the `lead_in` or `lead_out` code.
 
-Where two code types would collide, priority is fixed by the standard: lead-in and lead-out codes win outright in their sections; `picture_stop` beats `programme_status`; `programme_time_code` beats `chapter_number`; `clv_picture_number` beats `chapter_number`; and `chapter_number` yields to `picture_number`.
+### NTSC and PAL-M FM lines
 
-`programme_status` (both standards) and `clv_code` (NTSC) start 0.172H into the active line rather than at its start, per IEC 60856 Figure 14 / IEC 60857 Figure 11. This offset is applied automatically.
+| Code type | Lead-in | Programme area | Lead-out |
+|-----------|---------|----------------|----------|
+| `fm_picture_number` (CAV) / `fm_programme_time` (CLV) | — | 10, 273 | — |
+| `fm_white_flag` | 11 | 11 | 11, 274 |
+
+`programme_status` (both standards) and `clv_code` (NTSC and PAL-M only) start 0.172H into the active line rather than at its start, per IEC 60856 Figure 14 / IEC 60857 Figure 11. This offset is applied automatically.
 
 ## What else a disc needs
 

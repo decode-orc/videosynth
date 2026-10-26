@@ -257,7 +257,6 @@ class BiphaseInjectionManager {
   // 40-bit FM generators (NTSC only).
   std::unique_ptr<FmPictureNumberGenerator> fm_picture_number_generator_;
   std::unique_ptr<FmProgrammeTimeGenerator> fm_programme_time_generator_;
-  std::unique_ptr<WhiteFlagTracker> white_flag_tracker_;
 
   std::unique_ptr<LinePlacementEngine> placement_engine_;
   std::unique_ptr<BiphaseEncoder> biphase_encoder_;

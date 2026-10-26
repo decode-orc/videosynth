@@ -243,14 +243,27 @@ TEST(LinePlacementTest, PalCavProgrammePictureNumberOnLines17And18) {
   }
 }
 
-TEST(LinePlacementTest, PalCavProgrammePictureNumberOnField2Lines330And331) {
+TEST(LinePlacementTest, PalCavProgrammePictureNumberFirstFieldOnly) {
+  // IEC 60856 §10.1.4: picture numbers go in the first field of the picture.
   LinePlacementEngine engine(Standard::kPal, DiscType::kCAV,
                              SectionType::kProgrammeArea, {"picture_number"});
   for (int line : {330, 331}) {
-    auto a = engine.GetAssignment(line, false);
-    EXPECT_TRUE(a.assigned) << "line=" << line;
-    EXPECT_EQ(a.code_type, "picture_number") << "line=" << line;
+    EXPECT_FALSE(engine.GetAssignment(line, false).assigned) << "line=" << line;
   }
+}
+
+TEST(LinePlacementTest, PalCavProgrammePictureStopInSecondField) {
+  // IEC 60856 §10.1.5: picture stop goes in lines 329/330 of the field after
+  // the picture number; programme status stays on line 16.
+  LinePlacementEngine engine(
+      Standard::kPal, DiscType::kCAV, SectionType::kProgrammeArea,
+      {"picture_number", "picture_stop", "programme_status"});
+  EXPECT_EQ(engine.GetAssignment(16, true).code_type, "programme_status");
+  EXPECT_EQ(engine.GetAssignment(17, true).code_type, "picture_number");
+  EXPECT_EQ(engine.GetAssignment(18, true).code_type, "picture_number");
+  EXPECT_EQ(engine.GetAssignment(329, false).code_type, "picture_stop");
+  EXPECT_EQ(engine.GetAssignment(330, false).code_type, "picture_stop");
+  EXPECT_FALSE(engine.GetAssignment(331, false).assigned);
 }
 
 // ---------------------------------------------------------------------------
@@ -326,15 +339,16 @@ TEST(LinePlacementTest, PalCavProgrammeChapterOnLine18WhenNoPictureNumber) {
   EXPECT_EQ(a.code_type, "chapter_number");
 }
 
-TEST(LinePlacementTest, PalCavProgrammePictureNumberBeforeChapterOnLine17) {
-  // picture_number takes line 17; chapter_number claims line 18 exclusively.
+TEST(LinePlacementTest, PalCavProgrammeChapterInFieldWithoutPictureNumber) {
+  // IEC 60856 §10.1.6: chapter numbers go in the fields without picture
+  // numbers.
   LinePlacementEngine engine(Standard::kPal, DiscType::kCAV,
                              SectionType::kProgrammeArea,
                              {"picture_number", "chapter_number"});
-  auto a17 = engine.GetAssignment(17, true);
-  EXPECT_EQ(a17.code_type, "picture_number");
-  auto a18 = engine.GetAssignment(18, true);
-  EXPECT_EQ(a18.code_type, "chapter_number");
+  EXPECT_EQ(engine.GetAssignment(17, true).code_type, "picture_number");
+  EXPECT_EQ(engine.GetAssignment(18, true).code_type, "picture_number");
+  EXPECT_EQ(engine.GetAssignment(330, false).code_type, "chapter_number");
+  EXPECT_EQ(engine.GetAssignment(331, false).code_type, "chapter_number");
 }
 
 TEST(LinePlacementTest,
@@ -372,13 +386,12 @@ TEST(LinePlacementTest, PalClvProgrammeClvPictureNumberOnLine16) {
   EXPECT_FALSE(a.uses_172h_offset);
 }
 
-TEST(LinePlacementTest, PalClvProgrammeClvPictureNumberOnField2Line329) {
+TEST(LinePlacementTest, PalClvProgrammeClvPictureNumberFirstFieldOnly) {
+  // IEC 60856 Amd 2: the CLV picture number goes in the first field.
   LinePlacementEngine engine(Standard::kPal, DiscType::kCLV,
                              SectionType::kProgrammeArea,
                              {"clv_picture_number"});
-  auto a = engine.GetAssignment(329, false);
-  EXPECT_TRUE(a.assigned);
-  EXPECT_EQ(a.code_type, "clv_picture_number");
+  EXPECT_FALSE(engine.GetAssignment(329, false).assigned);
 }
 
 TEST(LinePlacementTest, PalClvProgrammeClvPictureNumberBeforeProgrammeStatus) {
@@ -436,28 +449,32 @@ TEST(LinePlacementTest, PalClvProgrammeChapterOnLine18WhenNoPtc) {
   EXPECT_EQ(a.code_type, "chapter_number");
 }
 
-TEST(LinePlacementTest, PalClvProgrammeChapterBeforeProgrammeTimeCodeOnLine18) {
-  // chapter_number claims line 18 exclusively; programme_time_code is on
-  // line 17.
+TEST(LinePlacementTest, PalClvProgrammeChapterInFieldWithoutTimeCode) {
+  // IEC 60856 §10.1.6: CLV chapter numbers go on line 18/331 of the fields
+  // without programme time code.
   LinePlacementEngine engine(Standard::kPal, DiscType::kCLV,
                              SectionType::kProgrammeArea,
                              {"programme_time_code", "chapter_number"});
-  auto a = engine.GetAssignment(18, true);
-  EXPECT_EQ(a.code_type, "chapter_number");
+  EXPECT_EQ(engine.GetAssignment(18, true).code_type, "programme_time_code");
+  EXPECT_EQ(engine.GetAssignment(331, false).code_type, "chapter_number");
 }
 
-TEST(LinePlacementTest, PalClvProgrammeField2Lines330And331) {
-  LinePlacementEngine engine(Standard::kPal, DiscType::kCLV,
-                             SectionType::kProgrammeArea,
-                             {"programme_time_code", "clv_picture_number"});
+TEST(LinePlacementTest, PalClvProgrammeSecondFieldCarriesNonPictureCodes) {
+  LinePlacementEngine engine(
+      Standard::kPal, DiscType::kCLV, SectionType::kProgrammeArea,
+      {"programme_time_code", "clv_picture_number", "clv_code",
+       "programme_status", "chapter_number"});
+  EXPECT_EQ(engine.GetAssignment(16, true).code_type, "clv_picture_number");
+  EXPECT_EQ(engine.GetAssignment(17, true).code_type, "programme_time_code");
+  EXPECT_EQ(engine.GetAssignment(18, true).code_type, "programme_time_code");
+
   auto a329 = engine.GetAssignment(329, false);
-  EXPECT_EQ(a329.code_type, "clv_picture_number");
-
+  EXPECT_EQ(a329.code_type, "programme_status");
+  EXPECT_TRUE(a329.uses_172h_offset);
   auto a330 = engine.GetAssignment(330, false);
-  EXPECT_EQ(a330.code_type, "programme_time_code");
-
-  auto a331 = engine.GetAssignment(331, false);
-  EXPECT_EQ(a331.code_type, "programme_time_code");
+  EXPECT_EQ(a330.code_type, "clv_code");
+  EXPECT_FALSE(a330.uses_172h_offset);  // the 0.172H offset is NTSC only
+  EXPECT_EQ(engine.GetAssignment(331, false).code_type, "chapter_number");
 }
 
 // ---------------------------------------------------------------------------
@@ -602,13 +619,12 @@ TEST(LinePlacementTest, NtscCavProgrammePictureNumberOnLines17And18) {
   }
 }
 
-TEST(LinePlacementTest, NtscCavProgrammePictureNumberOnField2Lines280And281) {
+TEST(LinePlacementTest, NtscCavProgrammePictureNumberFirstFieldOnly) {
+  // IEC 60857 §10.1.4: picture numbers go in the first field of the picture.
   LinePlacementEngine engine(Standard::kNtsc, DiscType::kCAV,
                              SectionType::kProgrammeArea, {"picture_number"});
   for (int line : {280, 281}) {
-    auto a = engine.GetAssignment(line, false);
-    EXPECT_TRUE(a.assigned) << "line=" << line;
-    EXPECT_EQ(a.code_type, "picture_number") << "line=" << line;
+    EXPECT_FALSE(engine.GetAssignment(line, false).assigned) << "line=" << line;
   }
 }
 
@@ -657,25 +673,20 @@ TEST(LinePlacementTest, NtscCavProgrammePriorityOnLine17) {
   }
 }
 
-TEST(LinePlacementTest, NtscCavProgrammePriorityOnLine18) {
-  // chapter_number claims line 18 exclusively; picture_number fills it only
-  // as a redundant copy when no chapter is present.
+TEST(LinePlacementTest, NtscCavProgrammeChapterInFieldWithoutPictureNumber) {
   {
     LinePlacementEngine e(Standard::kNtsc, DiscType::kCAV,
                           SectionType::kProgrammeArea,
                           {"picture_number", "chapter_number"});
-    EXPECT_EQ(e.GetAssignment(18, true).code_type, "chapter_number");
+    EXPECT_EQ(e.GetAssignment(18, true).code_type, "picture_number");
+    EXPECT_EQ(e.GetAssignment(281, false).code_type, "chapter_number");
   }
   {
+    // Without picture numbers every field is a chapter field.
     LinePlacementEngine e(Standard::kNtsc, DiscType::kCAV,
                           SectionType::kProgrammeArea, {"chapter_number"});
     EXPECT_EQ(e.GetAssignment(18, true).code_type, "chapter_number");
-  }
-  {
-    // picture_number alone (no chapter): fills line 18 redundantly.
-    LinePlacementEngine e(Standard::kNtsc, DiscType::kCAV,
-                          SectionType::kProgrammeArea, {"picture_number"});
-    EXPECT_EQ(e.GetAssignment(18, true).code_type, "picture_number");
+    EXPECT_EQ(e.GetAssignment(281, false).code_type, "chapter_number");
   }
 }
 
@@ -723,9 +734,8 @@ TEST(LinePlacementTest, NtscClvProgrammeClvPictureNumberOnLine16) {
   EXPECT_TRUE(a16.assigned);
   EXPECT_EQ(a16.code_type, "clv_picture_number");
 
-  auto a279 = engine.GetAssignment(279, false);
-  EXPECT_TRUE(a279.assigned);
-  EXPECT_EQ(a279.code_type, "clv_picture_number");
+  // IEC 60857 Amd 2: first field of the picture only.
+  EXPECT_FALSE(engine.GetAssignment(279, false).assigned);
 }
 
 TEST(LinePlacementTest, NtscClvProgrammeProgrammeTimeCodeOnLines17And18) {
@@ -740,13 +750,12 @@ TEST(LinePlacementTest, NtscClvProgrammeProgrammeTimeCodeOnLines17And18) {
   }
 }
 
-TEST(LinePlacementTest, NtscClvProgrammeProgrammeTimeCodeOnField2Lines280281) {
+TEST(LinePlacementTest, NtscClvProgrammeProgrammeTimeCodeFirstFieldOnly) {
   LinePlacementEngine engine(Standard::kNtsc, DiscType::kCLV,
                              SectionType::kProgrammeArea,
                              {"programme_time_code"});
   for (int line : {280, 281}) {
-    auto a = engine.GetAssignment(line, false);
-    EXPECT_EQ(a.code_type, "programme_time_code") << "line=" << line;
+    EXPECT_FALSE(engine.GetAssignment(line, false).assigned) << "line=" << line;
   }
 }
 
@@ -787,15 +796,12 @@ TEST(LinePlacementTest, NtscClvProgrammeChapterOnLine18WhenNoPtc) {
   EXPECT_EQ(a.code_type, "chapter_number");
 }
 
-TEST(LinePlacementTest,
-     NtscClvProgrammeChapterBeforeProgrammeTimeCodeOnLine18) {
-  // chapter_number claims line 18 exclusively; programme_time_code is on
-  // line 17.
+TEST(LinePlacementTest, NtscClvProgrammeChapterInFieldWithoutTimeCode) {
   LinePlacementEngine engine(Standard::kNtsc, DiscType::kCLV,
                              SectionType::kProgrammeArea,
                              {"programme_time_code", "chapter_number"});
-  auto a = engine.GetAssignment(18, true);
-  EXPECT_EQ(a.code_type, "chapter_number");
+  EXPECT_EQ(engine.GetAssignment(18, true).code_type, "programme_time_code");
+  EXPECT_EQ(engine.GetAssignment(281, false).code_type, "chapter_number");
 }
 
 // ---------------------------------------------------------------------------

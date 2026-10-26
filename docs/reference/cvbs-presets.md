@@ -54,7 +54,7 @@ Only one standard per project. The output resolution follows from it and must no
 
 **Rule**: 4fsc generation requires a 4fsc encoding *and* the `signal_state_preset` the standard requires (see below).
 
-**Warning**: enabling `pal_laserdisc_pilot_burst` with an unsigned preset clips the burst trough at −300 mV, where the waveform reaches −600 mV. Use `CVBS_S16_4FSC` or a raw preset.
+**Warning**: enabling `pal_laserdisc_pilot_burst` with `CVBS_U10_4FSC`, `CVBS_U16_4FSC` or `CVBS_TPG21_4FSC` clips the burst trough at −300 mV, where the waveform reaches −600 mV. Use `CVBS_S16_4FSC` or a raw preset.
 
 ## `signal_state_preset`
 

@@ -33,7 +33,7 @@ The output resolution is fixed by the standard and cannot be set in the project.
 | `RAW_S16_28M` | 28 MHz | Signed 16-bit millivolts | Resampled from the 4fsc lattice |
 | `RAW_S16_40M` | 40 MHz | Signed 16-bit millivolts | Resampled from the 4fsc lattice |
 
-**4fsc** means the sample clock is phase-locked to the colour subcarrier at four times its frequency: 17,734,475 Hz for PAL and 14,318,180 Hz for NTSC. SECAM has no single subcarrier and is stored on the PAL 4fsc lattice, as the CVBS file format specifies. NTSC is orthogonal at 4fsc — 910 samples × 525 lines = 477,750 samples per frame. PAL is not, and uses 709,379 samples per frame via a distributed one-sample slip (1135 nominal samples per line, with four lines per frame at 1134).
+**4fsc** means the sample clock is phase-locked to the colour subcarrier at four times its frequency: 17,734,475 Hz for PAL and 14,318,180 Hz for NTSC. SECAM has no single subcarrier and is stored on the PAL 4fsc lattice, as the CVBS file format specifies. NTSC is orthogonal at 4fsc — 910 samples × 525 lines = 477,750 samples per frame. PAL is not: it has 1135.0064 samples per line, so a frame is 709,379 samples — 1135 per line plus four extra samples per frame, two on line 313 and two on line 625. PAL-M has exactly 909 samples per line, 477,225 per frame.
 
 Generation always happens on the 4fsc lattice. The raw presets are produced by resampling that lattice to the requested rate in the output stage.
 
@@ -62,7 +62,7 @@ Sub-black and over-white excursions inside the legal range are preserved rather 
 
 ## Signal state
 
-`signal_state_preset` must be `STANDARD_STABLE_LOCKED`. This declares the signal standard-rate (4×fsc), time-base stable, and phase locked — every sample sits at the standard subcarrier-reference-locked phase point for its (field, line, sample) position, which is what 4fsc generation produces by construction. The CVBS specification's unstable and unlocked presets describe imperfect captures; videosynth never emits one, so any other value is rejected at validation.
+`signal_state_preset` must be `STANDARD_STABLE_LOCKED` for `PAL`, `NTSC` and `PAL_M`, and `STANDARD_STABLE_UNLOCKED` for `SECAM` (see [SECAM chroma](#secam-chroma)); leaving it out selects the right one. For the quadrature standards this declares the signal standard-rate (4×fsc), time-base stable, and phase locked — every sample sits at the standard subcarrier-reference-locked phase point for its (field, line, sample) position, which is what 4fsc generation produces by construction. The CVBS specification's unstable and unlocked presets describe imperfect captures; videosynth never emits one, so any value other than the one the standard requires is rejected at validation.
 
 The metadata sidecar additionally declares `sequence_continuous = TRUE`: the synthesised signal is one unbroken sequence, with subcarrier phase and colour field sequence advancing continuously from the first frame to the last. Simulated disc skips (re-anchored picture numbers) change the VBI content only — they never break the signal's own continuity.
 

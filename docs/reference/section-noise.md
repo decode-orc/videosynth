@@ -26,7 +26,8 @@ No other key is accepted.
 | Block absent | No noise |
 | `noise_db` only | Flat floor; White SNR = Black PSNR = `noise_db` |
 | Both keys | Two-component model; brighter picture content is noisier |
-| `noise_spread_db` without `noise_db` | Validation error |
+| `noise_spread_db` without `noise_db` | Parse error |
+| `noise_seed` only | No noise — the block has no effect |
 
 Noise is injected on the internal millivolt representation **before quantisation**, so it lands on every synthesised region — VBI lines, blanking and active picture — and survives into the final sample codes.
 

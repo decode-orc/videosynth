@@ -137,6 +137,15 @@ TEST(ClvCodeGeneratorTest, NtscFramesPerMinuteIs1800) {
   EXPECT_EQ(ProgrammeTimeCodeGenerator::FramesPerMinute(Standard::kNtsc), 1800);
 }
 
+TEST(ClvCodeGeneratorTest, PalMFramesPerMinuteIs1800) {
+  // PAL-M is a System M (30 frame/s nominal) standard like NTSC.
+  EXPECT_EQ(ProgrammeTimeCodeGenerator::FramesPerMinute(Standard::kPalM), 1800);
+}
+
+TEST(ClvCodeGeneratorTest, PalMClvPictureNumberCountsThirtyFramesPerSecond) {
+  EXPECT_EQ(ClvPictureNumberGenerator::FramesPerSecond(Standard::kPalM), 30);
+}
+
 // ---------------------------------------------------------------------------
 // ProgrammeTimeCodeGenerator — state machine (PAL)
 // ---------------------------------------------------------------------------

@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "videosynth/biphase_types.h"
+#include "videosynth/cav_code_generator.h"
 #include "videosynth/dropout_scale.h"
 #include "videosynth/osd_token_resolver.h"
 #include "videosynth/path_resolution.h"
@@ -1137,10 +1138,10 @@ void ValidateDropoutParameters(const videosynth::Section& section,
   const bool scratch_active =
       dp.scratch.enabled && dp.scratch.scale > kDropoutScaleMin;
 
-  // If neither sub-key is present (both at default/zero) there is nothing to
-  // validate; the stage will be a no-op for this section.
-  if (!random_active && !scratch_active && dp.random.scale == 0 &&
-      dp.scratch.scale == 0) {
+  // Without a dropouts: block (both sub-blocks at their defaults) there is
+  // nothing to validate; the stage will be a no-op for this section.
+  if (!dp.block_present && !random_active && !scratch_active &&
+      dp.random.scale == 0 && dp.scratch.scale == 0) {
     return;
   }
 
@@ -1241,7 +1242,7 @@ void ValidateOsdConfig(const videosynth::Section& section,
           "OSD validation error in section '" + section.name +
           "': overlay text contains unknown token '{" + unknown_token +
           "}'. Supported tokens: {picture_number}, {biphase_hex}, {phase_id}, "
-          "{section_name}.");
+          "{section_name}, {timecode}, {frame_number}.");
       return;
     }
   }
@@ -1284,6 +1285,14 @@ void ValidateAudioChannel(const videosynth::AudioParameters& audio,
     result->is_valid = false;
     result->errors.push_back(where + ": amplitude must be in [0.0, 1.0]; got " +
                              std::to_string(audio.amplitude) + ".");
+    return;
+  }
+
+  // A ramp replaces the fixed frequency.
+  if (audio.ramp_enabled && audio.frequency_specified) {
+    result->is_valid = false;
+    result->errors.push_back(
+        where + ": ramp and frequency are mutually exclusive; remove one.");
     return;
   }
 
@@ -1705,6 +1714,77 @@ void ValidateEfmAudioOutput(const videosynth::Project& project,
 // no section may follow the lead_out, and every section after a lead_in or
 // before a lead_out must be programme_area. Out-of-order sections would break
 // the monotonic picture-number and time-code generation (IEC 60856/60857).
+// IEC 60856/60857 §10.1.5: a chapter lasts at least 30 tracks, which is 30
+// frames on CAV. A chapter starts at the first section carrying
+// chapter_number and at each section that sets `chapter`; later sections
+// carrying chapter_number without `chapter` continue it. CLV track density
+// varies, so CLV chapters are not checked, and a chapter with a section that
+// plays its whole source has no statically known length.
+void ValidateChapterLengths(const videosynth::Project& project,
+                            videosynth::ValidationResult* result) {
+  if (result == nullptr ||
+      videosynth::DiscTypeFromString(project.line_injections.disc_type) !=
+          videosynth::DiscType::kCAV) {
+    return;
+  }
+
+  struct ChapterRun {
+    int chapter = 0;
+    std::string first_section;
+    int frames = 0;
+    bool length_known = true;
+  };
+  std::optional<ChapterRun> run;
+
+  const auto finish_run = [&]() {
+    if (run.has_value() && run->length_known &&
+        run->frames <
+            videosynth::ChapterNumberGenerator::kMinimumChapterTracks) {
+      result->warnings.push_back(
+          "Laserdisc injection warning: CAV chapter " +
+          std::to_string(run->chapter) + " starting in section '" +
+          run->first_section + "' lasts " + std::to_string(run->frames) +
+          " frames; IEC 60856/60857 requires at least " +
+          std::to_string(
+              videosynth::ChapterNumberGenerator::kMinimumChapterTracks) +
+          ".");
+    }
+  };
+
+  for (const videosynth::Section& section : project.sections) {
+    const videosynth::Section::LineInjectionCode* chapter_code = nullptr;
+    for (const videosynth::Section::LineInjection& injection :
+         section.line_injections) {
+      if (Lowercase(injection.type) != "laserdisc") {
+        continue;
+      }
+      for (const videosynth::Section::LineInjectionCode& code :
+           injection.codes) {
+        if (code.code_type == "chapter_number") {
+          chapter_code = &code;
+        }
+      }
+    }
+    if (chapter_code == nullptr) {
+      continue;
+    }
+
+    if (!run.has_value() || chapter_code->chapter_specified) {
+      finish_run();
+      run = ChapterRun{};
+      run->chapter =
+          chapter_code->chapter_specified ? chapter_code->chapter : 0;
+      run->first_section = section.name;
+    }
+    if (section.duration_frames_all) {
+      run->length_known = false;
+    } else {
+      run->frames += section.duration_frames;
+    }
+  }
+  finish_run();
+}
+
 void ValidateSectionOrdering(const videosynth::Project& project,
                              videosynth::ValidationResult* result) {
   if (result == nullptr) {
@@ -1936,6 +2016,7 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
   // before the per-section pass; the section pass relies on the project
   // disc_type and VITS set.
   ValidateProjectLineInjections(project, &result);
+  ValidateChapterLengths(project, &result);
 
   // Project VITS target lines, consulted by the per-section noise check.
   std::set<int> project_vits_lines;

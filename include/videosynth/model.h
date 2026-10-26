@@ -227,6 +227,10 @@ struct ScratchDropoutParameters {
 struct DropoutParameters {
   RandomDropoutParameters random = {};
   ScratchDropoutParameters scratch = {};
+  // True when the project file carried a dropouts: block, so validation can
+  // reject a block that enables nothing. Set by the parser only and not
+  // compared by operator== (the emitter never writes an inert block).
+  bool block_present = false;
 };
 
 // On-screen display foreground level. Only four discrete levels are
@@ -431,6 +435,10 @@ struct AudioParameters {
 
   // Fixed-frequency mode (used when !ramp_enabled).
   double frequency_hz = 1000.0;
+  // True when the project file set `frequency`, so validation can reject it
+  // alongside a ramp. Not compared by operator== (the emitter writes
+  // `frequency` only for fixed-frequency tones).
+  bool frequency_specified = false;
 
   // Ramp mode.
   bool ramp_enabled = false;

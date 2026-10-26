@@ -72,7 +72,7 @@ The directory `{output}/…` resolves to. Defaults to the project file's own dir
 | `XDG_DATA_HOME` | Base for `{user}` (`$XDG_DATA_HOME/videosynth/assets`) |
 | `VIDEOSYNTH_OUTPUT_DIR` | Where `{output}` resolves |
 
-Command-line options take precedence over the environment.
+Command-line options take precedence over the environment. The GUI also looks for an installed asset library on the XDG data dirs, which takes precedence over `VIDEOSYNTH_ASSET_DIR` there (see [Asset roots](asset-roots.md)).
 
 ## Exit codes
 
@@ -83,7 +83,7 @@ Command-line options take precedence over the environment.
 
 ## The GUI's options
 
-`videosynth-gui` accepts `--log-level` and `--log-file`, which override the persisted preferences for that session without changing the saved values.
+`videosynth-gui` accepts `--log-level` and `--log-file`, which override the persisted preferences for that session without changing the saved values, plus `--help` and `--version`. It takes no project path on the command line.
 
 ## Examples
 

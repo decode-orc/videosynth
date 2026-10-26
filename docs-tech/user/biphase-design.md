@@ -90,6 +90,9 @@ Set the video standard via `cvbs_presets.video_standard_preset`:
 |----------|-----------|-------|-------|
 | `PAL` | 25 fps | 625 | 24-bit biphase only |
 | `NTSC` | 29.97 fps | 525 | 24-bit biphase + 40-bit FM |
+| `PAL_M` | 29.97 fps | 525 | Treated as System M: NTSC line placement, 40-bit FM, 79 999 maximum CAV picture number, 1800 frames/min and 30 fps CLV picture numbers with colour time error correction |
+
+SECAM has no LaserVision format; laserdisc injections are validation errors for SECAM projects.
 
 ---
 
@@ -206,9 +209,9 @@ Fixed code that marks the lead-out section.
 | Section | `programme_area` only |
 | Disc type | CAV only |
 | Auto-increment | Yes (per frame) |
-| Lines (PAL) | 17, 18 or 330, 331 (field-dependent) |
-| Lines (NTSC) | 17, 18 or 280, 281 (field-dependent) |
-| Value range | 1–99,999 (PAL) / 1–79,999 (NTSC) |
+| Lines (PAL) | 17, 18 (field 1) |
+| Lines (NTSC/PAL-M) | 17, 18 (field 1) |
+| Value range | 1–99,999 (PAL) / 1–79,999 (NTSC, PAL-M) |
 | Digit constraint | X₁–X₅ must each be 0–9 (decimal digits) |
 
 The picture number identifies each unique frame on a CAV disc. It auto-increments by 1 per frame.
@@ -237,10 +240,10 @@ The picture number identifies each unique frame on a CAV disc. It auto-increment
 | Hex format | `82CFFF` |
 | Section | `programme_area` only |
 | Disc type | CAV only |
-| Lines (PAL) | 16, 17 or 329, 330 |
-| Lines (NTSC) | 16, 17 or 279, 280 |
+| Lines (PAL) | 329, 330 (field 2) |
+| Lines (NTSC/PAL-M) | 279, 280 (field 2) |
 
-Signals the player to stop at a specific frame (freeze-frame marker). Generated on the field immediately following the picture number field.
+Signals the player to stop at a specific frame (freeze-frame marker). Generated in field 2, the field immediately following the picture-number field; it takes priority over `programme_status` on 329/279 and over `chapter_number` on 330/280. In a section without `picture_number` it is written in both fields (16, 17 and 329, 330 / 279, 280).
 
 ```yaml
 - code_type: picture_stop
@@ -255,12 +258,14 @@ Signals the player to stop at a specific frame (freeze-frame marker). Generated 
 | Hex format | `8X₁X₂DDD` |
 | Section | `programme_area` only |
 | Auto-increment | No (static per section) |
-| Lines (CAV PAL) | 17, 18, 330, 331 (where no `picture_number`) |
-| Lines (CLV PAL) | 18 or 331 (where no `programme_time_code`) |
-| Lines (CAV NTSC) | 17, 18, 280, 281 (where no `picture_number`) |
-| Lines (CLV NTSC) | 18 or 281 |
+| Lines (CAV PAL) | 330 (unless `picture_stop`), 331 — field 2 |
+| Lines (CLV PAL) | 331 — field 2 |
+| Lines (CAV NTSC/PAL-M) | 280 (unless `picture_stop`), 281 — field 2 |
+| Lines (CLV NTSC/PAL-M) | 281 — field 2 |
 | Chapter range | 0–79 |
-| Minimum length | 30 tracks |
+| Minimum length | 30 tracks (CAV: validator warning) |
+
+In a section without the picture-field codes (`picture_number` on CAV; `programme_time_code`/`clv_picture_number` on CLV) the chapter is written in both fields.
 
 Identifies the current chapter. Contains an encoded **stop-bit** that controls whether the player can use this chapter as a still-frame search stop point. See [Chapter System](#6-chapter-system) for stop-bit rules.
 
@@ -287,8 +292,9 @@ Identifies the current chapter. Contains an encoded **stop-bit** that controls w
 |----------|-------|
 | Hex format | `8DC/BA X₃X₄X₅` |
 | Section | `programme_area` only |
-| Lines (PAL) | 16 or 329 |
-| Lines (NTSC) | 16 or 279 |
+| Lines (CAV) | 16 (field 1) and 329 / 279 (field 2, unless `picture_stop`) |
+| Lines (CLV) | 329 / 279 (field 2); also 16 when the section has no `programme_time_code`/`clv_picture_number` |
+| Horizontal start | 0.172H |
 
 Carries audio/video mode and copy-permission information. Must include a valid Hamming check code in X₅. Use the `ProgrammeStatusCodeBuilder` to calculate valid codes.
 
@@ -332,8 +338,8 @@ Carries disc-specific metadata for the disc manufacturer.
 | Section | `programme_area` only |
 | Disc type | CLV only |
 | Auto-increment | Yes (minutes) |
-| Lines (PAL) | 17, 18 or 330, 331 (field-dependent) |
-| Lines (NTSC) | 17, 18 or 280, 281 (field-dependent) |
+| Lines (PAL) | 17, 18 (field 1) |
+| Lines (NTSC/PAL-M) | 17, 18 (field 1) |
 | X₁ range | 0–F (hours, 0–15) |
 | X₂ range | 0–5 (minutes tens, BCD) |
 | X₃ range | 0–9 (minutes units, BCD) |
@@ -353,10 +359,10 @@ Encodes elapsed programme time (hours and minutes) for CLV discs. Starts at `0:0
 | Hex format | `87FFFF` |
 | Section | `programme_area` only |
 | Disc type | CLV only |
-| Lines (PAL) | 17 or 330 |
-| Lines (NTSC) | 17 or 280 |
+| Lines (PAL) | 330 (field 2) |
+| Lines (NTSC/PAL-M) | 280 (field 2), 0.172H horizontal start |
 
-A fixed marker code that identifies the disc as CLV. Placed on lines where no `programme_time_code` or `clv_picture_number` is present.
+A fixed marker code that identifies the disc as CLV, placed in field 2 (the field without programme time code and CLV picture number). In a section with neither of those codes it is written in both fields.
 
 ```yaml
 - code_type: clv_code
@@ -372,8 +378,8 @@ A fixed marker code that identifies the disc as CLV. Placed on lines where no `p
 | Section | `programme_area` only |
 | Disc type | CLV only |
 | Auto-increment | Yes (per frame) |
-| Lines (PAL) | 16 or 329 |
-| Lines (NTSC) | 16 or 279 |
+| Lines (PAL) | 16 (field 1) |
+| Lines (NTSC/PAL-M) | 16 (field 1) |
 | X₁ range | A–F |
 | X₃ range | 0–9 |
 | X₄ range | 0–2 |
@@ -381,7 +387,7 @@ A fixed marker code that identifies the disc as CLV. Placed on lines where no `p
 
 Encodes the frame position within the current second (X₄×10 + X₅ = frame 0–29) and the second offset within a 60-second block (X₁, X₃). Auto-increments each frame.
 
-**NTSC note**: Includes colour time error correction (IEC 60857 Amendment 2 §10.1.10) — the seconds count periodically jumps forward at specific frame counts to maintain accurate colour timing.
+**NTSC/PAL-M note**: Includes colour time error correction (IEC 60857 Amendment 2 §10.1.10) — the seconds count periodically jumps forward at specific frame counts to maintain accurate colour timing.
 
 ```yaml
 - code_type: clv_picture_number
@@ -391,7 +397,7 @@ Encodes the frame position within the current second (X₄×10 + X₅ = frame 0�
 
 ### NTSC 40-bit FM Code Types
 
-These code types are NTSC-only and must not be used with PAL projects.
+These code types are System M only (NTSC and PAL-M) and must not be used with PAL projects.
 
 #### `fm_picture_number` — FM Picture Number (NTSC CAV)
 
@@ -399,7 +405,7 @@ These code types are NTSC-only and must not be used with PAL projects.
 |----------|-------|
 | Signal type | 40-bit FM |
 | Section | `programme_area` only |
-| Disc type | CAV + NTSC only |
+| Disc type | CAV + NTSC/PAL-M only |
 | Lines | 10, 273 |
 | Value range | 0–79,999 |
 | Update timing | Second field of each new picture |
@@ -418,7 +424,7 @@ Carries the CAV picture number in the 40-bit FM format on lines 10/273. Starts a
 |----------|-------|
 | Signal type | 40-bit FM |
 | Section | `programme_area` only |
-| Disc type | CLV + NTSC only |
+| Disc type | CLV + NTSC/PAL-M only |
 | Lines | 10, 273 |
 
 Carries CLV programme time in the 40-bit FM format. X₅ mode indicator: A = lead-in, B = end of lead-in, D = programme, C = lead-out.
@@ -436,10 +442,10 @@ Carries CLV programme time in the 40-bit FM format. X₅ mode indicator: A = lea
 | Signal type | 100 IRE constant level |
 | Section | `lead_in`, `programme_area`, `lead_out` |
 | Lines (lead-in) | Line 11 only |
-| Lines (programme) | Line 11 or 274 (field-dependent) |
+| Lines (programme) | Line 11 (field 1) |
 | Lines (lead-out) | Lines 11 and 274 |
 
-The white flag is a constant 100 IRE signal that marks the start of each new picture. It is placed automatically on the correct field and deferred when consecutive fields are identical (telecine or freeze-frame).
+The white flag is a constant 100 IRE signal that marks the start of each new picture. Every output frame is one picture opened by field 1, so in the programme area the flag is always on line 11.
 
 ```yaml
 - code_type: fm_white_flag
@@ -455,7 +461,7 @@ IEC 60856/60857 §10.1.5 requires that timecodes run **continuously** from the f
 
 The affected code types are:
 - `picture_number` (CAV): increments every frame and continues across sections (anchored by `start_value` on the first section, or re-anchored where a section sets it explicitly)
-- `programme_time_code` (CLV): counts from `0:00`, increments minutes every 1500 (PAL) or 1800 (NTSC) frames
+- `programme_time_code` (CLV): counts from `0:00`, increments minutes every 1500 (PAL) or 1800 (NTSC, PAL-M) frames
 - `clv_picture_number` (CLV): counts seconds and frames from `0:00`, increments every frame
 
 ### Chapters Do NOT Reset Timecodes
@@ -557,71 +563,60 @@ The encoder manages this automatically — you only need to specify the chapter 
 
 LaserDisc uses sequential line numbering across the full frame (both fields). PAL line 1 maps to the first line of field 1; line 313 maps to the first line of field 2. NTSC line 1 maps to field 1; line 263 maps to field 2.
 
-Code placement depends on **which field opens the current picture** (field 1 or field 2 first):
+Every output frame is one picture whose **first field is field 1**. Codes that IEC 60856/60857 clause 10 place in "the first field of the picture" go in field 1; codes for the remaining fields go in field 2. If a programme-area section carries none of the first-field codes (`picture_number` on CAV; `programme_time_code` or `clv_picture_number` on CLV), the field-2 assignments are written in **both** fields.
 
 ### Reserved VBI Ranges
 
-The following line ranges are exclusively reserved for laserdisc and must not be targeted by any other injection type (VITS, line_content) when a laserdisc injection is active in the same section:
+The following line ranges are exclusively reserved for laserdisc. When the project declares a `disc_type` (a laserdisc project), no project VITS entry may target them:
 
 | Standard | Field 1 range | Field 2 range |
 |----------|-------------|-------------|
 | PAL | Lines 6–18 | Lines 319–331 |
-| NTSC | Lines 10–18 | Lines 273–281 |
+| NTSC / PAL-M | Lines 10–18 | Lines 273–281 |
 
 ### Active Line Assignments
 
-#### PAL CAV
+Field-2 lines are 329/330/331 on PAL and 279/280/281 on NTSC/PAL-M; "A > B" means A takes the line when present, otherwise B.
 
-| Code type | Field 1 lines | Field 2 lines |
-|-----------|-------------|-------------|
-| `picture_number` | 17, 18 | 330, 331 |
-| `picture_stop` | 16, 17 | 329, 330 |
-| `chapter_number` | 17, 18 (no pic#) | 330, 331 (no pic#) |
-| `programme_status` | 16 | 329 |
-| `users_code` | 16 | 329 |
+#### Lead-in / lead-out (CAV and CLV)
 
-#### PAL CLV
+| Line (F1 / PAL F2 / NTSC F2) | Code |
+|------------------------------|------|
+| 16 / 329 / 279 | `users_code` (when declared) |
+| 17, 18 / 330, 331 / 280, 281 | `lead_in` or `lead_out` |
 
-| Code type | Field 1 lines | Field 2 lines |
-|-----------|-------------|-------------|
-| `programme_time_code` | 17, 18 | 330, 331 |
-| `clv_code` | 17 (no ptc/clv#) | 330 (no ptc/clv#) |
-| `clv_picture_number` | 16 | 329 |
-| `chapter_number` | 18 (no ptc) | 331 (no ptc) |
-| `programme_status` | 16 (CLV field) | 329 (CLV field) |
-| `users_code` | 16 | 329 |
+#### CAV programme area
 
-#### NTSC CAV
+| Line | Field 1 | Field 2 |
+|------|---------|---------|
+| 16 / 329 / 279 | `programme_status` | `picture_stop` > `programme_status` |
+| 17 / 330 / 280 | `picture_number` | `picture_stop` > `chapter_number` |
+| 18 / 331 / 281 | `picture_number` | `chapter_number` |
 
-| Code type | Field 1 lines | Field 2 lines |
-|-----------|-------------|-------------|
-| `fm_picture_number` | 10 | 273 |
-| `fm_white_flag` | 11 | 274 |
-| `picture_number` | 17, 18 | 280, 281 |
-| `picture_stop` | 16, 17 | 279, 280 |
-| `chapter_number` | 17, 18 (no pic#) | 280, 281 (no pic#) |
-| `programme_status` | 16 | 279 |
-| `users_code` | 16 | 279 |
+#### CLV programme area
 
-#### NTSC CLV
+| Line | Field 1 | Field 2 |
+|------|---------|---------|
+| 16 / 329 / 279 | `clv_picture_number` | `programme_status` |
+| 17 / 330 / 280 | `programme_time_code` | `clv_code` |
+| 18 / 331 / 281 | `programme_time_code` | `chapter_number` |
 
-| Code type | Field 1 lines | Field 2 lines |
-|-----------|-------------|-------------|
-| `fm_programme_time` | 10 | 273 |
-| `fm_white_flag` | 11 | 274 |
-| `programme_time_code` | 17, 18 | 280, 281 |
-| `clv_code` | 17 (no ptc/clv#) | 280 (no ptc/clv#) |
-| `clv_picture_number` | 16 | 279 |
-| `chapter_number` | 18 (no ptc) | 281 (no ptc) |
-| `programme_status` | 16 (CLV field) | 279 (CLV field) |
-| `users_code` | 16 | 279 |
+A field-1 line whose code the section does not declare is left empty.
+
+#### NTSC / PAL-M 40-bit FM lines
+
+| Code type | Field 1 | Field 2 |
+|-----------|---------|---------|
+| `fm_picture_number` (CAV) / `fm_programme_time` (CLV) | 10 | 273 |
+| `fm_white_flag` — lead-in, programme area | 11 | — |
+| `fm_white_flag` — lead-out | 11 | 274 |
 
 ### Horizontal Start Timing
 
 Two code types have a delayed horizontal start of 0.172H from the start of the active line (IEC 60856 Figure 14, IEC 60857 Figure 11):
 
-- `programme_status` (PAL and NTSC)
-- `clv_code` (NTSC only)
+- `programme_status` (all standards)
+- `clv_code` (NTSC and PAL-M only)
 
 All other code types begin at the start of the active video line. This offset is applied automatically.
 
@@ -629,11 +624,10 @@ All other code types begin at the start of the active video line. This offset is
 
 When multiple code types would occupy the same line, the following priorities apply:
 
-1. Lead-in/lead-out codes have absolute priority in their sections
-2. `picture_stop` has priority over `programme_status`
-3. `programme_time_code` has priority over `chapter_number` on lines 17/18/280/281 (CLV)
-4. `clv_picture_number` has priority over `chapter_number` on lines 16/279 (CLV)
-5. `chapter_number` yields to `picture_number` on the same lines (CAV)
+1. Lead-in/lead-out codes are the only codes (besides `users_code` on line 16/329/279) in their sections.
+2. Field 1 of a programme-area picture carries only the first-field codes (CAV: `programme_status`, `picture_number`; CLV: `clv_picture_number`, `programme_time_code`), so `chapter_number`, `picture_stop` and `clv_code` never compete with them.
+3. In field 2, `picture_stop` has priority over `programme_status` on 329/279 and over `chapter_number` on 330/280 (CAV).
+4. `chapter_number` alone occupies 331/281 in field 2 (CAV and CLV).
 
 ---
 
@@ -643,7 +637,7 @@ When multiple code types would occupy the same line, the following priorities ap
 
 NTSC discs carry **two parallel encoding systems**:
 1. **24-bit biphase** on lines 16–18 / 279–281 — the primary system shared with PAL
-2. **40-bit FM** on lines 10–11 / 273–274 — NTSC-only supplementary system
+2. **40-bit FM** on lines 10–11 / 273–274 — System M (NTSC/PAL-M) supplementary system
 
 Both systems must be configured simultaneously on NTSC discs. They differ in both bit-cell duration and transition time:
 
@@ -679,13 +673,11 @@ All transitions are S-curve shaped with a 135 ns ± 15 ns 10 %–90 % time.
 
 ### White Flag
 
-The white flag is a **100 IRE constant-level signal** (not modulated) on line 11 (field 1) or 274 (field 2). It marks the start of each complete picture and is automatically managed:
+The white flag is a **100 IRE constant-level signal** (not modulated) on line 11 (field 1) and, in lead-out, also line 274 (field 2). It marks the start of each complete picture and is placed automatically:
 
 - **Lead-in**: line 11 only (field 1 line; line 274 is not used)
-- **Programme area**: line 11 or 274 depending on which field opens the picture
+- **Programme area**: line 11 only — every output frame is one picture opened by field 1
 - **Lead-out**: both lines 11 and 274 for the full lead-out duration
-
-**Automatic deferral**: When consecutive fields are identical (e.g., from the same photographic frame or electronic freeze), the white flag is automatically deferred to the first field of the next new picture. No YAML configuration is needed for this.
 
 ### Coexistence with 24-bit Biphase
 
@@ -892,7 +884,7 @@ sections:
           - code_type: programme_status
             programme_status: "0x8DC001"
           - code_type: fm_picture_number      # 40-bit FM on lines 10/273
-          - code_type: fm_white_flag          # 100 IRE on line 11/274
+          - code_type: fm_white_flag          # 100 IRE on line 11 (field 1)
 
   - name: LeadOut
     type: progressive
@@ -1032,33 +1024,33 @@ Every section with a laserdisc injection must then have:
 
 | Code type | Optional field | Default | Description |
 |-----------|---------------|---------|-------------|
-| `picture_number` | `start_value` | 1 | Starting picture number |
-| `chapter_number` | `chapter` | — | **Required**: chapter number 0–79 |
+| `picture_number` / `fm_picture_number` | `start_value` | Continue from the previous section (1 on the first) | Re-anchors the picture number at this section |
+| `chapter_number` | `chapter` | Continue the previous section's chapter (0 on the first) | Chapter number 0–79; setting it starts a new chapter |
 | `programme_status` | `programme_status` | — | **Required**: 24-bit hex value with Hamming |
 | `users_code` | `users_code` | — | **Required**: 24-bit hex value (X₁ = 0–7) |
 
 ### Validation Rules
 
-The validator enforces all of the following before generation begins:
+The validator checks all of the following before generation begins; items marked **warning** are reported but do not block generation:
 
 1. `section_type` must be `lead_in`, `programme_area`, or `lead_out`
 2. `disc_type` must be `CAV` or `CLV`
 3. Each `code_type` must be compatible with the `disc_type` and `section_type` (see matrix in §3)
-4. `fm_*` code types require NTSC standard
+4. `fm_*` code types require a System M standard (NTSC or PAL-M)
 5. `picture_number` and `picture_stop` require CAV disc type
 6. `programme_time_code`, `clv_code`, `clv_picture_number` require CLV disc type
 7. `users_code` X₁ field must be 0–7
-8. `picture_number` must not exceed 99,999 (PAL) or 79,999 (NTSC) at start or after increment
+8. `picture_number` `start_value` must not exceed 99,999 (PAL) or 79,999 (NTSC, PAL-M); `fm_picture_number` `start_value` must not exceed 79,999. Only the start value is checked, not the incremented count
 9. `chapter` must be 0–79
-10. Lead-in duration ≥ 938 frames (CAV) at 1.6 µm pitch
-11. Lead-out duration ≥ 1250 frames (CAV) at 1.6 µm pitch
-12. Chapter sections ≥ 30 frames (minimum chapter length)
-13. VITS types that target the biphase reserved range are rejected when laserdisc is active
-14. NTSC: a `virs` VITS is required in the project-level `line_injections.vits` list (it is applied to every laserdisc section)
-15. PAL: `vits17`, `itu-multiburst`, `itu-composite`, `itu-combination` are rejected when laserdisc is active
-16. NTSC: `ntc7-composite`, `fcc-multiburst`, `ntc7-combination`, `fcc-composite` are rejected when laserdisc is active
+10. Lead-in duration ≥ 938 frames (CAV) at 1.6 µm pitch — **warning**, not checked for `duration_frames: "all"`
+11. Lead-out duration ≥ 1250 frames (CAV) at 1.6 µm pitch — **warning**, not checked for `duration_frames: "all"`
+12. Each chapter (a run of sections from one `chapter` setting to the next) ≥ 30 frames — **warning**, CAV only; chapters containing a `duration_frames: "all"` section are skipped, and CLV discs are not checked
+13. Project VITS entries that target the biphase reserved range are rejected when the project declares a `disc_type`
+14. NTSC and PAL-M: a `virs` VITS is required in the project-level `line_injections.vits` list (it is applied to every laserdisc section)
+15. PAL: `vits17`, `itu-multiburst`, `itu-composite`, `itu-combination` are rejected on their standard lines in a laserdisc project (reserved range)
+16. NTSC: `ntc7-composite`, `fcc-multiburst`, `ntc7-combination`, `fcc-composite` are rejected on their standard lines in a laserdisc project (reserved range)
 17. `target_lines` must not be specified for laserdisc injections
-18. VITC injections must not coexist with laserdisc injections in the same section
+18. VITC injections must not coexist with laserdisc injections in the same section (VITC is in any case rejected as not implemented)
 
 ---
 
@@ -1078,9 +1070,9 @@ The validator enforces all of the following before generation begins:
 | `programme_time_code` | CLV | PAL/NTSC | programme | ✅ | — |
 | `clv_code` | CLV | PAL/NTSC | programme | — | — |
 | `clv_picture_number` | CLV | PAL/NTSC | programme | ✅ | — |
-| `fm_picture_number` | CAV | NTSC | programme | ✅ | — |
-| `fm_programme_time` | CLV | NTSC | programme | ✅ | — |
-| `fm_white_flag` | CAV/CLV | NTSC | all | — | — |
+| `fm_picture_number` | CAV | NTSC/PAL-M | programme | ✅ | `start_value` |
+| `fm_programme_time` | CLV | NTSC/PAL-M | programme | ✅ | — |
+| `fm_white_flag` | CAV/CLV | NTSC/PAL-M | all | — | — |
 
 ### Section Type Compatibility Summary
 
@@ -1096,9 +1088,9 @@ lead_out:     lead_out, users_code, fm_white_flag (NTSC)
 
 | Standard | Section | Minimum frames | Basis |
 |----------|---------|---------------|-------|
-| PAL/NTSC | Lead-in | 938 | 1.5 mm ÷ 1.6 µm pitch |
-| PAL/NTSC | Lead-out | 1250 | 2.0 mm ÷ 1.6 µm pitch |
-| PAL/NTSC | Chapter | 30 | IEC §10.1.5 |
+| PAL/NTSC/PAL-M | Lead-in (CAV, warning) | 938 | 1.5 mm ÷ 1.6 µm pitch |
+| PAL/NTSC/PAL-M | Lead-out (CAV, warning) | 1250 | 2.0 mm ÷ 1.6 µm pitch |
+| PAL/NTSC/PAL-M | Chapter (CAV, warning) | 30 | IEC §10.1.5 |
 
 ### VITS Compatibility with Laserdisc
 
@@ -1127,33 +1119,35 @@ lead_out:     lead_out, users_code, fm_white_flag (NTSC)
 
 ### Common Errors and Solutions
 
-#### `code_type 'picture_number' is not valid in section_type 'lead_in'`
+Messages are quoted as the validator emits them (without the `Laserdisc injection validation error:` / `Line injection validation error:` prefix).
+
+#### `code_type 'picture_number' is not allowed in 'lead_in' sections.`
 
 You have placed a programme-area code type in a lead-in section. Check the section type matrix in §3 and move the code type to the correct section.
 
 ---
 
-#### `code_type 'users_code': X₁ value must be 0–7, got 8`
+#### `users_code X1 nibble must be 0-7; '0x88D000' has X1=8.`
 
-The `users_code` field has X₁ = 8 or higher. The users_code hex value `0x8XDYYY` must have X = 0–7. Example: `"0x87D000"` is valid (X₁ = 7); `"0x88D000"` is invalid (X₁ = 8).
-
----
-
-#### `picture_number start_value 100000 exceeds PAL maximum of 99999`
-
-The `start_value` for `picture_number` must not cause the final picture number to exceed 99,999 on PAL or 79,999 on NTSC. Reduce the `start_value` or split the section.
+The users_code hex value `0x8X₁DX₃X₄X₅` must have X₁ = 0–7, and its third nibble must be `D` (a separate error reports a wrong D nibble). Example: `"0x87D000"` is valid (X₁ = 7); `"0x88D000"` is invalid (X₁ = 8).
 
 ---
 
-#### `VITS type 'ntc7-composite' targets line 17 which is within the NTSC laserdisc reserved range`
+#### `picture_number start_value must be in the range 0-99999 for PAL; got 100000.`
 
-NTSC VITS types that target lines within 10–18 or 273–281 cannot coexist with a laserdisc injection. Remove the incompatible VITS type. If you need colour measurement, use `virs` on lines 19/282 instead.
+`start_value` must lie within 0–99,999 on PAL or 0–79,999 on NTSC and PAL-M. Only the start value is checked; keep the section short enough that the incremented picture number stays within the maximum too.
 
 ---
 
-#### `NTSC laserdisc section 'Programme' requires a 'virs' VITS injection`
+#### `VITS target line 17 conflicts with laserdisc reserved VBI ranges for NTSC.`
 
-NTSC laserdisc discs require a `virs` VITS on lines 19/282. It is declared once at the project level and applied to every section — add the following to the top-level `line_injections:` block (a sibling of `output:` and `sections:`):
+In a laserdisc project (one that declares `disc_type`), no VITS may sit on lines 10–18 or 273–281 (NTSC/PAL-M) or 6–18 / 319–331 (PAL). Remove the incompatible VITS type or move it to a laserdisc VITS line (`placement: laserdisc`). If you need colour measurement, use `virs` on lines 19/282.
+
+---
+
+#### `NTSC and PAL-M laserdisc projects require a virs VITS injection for colour (IEC 60857 §9.1.3).`
+
+NTSC and PAL-M laserdisc discs require a `virs` VITS on lines 19/282. It is declared once at the project level and applied to every section — add the following to the top-level `line_injections:` block (a sibling of `output:` and `sections:`):
 
 ```yaml
 line_injections:
@@ -1165,13 +1159,19 @@ line_injections:
 
 ---
 
-#### `lead_out section duration 500 frames is below minimum of 1250 frames`
+#### Warning: `CAV lead_out section has 500 frames; IEC 2 mm minimum at 1.6 um track pitch requires 1250.`
 
-The lead-out section must be at least 1250 frames (2.0 mm at 1.6 µm pitch). Extend the section duration.
+The lead-out section should be at least 1250 frames (2.0 mm at 1.6 µm pitch); the lead-in at least 938. This is a warning: generation still runs. Extend the section duration to comply.
 
 ---
 
-#### `chapter_number 80 exceeds maximum of 79`
+#### Warning: `CAV chapter 2 starting in section 'Ch2' lasts 20 frames; IEC 60856/60857 requires at least 30.`
+
+A CAV chapter is shorter than the IEC minimum of 30 tracks. Merge it with a neighbouring chapter or lengthen its sections.
+
+---
+
+#### `chapter_number chapter must be in the range 0-79; got 80.`
 
 Chapter numbers are 0–79. Use a value in this range.
 
@@ -1183,7 +1183,7 @@ If you start a new programme-area section and set `start_value: 1` again on `pic
 
 ---
 
-#### `target_lines must not be specified for laserdisc injections`
+#### `target_lines must not be specified for laserdisc injections.`
 
 Laserdisc line placement is determined automatically by the standard. Remove the `target_lines` field from the `laserdisc` injection block.
 

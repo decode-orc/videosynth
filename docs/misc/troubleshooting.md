@@ -16,7 +16,7 @@ The same message shape appears for every block — `section contains unsupported
 
 ### Sections in the wrong order
 
-Once any section declares a `section_type`, the sequence must be `[lead_in] programme_area… [lead_out]` — at most one lead-in and it must be first, at most one lead-out and it must be last, everything between them `programme_area`. Reorder the sections.
+Once any section is a `lead_in` or `lead_out`, the sequence must be `[lead_in] programme_area… [lead_out]` — at most one lead-in and it must be first, at most one lead-out and it must be last, everything between them `programme_area`. Reorder the sections.
 
 ## Presets
 
@@ -54,7 +54,7 @@ A warning, not an error. The pilot burst trough reaches −600 mV, which an unsi
 
 ## Sources
 
-### `File '…' not found`
+### `Progressive source not found: …`
 
 Check the path and the [asset root](../reference/asset-roots.md) it uses. The commonest cause is a bare relative path, which resolves against the working directory in the CLI but against the project directory in the GUI. Use `{bundled}/…` for shipped assets and `{project}/…` for files beside the project.
 
@@ -130,15 +130,15 @@ Laserdisc line placement is fixed by IEC 60856/60857 and computed per frame. Rem
 
 ### `line injection type 'vitc' is not implemented in the current runtime`
 
-VITC and `line_content` are described by the schema but have no runtime behaviour, so they are rejected rather than silently dropped. `laserdisc` is the only usable section-level injection type today.
+VITC is described by the schema but has no runtime behaviour, so it is rejected rather than silently dropped. `type: line_content` is likewise rejected, with `unsupported injection type 'line_content'`. `laserdisc` is the only usable section-level injection type today.
 
-### `VITS type 'ntc7-composite' targets line 17 which is within the NTSC laserdisc reserved range`
+### `VITS target line 17 conflicts with laserdisc reserved VBI ranges for NTSC`
 
-The broadcast VITS lines collide with the laserdisc address-code ranges. On a disc, use the laserdisc VITS lines instead — set `placement: laserdisc` and use `virs` on 19/282 for colour reference. See [VITS types](../reference/vits-types.md).
+The broadcast VITS lines collide with the laserdisc address-code ranges, which are reserved whenever `line_injections.disc_type` is set. On a disc, use the laserdisc VITS lines instead — set `placement: laserdisc` and use `virs` on 19/282 for colour reference. See [VITS types](../reference/vits-types.md).
 
-### `NTSC laserdisc section 'x' requires a 'virs' VITS injection`
+### `NTSC and PAL-M laserdisc projects require a virs VITS injection for colour`
 
-IEC 60857 §9.1.3 makes VIRS mandatory on NTSC discs. Add it to the **project-level** `line_injections:` block:
+IEC 60857 §9.1.3 makes VIRS mandatory on NTSC and PAL-M discs, so any such project with `disc_type` set needs one. Add it to the **project-level** `line_injections:` block:
 
 ```yaml
 line_injections:
@@ -149,31 +149,35 @@ line_injections:
       target_lines: [19, 282]
 ```
 
-### `Overlapping target_lines in section: x`
+### `overlapping VITS target line N within the project VITS set`
 
-Two injections target the same frame line. Each line can carry one thing.
+Two VITS entries target the same frame line. Each line can carry one thing.
 
 ## Laserdisc codes
 
-### `code_type 'picture_number' is not valid in section_type 'lead_in'`
+### `code_type 'picture_number' is not allowed in 'lead_in' sections`
 
 A programme-area code in a lead-in section. Check the [compatibility matrices](../user-manual/laserdisc.md#which-codes-go-where) and move the code to the right section.
 
-### `picture_number start_value 100000 exceeds PAL maximum of 99999`
+### `picture_number start_value must be in the range 0-99999 for PAL; got 100000`
 
-Picture numbers are capped at 99,999 (PAL) and 79,999 (NTSC), and the *final* number in the section must fit too. Lower the `start_value` or split the section.
+Picture numbers are capped at 99,999 (PAL) and 79,999 (NTSC and PAL-M). Only `start_value` is checked, so keep the numbers the disc will reach within the limit too. Lower the `start_value` or split the section.
 
-### `chapter_number 80 exceeds maximum of 79`
+### `chapter_number chapter must be in the range 0-79; got 80`
 
 Chapters are 0–79.
 
-### `code_type 'users_code': X₁ value must be 0-7, got 8`
+### `users_code X1 nibble must be 0-7; '0x88D000' has X1=8`
 
-The users code hex `0x8X₁D…` requires X₁ in 0–7. `"0x87D000"` is valid; `"0x88D000"` is not.
+The users code hex `0x8X₁D…` requires X₁ in 0–7, and the D digit must be `D`. `"0x87D000"` is valid; `"0x88D000"` is not.
 
-### `lead_out section duration 500 frames is below minimum of 1250 frames`
+### `CAV lead_out section has 500 frames; IEC 2 mm minimum at 1.6 um track pitch requires 1250`
 
-IEC requires 2 mm of track after the programme, which is 1250 frames at the 1.6 µm pitch. Lead-in needs 938 frames for the same reason. Extend the section.
+A warning, not an error. IEC requires 2 mm of track after the programme, which is 1250 frames at the 1.6 µm pitch; a CAV lead-in needs 938 frames for the same reason (`CAV lead_in section has N frames; IEC 1.5 mm minimum …`). Extend the section if the disc should conform.
+
+### `CAV chapter N starting in section 'x' lasts M frames; IEC 60856/60857 requires at least 30`
+
+A warning. A chapter must span at least 30 tracks, which is 30 frames on CAV. Lengthen the chapter, or merge it into its neighbour.
 
 ### Timecodes appear to reset between sections
 
@@ -181,7 +185,7 @@ You have set `start_value: 1` on `picture_number` in a later section, which re-a
 
 ## Impairments
 
-### `noise_spread_db present without noise_db`
+### `noise_spread_db requires noise_db to be specified`
 
 `noise_spread_db` is relative to the floor, so it needs one. Add `noise_db`.
 
@@ -189,13 +193,13 @@ You have set `start_value: 1` on `picture_number` in a later section, which re-a
 
 `noise_db` must be 20.0–61.0, and `noise_db − noise_spread_db` must be at least 20.0. Below 20 dB the noise approaches the amplitude of sync; above 61 dB it is smaller than the quantisation floor.
 
-### A `dropouts:` block with everything at zero is an error
+### `dropouts block has no active type`
 
 Omit the whole block to disable dropouts rather than setting `scale: 0`. A block that looks like it configures something always does.
 
-### `scratch lifespan exceeds section duration`
+### `scratch lifespan derived from scale N (M frames) exceeds section duration`
 
-A warning. The scratch will not complete its triangular envelope before the section ends, so it never reaches full severity. Legal if that is what you want; otherwise lengthen the section or lower the scale.
+A warning. The scratch may not complete its triangular envelope before the section ends, so it can be cut off before reaching full severity. Legal if that is what you want; otherwise lengthen the section or lower the scale.
 
 ## Audio
 
@@ -209,7 +213,7 @@ Only WAV and FLAC audio files are accepted. Convert other formats first, for exa
 
 ### `audio file '…' could not be read: the file does not exist.`
 
-The path did not resolve to a file. Relative paths and `{project}/…` resolve against the project file's directory; check the spelling and the [asset roots](../reference/asset-roots.md). The same message ends *the file has no audio stream.* for a file with no audio in it.
+The path did not resolve to a file. `{project}/…` resolves against the project file's directory, while a bare relative path resolves against the working directory in the CLI (and the project directory in the GUI); check the spelling and the [asset roots](../reference/asset-roots.md). The same message ends *the file has no audio stream.* for a file with no audio in it.
 
 ### `audio file '…' has N channels; only mono and stereo files are supported.`
 

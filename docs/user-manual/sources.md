@@ -16,6 +16,8 @@ A single-frame OpenEXR image, used when a section should hold one picture for it
 | Channels | `R`, `G`, `B` |
 | Type | `FLOAT` (32-bit) |
 | Compression | None |
+| Line order | Increasing Y |
+| Gamma metadata | `1` |
 | Windows | Data and display windows must cover the full raster |
 | Raster | 720×576 (PAL/SECAM) or 720×486 (NTSC/PAL-M) |
 | Frame rate metadata | `25/1` (PAL/SECAM) or `30000/1001` (NTSC/PAL-M) |

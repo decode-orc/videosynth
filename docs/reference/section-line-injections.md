@@ -32,11 +32,14 @@ No other key is accepted.
 |-------|--------|
 | `laserdisc` | Implemented |
 | `vitc` | **Not implemented** — using it is a validation error |
-| `line_content` | **Not implemented** — using it is a validation error |
 
-`vits` is not a section-level type; VITS are declared project-wide.
+`vits` is not a section-level type; VITS are declared project-wide. Any other value is rejected:
 
-Rather than generating a file that quietly lacks the content you asked for, videosynth rejects the unimplemented types outright:
+```text
+Line injection validation error: unsupported injection type 'line_content'.
+```
+
+Rather than generating a file that quietly lacks the content you asked for, videosynth rejects `vitc` outright. A `vitc` injection still needs a non-empty `target_lines`, checked first, and cannot share a section with a `laserdisc` injection; with those satisfied it fails with:
 
 ```text
 Project configuration error: line injection type 'vitc' is not implemented in
@@ -48,8 +51,8 @@ the current runtime.
 `target_lines` must not appear on a `laserdisc` injection. VBI line placement is determined entirely by IEC 60856/60857 from the code type, the disc format, and which field opens the current picture — videosynth computes it per frame.
 
 ```text
-target_lines must not be specified for laserdisc injections; line placement is
-fixed by the standard.
+Line injection validation error: target_lines must not be specified for
+laserdisc injections.
 ```
 
 Nor is `disc_type` repeated here. It is project-wide.
@@ -59,16 +62,23 @@ Nor is `disc_type` repeated here. It is project-wide.
 | Key | Type | Applies to | Description |
 |-----|------|------------|-------------|
 | `code_type` | string | All | Which code — see [laserdisc code types](laserdisc-codes.md) |
-| `start_value` | int | `picture_number`, `fm_picture_number` | Anchors the count for this section |
+| `start_value` | int | `picture_number`, `fm_picture_number` | Anchors the count for this section (`fm_picture_number`: first section only) |
 | `chapter` | int | `chapter_number` | Chapter number 0–79 |
 | `programme_status` | hex string | `programme_status` | 24-bit status word, e.g. `"0x8DC000"` |
 | `users_code` | hex string | `users_code` | 24-bit user's code, e.g. `"0x80D234"` |
 
 No other key is accepted. `code_type` is required on every entry.
 
-Each optional field applies only to the code types listed; supplying one on a code type that does not use it is rejected.
+Each optional field is read only by the code types listed. A field supplied on another code type is accepted by the parser but ignored. A `programme_status` or `users_code` code without its hex value is not written.
 
 ## Which codes are legal here
+
+A section with a `laserdisc` injection must set `section_type`:
+
+```text
+Laserdisc injection validation error: section_type must be set to 'lead_in',
+'programme_area', or 'lead_out' when disc_type is specified.
+```
 
 The validator checks each `code_type` against the project's `disc_type` **and** this section's `section_type`. See the [compatibility matrices](../user-manual/laserdisc.md#which-codes-go-where).
 

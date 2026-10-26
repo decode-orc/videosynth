@@ -57,7 +57,7 @@ class ProgrammeTimeCodeGenerator final : public CodeGenerator {
   // Constructs the generator.
   // start_hours:   Initial hours value, must be in [0, kMaxHours].
   // start_minutes: Initial minutes value, must be in [0, kMaxMinutes].
-  // standard:      Determines frames per minute (PAL: 1500, NTSC: 1800).
+  // standard:      Determines frames per minute (PAL: 1500, NTSC/PAL-M: 1800).
   ProgrammeTimeCodeGenerator(int start_hours, int start_minutes,
                              Standard standard);
 
@@ -80,7 +80,8 @@ class ProgrammeTimeCodeGenerator final : public CodeGenerator {
   static bool IsValidTimeCode(int hours, int minutes);
 
   // Returns the number of frames per minute for the given standard.
-  // PAL: 1500 (25 fps × 60 s), NTSC: 1800 (30 fps nominal × 60 s).
+  // 625-line: 1500 (25 fps × 60 s); NTSC and PAL-M: 1800 (30 fps nominal × 60
+  // s).
   static int FramesPerMinute(Standard standard);
 
  private:

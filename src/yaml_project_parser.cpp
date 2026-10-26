@@ -318,6 +318,7 @@ bool ParseAudioChannel(const YAML::Node& node, const std::string& context,
   }
   if (node["frequency"]) {
     audio.frequency_hz = node["frequency"].as<double>();
+    audio.frequency_specified = true;
   }
   if (node["amplitude"]) {
     audio.amplitude = node["amplitude"].as<double>();
@@ -654,6 +655,7 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
         if (!result.errors.empty()) {
           return result;
         }
+        section.dropouts.block_present = true;
 
         if (dropouts_node["random"]) {
           const YAML::Node rnd = dropouts_node["random"];

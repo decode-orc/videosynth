@@ -60,7 +60,8 @@ bool CavPictureNumberGenerator::IsValidPictureNumber(int n, Standard standard) {
 
 // static
 int CavPictureNumberGenerator::MaxPictureNumber(Standard standard) {
-  return (standard == Standard::kNtsc) ? kNtscMaxValue : kPalMaxValue;
+  // IEC 60857 limits apply to both System M standards (NTSC and PAL-M).
+  return Is625LineStandard(standard) ? kPalMaxValue : kNtscMaxValue;
 }
 
 // ---------------------------------------------------------------------------

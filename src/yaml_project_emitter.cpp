@@ -266,7 +266,7 @@ void EmitAudioChannel(YAML::Emitter& out, const char* key,
   if (!audio.waveform_text.empty()) {
     out << YAML::Key << "waveform" << YAML::Value << audio.waveform_text;
   }
-  if (audio.frequency_hz != kDefaultAudioFrequencyHz) {
+  if (!audio.ramp_enabled && audio.frequency_hz != kDefaultAudioFrequencyHz) {
     out << YAML::Key << "frequency" << YAML::Value << audio.frequency_hz;
   }
   if (audio.amplitude != kDefaultAudioAmplitude) {

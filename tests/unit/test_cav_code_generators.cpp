@@ -186,6 +186,11 @@ TEST(CavCodeGeneratorTest, NtscMaxPictureNumberIs79999) {
             79999);
 }
 
+TEST(CavCodeGeneratorTest, PalMMaxPictureNumberIs79999) {
+  EXPECT_EQ(CavPictureNumberGenerator::MaxPictureNumber(Standard::kPalM),
+            79999);
+}
+
 // ---------------------------------------------------------------------------
 // CavPictureNumberGenerator — state machine
 // ---------------------------------------------------------------------------
