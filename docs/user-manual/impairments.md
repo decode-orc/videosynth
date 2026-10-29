@@ -205,7 +205,7 @@ Everything in `channel:` belongs to the pressing, so every project of one pressi
 | The pressing | `channel:`, `noise.shared`, dropouts with `anchor: disc` | Yes |
 | One capture | capture `noise_db`/`noise_spread_db`/`noise_seed`/`spectrum`, section-anchored `dropouts`, `chroma_error`, `luma_bandwidth` | No: a new seed (or player) for every capture |
 
-The repository's [pressing sets](../misc/example-projects.md#pressings-and-captures) follow this pattern. There are two pressings per standard, offset by 0.3 sample, a third PAL pressing that adds the FM beat and an edge smear, and a fourth PAL pressing with unflagged, disc-anchored pressing defects. Each has four derived captures, one of which starts later and one of which replays a range. See [channel](../reference/channel.md) for the full reference.
+The repository's [pressing sets](../misc/example-projects.md#pressings-and-captures) follow this pattern. There are two pressings per standard, offset by one whole sample, a third PAL pressing that adds the FM beat, an edge smear and a 0.15-sample offset, and a fourth PAL pressing with unflagged, disc-anchored pressing defects. Each has six derived captures, one of which starts later and one of which replays a range. No two pressings share a capture seed. See [channel](../reference/channel.md) for the full reference.
 
 ## Chroma gain and phase error
 

@@ -2,7 +2,7 @@
 #
 # One pressing of a 16-frame CAV laserdisc (PNs 1–16). The captures of this
 # pressing are not committed: projects/variants.json (stacking-captures)
-# derives four of them, each with its own capture seed, one starting later
+# derives six of them, each with its own capture seed, one starting later
 # (at PN 5) and one replaying the multi-burst range (PNs 9–12). Their
 # impairment-free truths come from the stacking-clean variant.
 #

@@ -151,6 +151,30 @@ class CapturesVariantTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             gen.expand_captures(missing)
 
+    def test_seed_offset_applies_to_matching_source_only(self):
+        variant = dict(self.VARIANT, capture_seed_offsets={
+            '*_pressing_B.yaml': 1000})
+        self.assertEqual(gen.capture_seed_offset(variant, 'pal_pressing_A.yaml'),
+                         0)
+        offset = gen.capture_seed_offset(variant, 'pal_pressing_B.yaml')
+        self.assertEqual(offset, 1000)
+        seeds = [gen.offset_capture_seed(d, offset)['capture_seed']
+                 for d in gen.expand_captures(variant)]
+        self.assertEqual(seeds, [2101, 2202, 2303])
+
+    def test_seed_offset_leaves_derivation_without_seed_alone(self):
+        derivation = {'name_suffix': '_clean'}
+        self.assertEqual(gen.offset_capture_seed(derivation, 1000), derivation)
+
+    def test_seed_offset_rejects_ambiguous_or_non_integer_globs(self):
+        ambiguous = {'capture_seed_offsets': {'*_B.yaml': 1, 'pal_*': 2}}
+        with self.assertRaises(ValueError):
+            gen.capture_seed_offset(ambiguous, 'pal_pressing_B.yaml')
+        for bad in (1.5, True, '1000'):
+            with self.assertRaises(ValueError):
+                gen.capture_seed_offset(
+                    {'capture_seed_offsets': {'*': bad}}, 'pal_pressing_B.yaml')
+
     def test_variant_without_captures_derives_once(self):
         variant = {'name': 'plain', 'sources': [], 'name_suffix': '_clean'}
         self.assertEqual(gen.expand_captures(variant), [variant])

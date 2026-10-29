@@ -2,15 +2,16 @@
 #
 # One pressing of a 16-frame CAV laserdisc (PNs 1–16). The captures of this
 # pressing are not committed: projects/variants.json (stacking-captures)
-# derives four of them, each with its own capture seed, one starting later
+# derives six of them, each with its own capture seed, one starting later
 # (at PN 5) and one replaying the multi-burst range (PNs 9–12). Their
 # impairment-free truths come from the stacking-clean variant.
 #
 # What belongs to the pressing, and is identical in every capture of it:
 #   - noise.shared: pressing noise keyed by picture number, seed
 #     7002 (pressing A uses 7001);
-#   - channel.timing_offset_samples: -0.3, so it arrives
-#     0.3 sample earlier than pressing A.
+#   - channel.timing_offset_samples: -1.0, so it arrives one sample
+#     earlier than pressing A. Measured captures of real pressings sit
+#     on a whole-sample grid of one another.
 # What belongs to one capture: the capture noise layer (noise_db,
 # noise_spread_db, noise_seed, spectrum), whose seed the variants replace.
 #
@@ -25,7 +26,7 @@
 project:
   name: PalPressingB
   version: "1.0"
-  description: PAL pressing B — shared noise seed 7002, timing offset -0.3
+  description: PAL pressing B — shared noise seed 7002, timing offset -1.0
 
 cvbs_presets:
   video_standard_preset: PAL
@@ -43,7 +44,7 @@ line_injections:
       target_lines: [19]
 
 channel:
-  timing_offset_samples: -0.3
+  timing_offset_samples: -1.0
 
 sections:
 

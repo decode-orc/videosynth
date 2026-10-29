@@ -10,12 +10,17 @@
   "variants": [
     {
       "name": "stacking-captures",
-      "description": "Six captures of each pressing: fresh capture seeds, the pressing's shared noise untouched. Capture 2 starts later (PN 5); capture 3 replays the multi-burst range (PNs 9-12); capture 5 comes from a player with a chroma gain and phase error; capture 6 sets a whole-sample timing offset of +2 for whole-sample alignment. The others keep the pressing's channel and chroma error.",
+      "description": "Six captures of each pressing: fresh capture seeds, the pressing's shared noise untouched. Capture 2 starts later (PN 5); capture 3 replays the multi-burst range (PNs 9-12); capture 5 comes from a player with a chroma gain and phase error; capture 6 sets a whole-sample timing offset of +2 for whole-sample alignment. The others keep the pressing's channel and chroma error. Each pressing offsets its capture seeds (B by 1000, C by 2000, D by 3000), because captures of different discs never share capture noise.",
       "sources": [
         "stacking/pal_pressing_?.yaml",
         "stacking/pal_m_pressing_?.yaml",
         "stacking/ntsc_pressing_?.yaml"
       ],
+      "capture_seed_offsets": {
+        "*_pressing_B.yaml": 1000,
+        "*_pressing_C.yaml": 2000,
+        "*_pressing_D.yaml": 3000
+      },
       "captures": [
         {"name_suffix": "_cap1", "capture_seed": 5101},
         {"name_suffix": "_cap2", "capture_seed": 5202, "remove_sections": ["Bars"]},

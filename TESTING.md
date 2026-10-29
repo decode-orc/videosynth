@@ -187,8 +187,8 @@ runs; keep it that way.
 
 Anything mechanically derivable is generated at build time by
 `scripts/generate_test_projects.py` into `build/generated-projects/` and is not
-committed — currently the impairment-free `stacking-clean` set and the Y/C
-`stacking-yc` set. Add a variant by editing `variants.json`, not by copying
+committed — currently the `stacking-captures` set, the impairment-free
+`stacking-clean` set and the Y/C `stacking-yc` set. Add a variant by editing `variants.json`, not by copying
 YAML. Generation needs a Python 3 interpreter; without one the build still
 succeeds and the suites simply cover the committed fixtures alone.
 

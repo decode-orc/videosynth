@@ -3,7 +3,7 @@
 # One pressing of a 16-frame CAV laserdisc (PNs 1–16), like pressings A and B
 # but cut from a glass master that recorded the FM-beat herringbone and read
 # back with a soft edge. The captures of this pressing are not committed:
-# projects/variants.json (stacking-captures) derives four of them, each with
+# projects/variants.json (stacking-captures) derives six of them, each with
 # its own capture seed, one starting later (at PN 5) and one replaying the
 # multi-burst range (PNs 9–12). Their impairment-free truths come from the
 # stacking-clean variant, which keeps the channel block: the beat and the

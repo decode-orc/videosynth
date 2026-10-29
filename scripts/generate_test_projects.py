@@ -37,11 +37,19 @@ authored comments survive into the derived project:
 The capture keys may also be set on a variant itself, which applies them to
 every derived project.
 
+  capture_seed_offsets    a mapping of source filename glob to an integer
+                          added to every capture_seed derived from a
+                          matching source, so the captures of different
+                          pressings never share capture noise. At most one
+                          glob may match a source; unmatched sources keep
+                          the seeds as written
+
 Usage:
   generate_test_projects.py --source projects --output <dir> [--stamp <file>]
 """
 
 import argparse
+import fnmatch
 import json
 import re
 import sys
@@ -469,6 +477,32 @@ def expand_captures(variant: dict) -> list[dict]:
             for capture in captures]
 
 
+def capture_seed_offset(variant: dict, source_name: str) -> int:
+    """The capture seed offset for one source: the value of the single
+    capture_seed_offsets glob matching its filename, or 0 when none does."""
+    offsets = variant.get('capture_seed_offsets', {})
+    matches = [pattern for pattern in offsets
+               if fnmatch.fnmatchcase(source_name, pattern)]
+    if len(matches) > 1:
+        raise ValueError(f"capture_seed_offsets: '{source_name}' matches "
+                         f"both '{matches[0]}' and '{matches[1]}'")
+    if not matches:
+        return 0
+    offset = offsets[matches[0]]
+    if isinstance(offset, bool) or not isinstance(offset, int):
+        raise ValueError(f"capture_seed_offsets: '{matches[0]}' must map to "
+                         'an integer')
+    return offset
+
+
+def offset_capture_seed(derivation: dict, offset: int) -> dict:
+    """The derivation with `offset` added to its capture_seed, if it has one."""
+    if offset == 0 or 'capture_seed' not in derivation:
+        return derivation
+    return {**derivation,
+            'capture_seed': int(derivation['capture_seed']) + offset}
+
+
 def collect_sources(patterns: list[str], search_roots: list[Path]) -> list[Path]:
     """Resolve globs against each search root in turn, de-duplicated by name."""
     found: dict[str, Path] = {}
@@ -504,6 +538,8 @@ def generate(source_root: Path, output_root: Path, config_path: Path,
                 suffix = derivation.get('name_suffix', '')
                 destination = variant_dir / f'{source.stem}{suffix}.yaml'
                 try:
+                    derivation = offset_capture_seed(
+                        derivation, capture_seed_offset(variant, source.name))
                     derived = derive(source.read_text(), derivation)
                 except ValueError as error:
                     raise ValueError(f'{source}: {error}') from error
