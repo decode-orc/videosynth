@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <system_error>
 #include <utility>
 
 #ifndef VIDEOSYNTH_BUNDLED_ASSET_DIR
@@ -195,6 +196,19 @@ Project ResolveProjectPaths(Project project, const AssetRootMap& roots,
   project.output.metadata_path = ResolveAssetPath(
       project.output.metadata_path, roots, project_dir, anchor_unset);
   return project;
+}
+
+bool CreateParentDirectories(const std::string& file_path,
+                             std::error_code* ec) {
+  ec->clear();
+  const std::filesystem::path parent =
+      std::filesystem::path(file_path).parent_path();
+  // create_directories("") reports an error rather than a no-op.
+  if (parent.empty()) {
+    return true;
+  }
+  std::filesystem::create_directories(parent, *ec);
+  return !*ec;
 }
 
 }  // namespace videosynth

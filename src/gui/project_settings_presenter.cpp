@@ -44,13 +44,6 @@ std::string StripOutputSuffix(const std::string& path) {
   return path;
 }
 
-// True for the standards with a LaserDisc digital audio specification:
-// IEC 60856:1986 Amd 2 clause 13 (PAL) and IEC 60857:1986 Amd 2 clause 13
-// (NTSC). No other standard defines an EFM sample frequency.
-bool StandardHasLaserdiscDigitalAudio(Standard standard) {
-  return standard == Standard::kPal || standard == Standard::kNtsc;
-}
-
 // Classifies the EFM selection exactly as ProjectEfmAudioPair decides whether
 // a stream is emitted, so the form reports the same outcome the pipeline
 // produces.

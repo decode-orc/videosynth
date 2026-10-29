@@ -20,3 +20,7 @@ sections:
     type: progressive
     source: "{bundled}/mkv/720x576/SMPTE_BARS.mkv"
     duration_frames: all
+  - name: PalMkvMovingBars
+    type: progressive
+    source: "{bundled}/mkv/720x576/MOVING_BARS_75.mkv"
+    duration_frames: all

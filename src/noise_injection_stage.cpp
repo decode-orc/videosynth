@@ -123,6 +123,11 @@ void NoiseInjectionStage::InjectNoise(
   const SampleFixed clamp_min = bounds.min;
   const SampleFixed clamp_max = bounds.max;
 
+  // noise_db is the level of each output signal. Y/C output carries the noise
+  // on both files, correlated sample for sample; composite output is Y + C, so
+  // adding the sample to both would double it (+6 dB) and it goes on Y alone.
+  const bool noise_on_chroma = (project.output.signal_type == "yc");
+
   for (std::size_t i = 0; i < frame_count; ++i) {
     const std::size_t global_frame = frame_offset + i;
     if (global_frame >= schedule.size()) {
@@ -182,7 +187,9 @@ void NoiseInjectionStage::InjectNoise(
         const std::size_t idx = frame_start + s;
         (*y_mv)[idx] =
             std::clamp((*y_mv)[idx] + shared_noise[s], clamp_min, clamp_max);
-        (*c_mv)[idx] += shared_noise[s];
+        if (noise_on_chroma) {
+          (*c_mv)[idx] += shared_noise[s];
+        }
       }
       continue;
     }
@@ -247,8 +254,9 @@ void NoiseInjectionStage::InjectNoise(
             std::sqrt(sigma_floor_squared + (prop_component * prop_component));
       }
 
-      // Single noise value shared by both channels — produces correlated Y/C
-      // noise that matches the physical behaviour of a real analogue source.
+      // Single noise value shared by both channels on Y/C output — correlated
+      // Y/C noise that matches the physical behaviour of a real analogue
+      // source.
       const double unit = shaped ? shaped_unit[s] : unit_normal(rng);
       SampleFixed noise_sample = MillivoltsToSampleFixed(sigma_total * unit);
       if (!shared_noise.empty()) {
@@ -260,7 +268,9 @@ void NoiseInjectionStage::InjectNoise(
       // output stage clamps Y + C and the chroma file.
       (*y_mv)[idx] =
           std::clamp((*y_mv)[idx] + noise_sample, clamp_min, clamp_max);
-      (*c_mv)[idx] += noise_sample;
+      if (noise_on_chroma) {
+        (*c_mv)[idx] += noise_sample;
+      }
     }
   }
 }

@@ -195,7 +195,11 @@ The offset is meant for sub-sample and few-sample alignment errors between press
 
 ### `chroma_error block must set at least one of: gain, phase_deg, line_jitter`
 
-An empty `chroma_error:` block configures nothing. Omit the block for an error-free chroma path. The same applies to an empty `line_jitter:`, which must set its `phase_deg` or `gain`; a `seed` alone draws nothing.
+An empty `chroma_error:` block configures nothing. Omit the block for an error-free chroma path. `include_burst` alone also configures nothing: it only widens where the error applies, so add a `gain`, `phase_deg` or `line_jitter`. The same applies to an empty `line_jitter:`, which must set its `phase_deg` or `gain`; a `seed` alone draws nothing.
+
+### `chroma_error.include_burst must be true or false`
+
+`include_burst` is a boolean. Write `include_burst: true` or `include_burst: false`.
 
 ### `Chroma error validation error: … must be in the range …`
 

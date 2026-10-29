@@ -225,8 +225,6 @@ constexpr double kPilotBurstAmplitudeMv = 300.0;
 // to 625-line PAL only; PAL-M keeps a zero anchor.
 constexpr double kPalSubcarrierAnchorRad = 3.0 * kPi / 2.0;
 
-int BurstStartSamples(Standard standard, double sample_rate_hz);
-int BurstEndSamples(Standard standard, double sample_rate_hz);
 double SyncEdgeRiseTimeSeconds(Standard standard);
 double BurstEnvelopeRiseTimeSeconds(Standard standard);
 std::vector<generation_detail::LinePulsePlan> BuildLinePulsePlans(
@@ -414,31 +412,6 @@ int PulseWidthSamples(SyncPulseKind kind, Standard standard,
       1, static_cast<int>(std::lround(sample_rate_hz * pulse_seconds)));
 }
 
-int BurstStartSamples(Standard standard, double sample_rate_hz) {
-  // ITU-R BT.470-6 Table 2 item 2.14g: burst gate start after epoch O_H.
-  // M/NTSC: 5.3 µs nominal; B,G,H,I/PAL: 5.6 µs; M/PAL: 5.8 µs.
-  double start_us = 5.6e-6;
-  if (standard == Standard::kNtsc) {
-    start_us = 5.3e-6;
-  } else if (standard == Standard::kPalM) {
-    start_us = 5.8e-6;
-  }
-  return std::max(0, static_cast<int>(std::lround(sample_rate_hz * start_us)));
-}
-
-int BurstEndSamples(Standard standard, double sample_rate_hz) {
-  // ITU-R BT.470-6 Table 2 item 2.14g/h: burst gate end = start + duration.
-  // M/NTSC: 5.3+2.67=7.97 µs; B,G,H,I/PAL: 5.6+2.25=7.85 µs (use 8.0 µs);
-  // M/PAL: 5.8+2.52=8.32 µs.
-  double end_us = 8.0e-6;
-  if (standard == Standard::kNtsc) {
-    end_us = 7.97e-6;
-  } else if (standard == Standard::kPalM) {
-    end_us = 8.32e-6;
-  }
-  return std::max(0, static_cast<int>(std::lround(sample_rate_hz * end_us)));
-}
-
 LinePulsePlan OnePulse(SyncPulseKind kind) {
   return LinePulsePlan{
       .segment_count = 1,
@@ -479,8 +452,14 @@ LinePulsePlan BuildLinePulseSchedule(const LineTimingPrimitive& line,
     }
     if (line_1based == 4 || line_1based == 5 || line_1based == 311 ||
         line_1based == 312 || line_1based == 316 || line_1based == 317 ||
-        line_1based == 623 || line_1based == 624 || line_1based == 625) {
+        line_1based == 624 || line_1based == 625) {
       return TwoPulses(SyncPulseKind::kEqualizing, SyncPulseKind::kEqualizing,
+                       half_line_samples);
+    }
+    if (line_1based == 623) {
+      // ITU-R BT.1700 Annex 1 Part B Figure 3: field 1's pre-equalizing
+      // sequence starts at mid-line 623, after the line's half of picture.
+      return TwoPulses(SyncPulseKind::kHorizontal, SyncPulseKind::kEqualizing,
                        half_line_samples);
     }
   }
@@ -928,6 +907,12 @@ struct GenerationStage::SynthesisResources {
   std::unique_ptr<LumaBandwidthFilter> luma_filter;
   std::vector<SampleFixed> line_luma;
   std::vector<SampleFixed> filtered_line_luma;
+
+  // The blanking waveform (sync pulses, chroma at zero) past the end of a
+  // half-picture line's picture, saved before the picture is painted over it
+  // and restored afterwards.
+  std::vector<SampleFixed> half_picture_luma_tail;
+  std::vector<SampleFixed> half_picture_chroma_tail;
 };
 
 // Per-worker cache of the frame-invariant synthesis resources.
@@ -1165,6 +1150,10 @@ bool GenerationStage::SynthesisResourceCache::Build(
                         0);
   out->filtered_line_luma.assign(
       static_cast<std::size_t>(out->active_window_samples), 0);
+  out->half_picture_luma_tail.assign(
+      static_cast<std::size_t>(out->synth.max_line_samples), 0);
+  out->half_picture_chroma_tail.assign(
+      static_cast<std::size_t>(out->synth.max_line_samples), 0);
 
   out->presets = project.cvbs_presets;
   out->vits = project.line_injections.vits;
@@ -1737,6 +1726,21 @@ void GenerationStage::SynthesiseTemplate(SynthesisResources& resources,
       const int active_y =
           ActiveFrameLineIndex(synth.active, line.line_number_1based);
       if (active_y >= 0) {
+        // A half-picture line keeps its blanking waveform, including the
+        // mid-line equalizing pulse, from the end of its picture onward.
+        const int picture_end = std::clamp(
+            ActivePictureEndSamples(synth.active, line.line_number_1based), 0,
+            line_samples);
+        const int tail_samples = (picture_end < resources.active_window_end)
+                                     ? (line_samples - picture_end)
+                                     : 0;
+        if (tail_samples > 0) {
+          std::copy_n(y_out + line_base + picture_end, tail_samples,
+                      resources.half_picture_luma_tail.begin());
+          std::copy_n(c_out + line_base + picture_end, tail_samples,
+                      resources.half_picture_chroma_tail.begin());
+        }
+
         const bool invert_pal_v_axis =
             (is_pal || is_pal_m) && PalInvertVAxisForLine(sequence_phase, line);
         const std::size_t active_window_line_start_absolute =
@@ -1864,6 +1868,13 @@ void GenerationStage::SynthesiseTemplate(SynthesisResources& resources,
                 active_sample_indices[static_cast<std::size_t>(x_sample)])] +=
                 encoded_line_chroma[static_cast<std::size_t>(x_sample)];
           }
+        }
+
+        if (tail_samples > 0) {
+          std::copy_n(resources.half_picture_luma_tail.begin(), tail_samples,
+                      y_out + line_base + picture_end);
+          std::copy_n(resources.half_picture_chroma_tail.begin(), tail_samples,
+                      c_out + line_base + picture_end);
         }
       }
     }
@@ -2116,7 +2127,12 @@ bool GenerationStage::GenerateFrameBatch(
                            field1_start, field1_end, active_window_start,
                            active_window_end, osd_levels, neutral_chroma_lines);
       const int field2_start = synth.active.first_active_line_field2 - 1;
-      const int field2_end = field2_start + synth.active.active_lines_per_field;
+      int field2_end = field2_start + synth.active.active_lines_per_field;
+      // Text is not drawn on a closing half-picture line: its second half
+      // carries the first equalizing pulse.
+      if (synth.active.half_picture_line == field2_end) {
+        --field2_end;
+      }
       osd_renderer_.Render(section->osd, resolved_texts, out_y_mv, out_c_mv,
                            local_frame_base, synth.line_sample_offsets,
                            field2_start, field2_end, active_window_start,

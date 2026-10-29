@@ -39,10 +39,13 @@ inline std::int64_t RoundShiftRightSigned(std::int64_t value, int shift_bits) {
 
   const std::int64_t rounding = static_cast<std::int64_t>(1)
                                 << (shift_bits - 1);
+  // Rounds half away from zero, matching std::llround. Negative values are
+  // rounded on their magnitude: an arithmetic right shift floors, so shifting
+  // (value - rounding) directly would bias every negative result one step low.
   if (value >= 0) {
     return (value + rounding) >> shift_bits;
   }
-  return (value - rounding) >> shift_bits;
+  return -((-value + rounding) >> shift_bits);
 }
 
 }  // namespace videosynth

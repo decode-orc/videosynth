@@ -89,10 +89,36 @@ std::vector<PictureLineWindow> BuildPictureLineWindows(const Project& project,
     const int start =
         std::clamp(geometry.active_window_start_samples, 0, samples);
     const int end =
-        std::clamp(geometry.active_window_end_samples, start, samples);
+        std::clamp(ActivePictureEndSamples(geometry, line.line_number_1based),
+                   start, samples);
     windows.push_back(PictureLineWindow{
         .start = static_cast<std::size_t>(line_offsets[index] + start),
-        .count = static_cast<std::size_t>(end - start)});
+        .count = static_cast<std::size_t>(end - start),
+        .line_1based = line.line_number_1based});
+  }
+  return windows;
+}
+
+std::vector<PictureLineWindow> BuildBurstLineWindows(Standard standard) {
+  const TimingConstants timing = GetTimingConstants(standard);
+  const std::vector<int> line_samples = BuildLineSampleCounts(
+      standard, timing.lines_per_frame, timing.samples_per_line_4fsc);
+  const std::vector<int> line_offsets = BuildLineSampleOffsets(line_samples);
+  const int gate_start =
+      BurstStartSamples(standard, timing.sample_rate_4fsc_hz) -
+      kBurstWindowGuardSamples;
+  const int gate_end = BurstEndSamples(standard, timing.sample_rate_4fsc_hz) +
+                       kBurstWindowGuardSamples;
+
+  std::vector<PictureLineWindow> windows;
+  windows.reserve(line_samples.size());
+  for (std::size_t index = 0; index < line_samples.size(); ++index) {
+    const int start = std::clamp(gate_start, 0, line_samples[index]);
+    const int end = std::clamp(gate_end, start, line_samples[index]);
+    windows.push_back(PictureLineWindow{
+        .start = static_cast<std::size_t>(line_offsets[index] + start),
+        .count = static_cast<std::size_t>(end - start),
+        .line_1based = static_cast<int>(index) + 1});
   }
   return windows;
 }

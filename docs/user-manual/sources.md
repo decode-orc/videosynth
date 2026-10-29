@@ -101,7 +101,8 @@ The layout is `{bundled}/<type>/<raster>/<file>`, where `<type>` is `exr` or `mk
 | Asset | Content |
 |-------|---------|
 | `SMPTE_BARS.mkv` / `SMPTE_BARS_001.mkv` | Static SMPTE bars as a clip |
-| `MOVING_ZONE_2H.mkv` | Moving zone plate — motion and high-frequency content |
+| `MOVING_ZONE_2H.mkv` | Moving zone plate — motion and high-frequency content (luma only) |
+| `MOVING_BARS_75.mkv` | 75 % colour bars (EBU 100/0/75/0) scrolling left 4 pixels per frame — moving chroma, for 3D comb filters and field-phase decisions. 176 frames, looping seamlessly |
 
 Always reference bundled assets through `{bundled}/…` rather than a bare relative path. A bare relative path resolves against the working directory in the CLI but against the project directory in the GUI, so it will work in one and not the other.
 

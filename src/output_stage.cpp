@@ -24,6 +24,7 @@
 #include "videosynth/cvbs_quantization.h"
 #include "videosynth/fixed_point.h"
 #include "videosynth/model.h"
+#include "videosynth/path_resolution.h"
 #include "videosynth/timing_constants.h"
 
 namespace videosynth {
@@ -491,16 +492,12 @@ bool OutputStage::BeginWrite(const Project& project,
 
   // Create parent directories so callers don't need to pre-create them.
   std::error_code ec;
-  std::filesystem::create_directories(
-      std::filesystem::path(output_path).parent_path(), ec);
-  if (ec) {
+  if (!CreateParentDirectories(output_path, &ec)) {
     errors->push_back("Failed to create output directory for: " + output_path +
                       " (" + ec.message() + ")");
     return false;
   }
-  std::filesystem::create_directories(
-      std::filesystem::path(metadata_path).parent_path(), ec);
-  if (ec) {
+  if (!CreateParentDirectories(metadata_path, &ec)) {
     errors->push_back("Failed to create output directory for: " +
                       metadata_path + " (" + ec.message() + ")");
     return false;

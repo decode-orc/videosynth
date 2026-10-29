@@ -89,7 +89,7 @@ Unknown keys are rejected outright, at every level, naming the offending key and
 
 - `gain` in 0.5–1.5; `phase_deg` in −180.0 to 180.0; `line_jitter.phase_deg` in 0.0–10.0; `line_jitter.gain` in 0.0–0.1. Values that are not finite are errors.
 - `chroma_error:` on a SECAM project is an error.
-- A non-numeric value, an unknown key, an empty `chroma_error:` block or an empty `line_jitter:` block is a parse error.
+- A non-numeric value, a non-boolean `include_burst`, an unknown key, an empty `chroma_error:` block (one with only `include_burst` counts as empty) or an empty `line_jitter:` block is a parse error.
 
 ### Luma bandwidth
 
@@ -114,7 +114,7 @@ Unknown keys are rejected outright, at every level, naming the offending key and
 - Tone pairs: at least one of `left`/`right` present; a known `waveform`; frequencies within 0–22 000 Hz; amplitude 0.0–1.0; `ramp` and `frequency` not both given; a ramp needs `start`, `end` and a known `mode`, and its `period` must not exceed the section. These rules are skipped for file and soundtrack pairs.
 - `file`: `path` set, ending in `.wav` or `.flac`; the file exists, can be read, and has one or two channels.
 - `video_audio`: `stream` ≥ 0; the section source is a video, not an EXR still, and has an audio stream at that index.
-- EFM requires PAL or NTSC, at most 79 programme-area sections.
+- EFM requires PAL, NTSC or PAL-M (not SECAM), at most 79 programme-area sections.
 - *Warnings*: a non-repeating audio file shorter than its section (the rest is silent); EFM pair not declared by any section; a programme track under 4 s (6 s for the first); no lead-in, so no table of contents.
 - *Log notes* (information, not warnings): an audio file or soundtrack that is resampled to 48 kHz, and a soundtrack with more than two channels that is downmixed to stereo.
 

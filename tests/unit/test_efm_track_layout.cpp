@@ -191,11 +191,38 @@ TEST(EfmTrackLayoutTest, RejectsStandardsWithoutLaserDiscDigitalAudio) {
 
   EfmTrackLayout layout;
   std::vector<std::string> errors;
-  EXPECT_FALSE(BuildEfmTrackLayout(Standard::kPalM,
+  EXPECT_FALSE(BuildEfmTrackLayout(Standard::kSecam,
                                    FrameList(sections, kPalFramesPerSection),
                                    &layout, &errors));
   ASSERT_EQ(errors.size(), 1U);
-  EXPECT_NE(errors.front().find("PAL and NTSC"), std::string::npos);
+  EXPECT_NE(errors.front().find("PAL, NTSC and PAL-M"), std::string::npos);
+}
+
+TEST(EfmTrackLayoutTest, PalMUsesThe525LineDiscDefinition) {
+  const std::vector<Section> sections = {
+      MakeSection("LeadIn", SectionType::kLeadIn),
+      MakeSection("Chapter0", SectionType::kProgrammeArea),
+      MakeSection("LeadOut", SectionType::kLeadOut),
+  };
+
+  EfmTrackLayout pal_m;
+  EfmTrackLayout ntsc;
+  std::vector<std::string> errors;
+  ASSERT_TRUE(BuildEfmTrackLayout(Standard::kPalM, FrameList(sections, 9U),
+                                  &pal_m, &errors))
+      << (errors.empty() ? "" : errors.front());
+  ASSERT_TRUE(BuildEfmTrackLayout(Standard::kNtsc, FrameList(sections, 9U),
+                                  &ntsc, &errors));
+
+  // IEC 60857:1986 Amd 2, 13.6.2: a 525-line LV disc identifies as such.
+  EXPECT_EQ(pal_m.table.video_system, efm::VideoSystem::kNtsc);
+  ASSERT_EQ(pal_m.table.entries.size(), ntsc.table.entries.size());
+  for (std::size_t i = 0; i < pal_m.table.entries.size(); ++i) {
+    EXPECT_EQ(pal_m.table.entries[i].start_section,
+              ntsc.table.entries[i].start_section);
+    EXPECT_EQ(pal_m.table.entries[i].section_count,
+              ntsc.table.entries[i].section_count);
+  }
 }
 
 TEST(EfmTrackLayoutTest, RejectsSectionsOutOfDiscOrder) {

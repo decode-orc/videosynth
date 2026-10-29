@@ -70,7 +70,7 @@ Every dock can be hidden, floated or rearranged; **View → Panels** toggles the
 - **Output** — video path and signal type, plus the optional EFM digital audio channel-pair selection.
 - **Laserdisc & VITS** — disc format (CAV/CLV), VITS placement policy and the VITS set. SECAM projects have no laserdisc format, so the disc format and laserdisc placement are disabled.
 - **Channel (pressing)** — the [`channel:` block](../reference/channel.md): a sub-sample **timing offset**, plus optional **Edge smear** (fraction and time constant) and **FM beat (herringbone)** (carrier at black and level). These describe the pressing, so every project of one pressing should use the same values. The FM beat is modelled for PAL only and is disabled for other standards.
-- **Chroma error (capture)** — the [`chroma_error:` block](../reference/chroma-error.md): chroma **gain** and **phase**, plus optional **Per-line jitter** (phase and gain deviations, with an optional fixed seed). It is not available for SECAM.
+- **Chroma error (capture)** — the [`chroma_error:` block](../reference/chroma-error.md): chroma **gain** and **phase**, **Include burst**, plus optional **Per-line jitter** (phase and gain deviations, with an optional fixed seed). It is not available for SECAM.
 
 Ticking a group that was off fills in typical values, which you can then edit. Changing the standard in the New Project dialog clears an FM beat or chroma error the new standard cannot carry.
 

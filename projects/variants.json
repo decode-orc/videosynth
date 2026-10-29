@@ -10,7 +10,7 @@
   "variants": [
     {
       "name": "stacking-captures",
-      "description": "Four captures of each pressing: fresh capture seeds, the pressing's shared noise and channel untouched. Capture 2 starts later (PN 5); capture 3 replays the multi-burst range (PNs 9-12).",
+      "description": "Six captures of each pressing: fresh capture seeds, the pressing's shared noise untouched. Capture 2 starts later (PN 5); capture 3 replays the multi-burst range (PNs 9-12); capture 5 comes from a player with a chroma gain and phase error; capture 6 sets a whole-sample timing offset of +2 for whole-sample alignment. The others keep the pressing's channel and chroma error.",
       "sources": [
         "stacking/pal_pressing_?.yaml",
         "stacking/pal_m_pressing_?.yaml",
@@ -20,7 +20,9 @@
         {"name_suffix": "_cap1", "capture_seed": 5101},
         {"name_suffix": "_cap2", "capture_seed": 5202, "remove_sections": ["Bars"]},
         {"name_suffix": "_cap3", "capture_seed": 5303, "repeat_sections": ["MultiBurst"]},
-        {"name_suffix": "_cap4", "capture_seed": 5404}
+        {"name_suffix": "_cap4", "capture_seed": 5404},
+        {"name_suffix": "_cap5", "capture_seed": 5505, "chroma_error": {"gain": 1.1, "phase_deg": 3.0}},
+        {"name_suffix": "_cap6", "capture_seed": 5606, "timing_offset_samples": 2.0}
       ]
     },
     {

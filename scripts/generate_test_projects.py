@@ -27,6 +27,15 @@ authored comments survive into the derived project:
       remove_sections     drop the named section entries (a later start)
       repeat_sections     play each named section entry twice in a row, the
                           copy renamed <name>_Replay (a replayed range)
+      chroma_error        replace the project's chroma_error block with this
+                          mapping (the capture's player), or remove it with
+                          null
+      timing_offset_samples
+                          set channel.timing_offset_samples, adding the key,
+                          or the channel block, when the project lacks it
+
+The capture keys may also be set on a variant itself, which applies them to
+every derived project.
 
 Usage:
   generate_test_projects.py --source projects --output <dir> [--stamp <file>]
@@ -307,6 +316,100 @@ def set_signal_type(text: str, signal_type: str) -> str:
     raise ValueError('project declares no output block to set signal_type in')
 
 
+def top_level_block_span(lines: list[str], key: str) -> tuple[int, int] | None:
+    """Line range [start, end) of a top-level `key:` block and its children."""
+    start = next((i for i, line in enumerate(lines)
+                  if indent_of(line) == 0 and line.startswith(f'{key}:')), None)
+    if start is None:
+        return None
+    end = start + 1
+    while end < len(lines) and (not lines[end].strip() or
+                                indent_of(lines[end]) > 0):
+        end += 1
+    # Leave the blank lines that separate the block from the next one.
+    while end > start + 1 and not lines[end - 1].strip():
+        end -= 1
+    return start, end
+
+
+def render_yaml_scalar(value) -> str:
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+    if isinstance(value, (int, float)):
+        return repr(value)
+    if isinstance(value, str):
+        return json.dumps(value)
+    raise ValueError(f'cannot render {value!r} as a YAML scalar')
+
+
+def render_yaml_block(key: str, mapping: dict, indent: int = 0) -> list[str]:
+    """Block-style YAML for a mapping of scalars and nested mappings."""
+    if not isinstance(mapping, dict) or not mapping:
+        raise ValueError(f"'{key}' must be a non-empty mapping")
+    pad = ' ' * indent
+    lines = [f'{pad}{key}:']
+    for child, value in mapping.items():
+        if isinstance(value, dict):
+            lines += render_yaml_block(child, value, indent + 2)
+        else:
+            lines.append(f'{pad}  {child}: {render_yaml_scalar(value)}')
+    return lines
+
+
+def insert_before_sections(lines: list[str], block: list[str]) -> list[str]:
+    start = next((i for i, line in enumerate(lines)
+                  if line.startswith('sections:')), None)
+    if start is None:
+        raise ValueError('project declares no sections list')
+    return lines[:start] + block + [''] + lines[start:]
+
+
+def set_chroma_error(text: str, chroma_error: dict | None) -> str:
+    """Replace, add or (with None) remove the top-level chroma_error block."""
+    lines = text.split('\n')
+    span = top_level_block_span(lines, 'chroma_error')
+    block = ([] if chroma_error is None else
+             render_yaml_block('chroma_error', chroma_error))
+    if span is not None:
+        start, end = span
+        if chroma_error is None:
+            # Take the separating blank line with the block.
+            if end < len(lines) and not lines[end].strip():
+                end += 1
+        lines[start:end] = block
+    elif chroma_error is not None:
+        lines = insert_before_sections(lines, block)
+    return '\n'.join(lines)
+
+
+def set_timing_offset(text: str, offset: float) -> str:
+    """Set channel.timing_offset_samples, adding the key or block if absent."""
+    if isinstance(offset, bool) or not isinstance(offset, (int, float)):
+        raise ValueError('timing_offset_samples must be a number')
+    value = render_yaml_scalar(float(offset))
+    lines = text.split('\n')
+    span = top_level_block_span(lines, 'channel')
+    if span is None:
+        return '\n'.join(insert_before_sections(
+            lines, ['channel:', f'  timing_offset_samples: {value}']))
+
+    start, end = span
+    if lines[start].split('#')[0].strip() != 'channel:':
+        raise ValueError('timing_offset_samples cannot rewrite a flow-style '
+                         'channel block; write it in block style')
+    for index in range(start + 1, end):
+        match = KEY_RE.match(lines[index])
+        if match is not None and match.group('key') == 'timing_offset_samples':
+            rest = match.group('rest')
+            comment = ('  ' + rest[rest.index('#'):].strip()
+                       if '#' in rest else '')
+            lines[index] = (f"{match.group('lead')}timing_offset_samples: "
+                            f'{value}{comment}')
+            return '\n'.join(lines)
+    lines.insert(start + 1, f'  timing_offset_samples: {value}')
+    return '\n'.join(lines)
+
+
 def derive(text: str, variant: dict) -> str:
     """Apply one variant's transformations to a project's YAML text."""
     blocks = set(variant.get('remove_section_blocks', []))
@@ -322,6 +425,12 @@ def derive(text: str, variant: dict) -> str:
 
     if 'capture_seed' in variant:
         text = set_capture_seed(text, int(variant['capture_seed']))
+
+    if 'chroma_error' in variant:
+        text = set_chroma_error(text, variant['chroma_error'])
+
+    if 'timing_offset_samples' in variant:
+        text = set_timing_offset(text, variant['timing_offset_samples'])
 
     signal_type = variant.get('signal_type', 'composite')
     if signal_type not in SIGNAL_TYPE_SUFFIX:

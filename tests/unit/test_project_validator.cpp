@@ -2182,7 +2182,7 @@ TEST(ProjectValidatorTest, RejectsEfmAudioPairBelowRange) {
   EXPECT_TRUE(ContainsMessage(result.errors, "output.efm_audio.pair"));
 }
 
-TEST(ProjectValidatorTest, RejectsEfmAudioForPalMPreset) {
+TEST(ProjectValidatorTest, AcceptsEfmAudioForPalMPreset) {
   Project project = MakeEfmProject();
   project.cvbs_presets.video_standard_preset = Standard::kPalM;
   project.cvbs_presets.ntsc_black_setup_ire = 7.5;
@@ -2190,11 +2190,23 @@ TEST(ProjectValidatorTest, RejectsEfmAudioForPalMPreset) {
   ProjectValidator validator;
   const ValidationResult result = validator.Validate(project);
 
+  EXPECT_FALSE(ContainsMessage(result.errors, "output.efm_audio requires"));
+  EXPECT_EQ(ProjectEfmAudioPair(project), 0);
+}
+
+TEST(ProjectValidatorTest, RejectsEfmAudioForSecamPreset) {
+  Project project = MakeEfmProject();
+  project.cvbs_presets = MakeValidSecamProject().cvbs_presets;
+
+  ProjectValidator validator;
+  const ValidationResult result = validator.Validate(project);
+
   EXPECT_FALSE(result.is_valid);
   EXPECT_TRUE(ContainsMessage(result.errors,
-                              "output.efm_audio requires a PAL "
-                              "or NTSC video_standard_preset"));
-  EXPECT_TRUE(ContainsMessage(result.errors, "PAL_M"));
+                              "output.efm_audio requires a PAL, NTSC or PAL_M "
+                              "video_standard_preset"));
+  EXPECT_TRUE(ContainsMessage(result.errors, "SECAM"));
+  EXPECT_EQ(ProjectEfmAudioPair(project), -1);
 }
 
 TEST(ProjectValidatorTest, WarnsWhenEfmAudioPairIsNotDeclared) {

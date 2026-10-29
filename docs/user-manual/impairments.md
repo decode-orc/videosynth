@@ -36,6 +36,8 @@ It has two components:
 
 `noise_db − noise_spread_db` must be at least 20.0.
 
+The levels are those of the output signal: on composite output the composite signal is at `noise_db`; on Y/C output the luma and the chroma file each are, with correlated noise.
+
 ### Shaping the spectrum
 
 Real channel noise is rarely white: FM demodulation tilts it towards high frequencies, and a player's filters shape it further. `spectrum` describes that shape as `[MHz, dB]` breakpoints:
@@ -217,6 +219,7 @@ chroma_error:
 ```
 
 - Only picture chroma changes. The burst, VBI, VITS lines and blanking are untouched, so a decoder that locks to burst sees a real hue and saturation error.
+- With `include_burst: true` the burst takes the error too: a whole chroma path (or an FM/MTF loss) rather than a mis-adjusted picture path. A decoder that references its chroma gain to the burst can then measure and correct the gain, and sees no hue error against burst.
 - `line_jitter` adds a fresh Gaussian deviation to phase and gain on every picture line.
 - On PAL and PAL-M a constant phase error alternates in sign from line to line after decoding, which a delay-line decoder turns into a small loss of saturation; NTSC shows it as a hue shift.
 

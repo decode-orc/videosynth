@@ -7,6 +7,7 @@ chroma_error:
   gain: 1.05
   phase_deg: 2.0
   line_jitter: { phase_deg: 0.5, gain: 0.01, seed: 5 }
+  include_burst: false
 ```
 
 Unlike [`channel`](channel.md), which belongs to the pressing, the chroma error belongs to the player that made the capture, so each capture of one pressing may use a different block.
@@ -18,6 +19,7 @@ Unlike [`channel`](channel.md), which belongs to the pressing, the chroma error 
 | `gain` | float | No | 0.5 to 1.5 | 1.0 | Chroma amplitude multiplier (saturation) |
 | `phase_deg` | float | No | −180.0 to 180.0 | 0.0 | Chroma phase advance relative to burst (hue), in degrees |
 | `line_jitter` | map | No | — | — | Per-line random variation, below |
+| `include_burst` | bool | No | `true`, `false` | `false` | Apply the error to the colour burst as well; see [Including the burst](#including-the-burst) |
 
 ### `line_jitter`
 
@@ -27,7 +29,7 @@ Unlike [`channel`](channel.md), which belongs to the pressing, the chroma error 
 | `gain` | float | No | 0.0 to 0.1 | Standard deviation of the per-line gain, about `gain` |
 | `seed` | integer | No | any | Fixed RNG seed. Omit for a run-specific seed |
 
-`chroma_error:` must set at least one of `gain`, `phase_deg` or `line_jitter`, and `line_jitter:` must set at least one of its `phase_deg` or `gain`; an empty block is a parse error.
+`chroma_error:` must set at least one of `gain`, `phase_deg` or `line_jitter` (`include_burst` alone does not count), and `line_jitter:` must set at least one of its `phase_deg` or `gain`; an empty block is a parse error.
 
 ## Behaviour
 
@@ -38,10 +40,21 @@ Unlike [`channel`](channel.md), which belongs to the pressing, the chroma error 
 | `gain` | Every picture line's chroma amplitude is scaled |
 | `phase_deg` | Every picture line's chroma phase is advanced relative to burst |
 | `line_jitter` | Each picture line adds its own Gaussian deviation to the phase and gain |
+| `include_burst: true` | Every line's burst is scaled and rotated as well |
 
 ### Picture chroma only
 
-The error is applied to chroma inside the active window of active picture lines. The colour burst, VBI lines, lines carrying a project VITS and the blanking between are left bit-identical. A burst-locked decoder therefore sees a real hue and saturation error, as it would from a mis-adjusted player, rather than a burst that has moved with the picture.
+By default the error is applied to chroma inside the active window of active picture lines. The colour burst, VBI lines, lines carrying a project VITS and the blanking between are left bit-identical. A burst-locked decoder therefore sees a real hue and saturation error, as it would from a mis-adjusted player, rather than a burst that has moved with the picture.
+
+### Including the burst
+
+`include_burst: true` models the other real case: a gain or phase error in the **whole** chroma path, or an FM/MTF loss on the disc, which moves the burst with the picture. The burst of every line is changed as well:
+
+- A picture line's burst takes that line's own error, jitter included, so picture and burst move together.
+- Bursts on VBI and VITS lines take the block's `gain` and `phase_deg`, without jitter.
+- The picture chroma is bit-identical to `include_burst: false`; only the bursts change.
+
+A burst-locked decoder therefore sees no hue error against burst, and one that references its chroma gain to the burst amplitude can measure and correct the gain. The window rotated around each burst is the burst gate widened by 8 samples each side, enough to follow the largest [channel](channel.md) timing offset. The burst is short against the Hilbert transformer, so a phase rotation of the burst is accurate to about 1° and 3 %; a pure gain error is exact.
 
 ### How it is applied
 
@@ -77,5 +90,5 @@ The chroma error runs after the channel, so pressing impairments are computed fr
 ## Rules
 
 - Values outside their ranges, or not finite, are validation errors.
-- A non-numeric value, an unknown key or an empty block is a parse error.
+- A non-numeric value, a non-boolean `include_burst`, an unknown key or an empty block is a parse error.
 - SECAM is a validation error: it has no quadrature chroma to rotate.

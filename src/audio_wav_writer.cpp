@@ -18,6 +18,7 @@
 #include <string_view>
 
 #include "videosynth/audio_output_paths.h"
+#include "videosynth/path_resolution.h"
 #include "videosynth/timing_constants.h"
 
 namespace videosynth {
@@ -123,9 +124,7 @@ bool AudioWavWriter::BeginWrite(const Project& project, int channel_pair,
   }
 
   std::error_code ec;
-  std::filesystem::create_directories(
-      std::filesystem::path(audio_path).parent_path(), ec);
-  if (ec) {
+  if (!CreateParentDirectories(audio_path, &ec)) {
     errors->push_back("Failed to create audio output directory for: " +
                       audio_path + " (" + ec.message() + ")");
     return false;

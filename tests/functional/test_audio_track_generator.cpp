@@ -398,10 +398,10 @@ TEST(AudioTrackGeneratorTest,
     ASSERT_TRUE(generator.Finalize(&errors));
   }
 
-  // PAL-M has no LaserDisc digital audio specification, so a valid pair
+  // SECAM has no LaserDisc digital audio specification, so a valid pair
   // selection still leaves the EFM path inactive.
   project.output.efm_audio.pair = 0;
-  project.cvbs_presets.video_standard_preset = Standard::kPalM;
+  project.cvbs_presets.video_standard_preset = Standard::kSecam;
   {
     AudioTrackGenerator generator;
     std::vector<std::string> errors;

@@ -145,6 +145,7 @@ class ProjectSettingsEditor : public QWidget {
   QGroupBox* chroma_error_group_ = nullptr;
   QDoubleSpinBox* chroma_gain_spin_ = nullptr;
   QDoubleSpinBox* chroma_phase_spin_ = nullptr;
+  QCheckBox* chroma_include_burst_check_ = nullptr;
   QGroupBox* chroma_jitter_group_ = nullptr;
   QDoubleSpinBox* jitter_phase_spin_ = nullptr;
   QDoubleSpinBox* jitter_gain_spin_ = nullptr;

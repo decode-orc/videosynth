@@ -56,6 +56,8 @@ Luma and chroma are generated independently regardless; this only selects whethe
 
 Its presence enables laserdisc EFM digital audio output for one channel pair. Omit the block to disable.
 
+PAL uses the 625-line definition of IEC 60856 Amd 2 clause 13. NTSC and PAL-M use the 525-line definition of IEC 60857 Amd 2 clause 13: no LaserVision standard names PAL-M, and a PAL-M disc is a 525-line disc at the NTSC frame rate, so it takes the NTSC sample sequence and identifies as a 525-line disc in its table of contents.
+
 | Key | Type | Required | Range |
 |-----|------|----------|-------|
 | `pair` | int | Yes | 0–7 |
@@ -65,7 +67,7 @@ Constraints:
 | Rule | Severity |
 |------|----------|
 | `pair` in 0–7 | Error |
-| Standard must be `PAL` or `NTSC` | Error |
+| Standard must be `PAL`, `NTSC` or `PAL_M` (not `SECAM`) | Error |
 | At most 79 `programme_area` sections (one EFM track each) | Error |
 | No section declares `pair` — nothing to encode, no `.efm` written | Warning |
 | A `programme_area` section under 4 s (6 s for the first) | Warning |

@@ -70,6 +70,11 @@ struct ActiveRasterGeometry {
   int active_window_start_samples = 0;
   int active_window_end_samples = 0;
   int active_width_pixels = 720;
+  // Frame line whose picture stops part-way along the line (0 when every
+  // active line carries a full line of picture), and the sample offset
+  // (exclusive) at which that picture ends.
+  int half_picture_line = 0;
+  int half_picture_end_samples = 0;
 };
 
 inline ActiveRasterGeometry GetActiveRasterGeometry(Standard standard,
@@ -83,13 +88,23 @@ inline ActiveRasterGeometry GetActiveRasterGeometry(Standard standard,
     const int active_window_end =
         active_window_start +
         std::max(1, static_cast<int>(std::lround(sample_rate_hz * 52.0e-6)));
+    // ITU-R BT.1700 Annex 1 Part B Table 2 item j: the field-blanking
+    // interval is 25H + a. Before field 2 it starts at line 311, so field 2
+    // picture resumes on line 336; before field 1 it starts at mid-line 623,
+    // so field 2 picture runs to the first half of line 623 (288 lines per
+    // field, Table 1 item 1a). Item K: blanking leads the first equalizing
+    // pulse (at half-line) by 3 us, so line 623 picture ends 29 us after 0H.
+    constexpr double kHalfPictureEndSeconds = 32.0e-6 - 3.0e-6;
     return ActiveRasterGeometry{
         .first_active_line_field1 = 23,
-        .first_active_line_field2 = 335,
+        .first_active_line_field2 = 336,
         .active_lines_per_field = 288,
         .active_window_start_samples = active_window_start,
         .active_window_end_samples = active_window_end,
         .active_width_pixels = 720,
+        .half_picture_line = 623,
+        .half_picture_end_samples = static_cast<int>(
+            std::lround(sample_rate_hz * kHalfPictureEndSeconds)),
     };
   }
 
@@ -107,6 +122,16 @@ inline ActiveRasterGeometry GetActiveRasterGeometry(Standard standard,
       .active_window_end_samples = active_window_end,
       .active_width_pixels = 720,
   };
+}
+
+// Sample offset (exclusive) within the line at which its picture ends.
+inline int ActivePictureEndSamples(const ActiveRasterGeometry& geometry,
+                                   int line_1based) {
+  if (geometry.half_picture_line != 0 &&
+      line_1based == geometry.half_picture_line) {
+    return geometry.half_picture_end_samples;
+  }
+  return geometry.active_window_end_samples;
 }
 
 // Index of a frame line within the active raster (field 1 rows first), or -1

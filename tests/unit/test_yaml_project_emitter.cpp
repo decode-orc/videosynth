@@ -631,6 +631,24 @@ sections:
 )");
 }
 
+TEST(YamlProjectEmitterTest, ChromaErrorIncludeBurstRoundTrip) {
+  ExpectRoundTrip(R"(
+cvbs_presets:
+  video_standard_preset: PAL
+output:
+  video_path: out/video.cvbs
+chroma_error:
+  gain: 0.9
+  phase_deg: 0.0
+  include_burst: true
+sections:
+  - name: Bars
+    type: progressive
+    source: assets/bars.exr
+    duration_frames: 10
+)");
+}
+
 TEST(YamlProjectEmitterTest, ChromaErrorWithUnseededJitterRoundTrip) {
   ExpectRoundTrip(R"(
 cvbs_presets:

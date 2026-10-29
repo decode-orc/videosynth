@@ -562,6 +562,13 @@ TEST(EfmOutputPipelineTest, NtscProjectProducesAValidEfmStream) {
                   efm::kVideoSystemIdentificationNtsc);
 }
 
+// PAL-M discs are 525-line LaserVision discs: IEC 60857 timing and the
+// 525-line identification in the lead-in TOC.
+TEST(EfmOutputPipelineTest, PalMProjectProducesAValidEfmStream) {
+  VerifyEfmOutput(Standard::kPalM, NtscPlans(), "videosynth_efm_pipeline_pal_m",
+                  efm::kVideoSystemIdentificationNtsc);
+}
+
 TEST(EfmOutputPipelineTest, NoEfmFileWhenTheSelectionIsInactive) {
   const std::filesystem::path video_path =
       TempPath("videosynth_efm_pipeline_off.cvbs");
@@ -571,10 +578,11 @@ TEST(EfmOutputPipelineTest, NoEfmFileWhenTheSelectionIsInactive) {
       TempPath("videosynth_efm_pipeline_off_audio_0.wav");
   std::filesystem::remove(efm_path);
 
-  // PAL-M has no LaserDisc digital audio specification, so only the WAV track
+  // SECAM has no LaserDisc digital audio specification, so only the WAV track
   // is written.
-  Project project = MakeEfmProject(Standard::kPalM, PalPlans(), video_path);
+  Project project = MakeEfmProject(Standard::kSecam, PalPlans(), video_path);
   project.cvbs_presets.sample_encoding_preset = "CVBS_U10_4FSC";
+  project.cvbs_presets.signal_state_preset = "STANDARD_STABLE_UNLOCKED";
   AudioTrackGenerator generator;
   ASSERT_TRUE(RunPipeline(project, &generator));
 

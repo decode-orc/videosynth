@@ -277,11 +277,20 @@ TEST(ProjectSettingsPresenterTest, EfmStatusReportsPairOutOfRange) {
             EfmOutputStatus::kPairOutOfRange);
 }
 
-// LaserDisc digital audio exists only for PAL (IEC 60856:1986 Amd 2 clause 13)
-// and NTSC (IEC 60857:1986 Amd 2 clause 13); every other standard must offer no
-// enable control and report why.
-TEST(ProjectSettingsPresenterTest, EfmUnavailableOutsidePalAndNtsc) {
+// LaserDisc digital audio exists for PAL (IEC 60856:1986 Amd 2 clause 13) and
+// 525-line discs, PAL-M included (IEC 60857:1986 Amd 2 clause 13); SECAM must
+// offer no enable control and report why.
+TEST(ProjectSettingsPresenterTest, EfmAvailableForPalM) {
   Project project = MakeProjectWithAudioPair(Standard::kPalM, 0);
+  EXPECT_TRUE(BuildProjectSettingsFormState(project).efm_output_editable);
+
+  project.output.efm_audio.enabled = true;
+  EXPECT_EQ(BuildProjectSettingsFormState(project).efm_status,
+            EfmOutputStatus::kActive);
+}
+
+TEST(ProjectSettingsPresenterTest, EfmUnavailableForSecam) {
+  Project project = MakeProjectWithAudioPair(Standard::kSecam, 0);
   EXPECT_FALSE(BuildProjectSettingsFormState(project).efm_output_editable);
 
   project.output.efm_audio.enabled = true;
@@ -295,7 +304,8 @@ TEST(ProjectSettingsPresenterTest, NormalizeOutputClearsEfmForeignToStandard) {
   output.efm_audio.enabled = true;
   output.efm_audio.pair = 2;
 
-  for (const Standard standard : {Standard::kPal, Standard::kNtsc}) {
+  for (const Standard standard :
+       {Standard::kPal, Standard::kNtsc, Standard::kPalM}) {
     const OutputTargets kept =
         NormalizeOutputTargetsForStandard(output, standard);
     EXPECT_TRUE(kept.efm_audio.enabled);
@@ -303,7 +313,7 @@ TEST(ProjectSettingsPresenterTest, NormalizeOutputClearsEfmForeignToStandard) {
   }
 
   const OutputTargets cleared =
-      NormalizeOutputTargetsForStandard(output, Standard::kPalM);
+      NormalizeOutputTargetsForStandard(output, Standard::kSecam);
   EXPECT_FALSE(cleared.efm_audio.enabled);
   EXPECT_EQ(cleared.efm_audio.pair, 0);
 }
@@ -312,7 +322,7 @@ TEST(ProjectSettingsPresenterTest, NormalizeOutputClearsEfmForeignToStandard) {
 // EFM (the enablement mirrors validation).
 TEST(ProjectSettingsPresenterTest, NormalizedOutputPassesValidatorEfmRule) {
   for (const Standard standard :
-       {Standard::kPal, Standard::kNtsc, Standard::kPalM}) {
+       {Standard::kPal, Standard::kNtsc, Standard::kPalM, Standard::kSecam}) {
     Project project = MakeProjectWithAudioPair(standard, 0);
     project.output.efm_audio.enabled = true;
     project.output =

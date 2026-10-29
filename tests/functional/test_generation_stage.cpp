@@ -37,18 +37,8 @@ int BurstStartSamples(double sample_rate_hz) {
   return static_cast<int>(std::lround(sample_rate_hz * 5.6e-6));
 }
 
-int BurstStartSamples(Standard standard, double sample_rate_hz) {
-  double us = (standard == Standard::kNtsc) ? 5.3e-6 : 5.6e-6;
-  return static_cast<int>(std::lround(sample_rate_hz * us));
-}
-
 int BurstEndSamples(double sample_rate_hz) {
   return static_cast<int>(std::lround(sample_rate_hz * 8.0e-6));
-}
-
-int BurstEndSamples(Standard standard, double sample_rate_hz) {
-  double us = (standard == Standard::kNtsc) ? 7.97e-6 : 8.0e-6;
-  return static_cast<int>(std::lround(sample_rate_hz * us));
 }
 
 // Matches kPalSubcarrierAnchorRad in generation_stage.cpp: the 625-line PAL

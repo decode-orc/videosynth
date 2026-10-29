@@ -9,9 +9,11 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <cstddef>
 #include <vector>
 
+#include "videosynth/frame_line_layout.h"
 #include "videosynth/signal_timing_model.h"
 
 namespace videosynth {
@@ -39,7 +41,9 @@ TEST(SignalTimingModelTest, ClassifiesPalSyncBlocksAndLineKinds) {
   EXPECT_EQ(GetSyncPulseKind(Standard::kPal, 311), SyncPulseKind::kEqualizing);
   EXPECT_EQ(GetSyncPulseKind(Standard::kPal, 314),
             SyncPulseKind::kVerticalSync);
-  EXPECT_EQ(GetSyncPulseKind(Standard::kPal, 623), SyncPulseKind::kEqualizing);
+  // Line 623 opens with a line-sync pulse; its equalizing pulse is mid-line.
+  EXPECT_EQ(GetSyncPulseKind(Standard::kPal, 623), SyncPulseKind::kHorizontal);
+  EXPECT_EQ(GetSyncPulseKind(Standard::kPal, 624), SyncPulseKind::kEqualizing);
 
   EXPECT_EQ(GetLineContentKind(Standard::kPal, 20),
             LineContentKind::kVbiBlanking);
@@ -50,8 +54,10 @@ TEST(SignalTimingModelTest, ClassifiesPalSyncBlocksAndLineKinds) {
   EXPECT_EQ(GetLineContentKind(Standard::kPal, 332),
             LineContentKind::kVbiBlanking);
   EXPECT_EQ(GetLineContentKind(Standard::kPal, 335),
-            LineContentKind::kActivePicture);
+            LineContentKind::kVbiBlanking);
   EXPECT_EQ(GetLineContentKind(Standard::kPal, 336),
+            LineContentKind::kActivePicture);
+  EXPECT_EQ(GetLineContentKind(Standard::kPal, 623),
             LineContentKind::kActivePicture);
 }
 
@@ -130,12 +136,45 @@ TEST(SignalTimingModelTest,
   EXPECT_DOUBLE_EQ(pal_line20, -pal_line21);
 }
 
-TEST(SignalTimingModelTest, PalSecondFieldVbiBoundaryStartsActiveAtLine335) {
-  // Guard against off-by-one regressions around PAL field-2 vertical blanking.
-  EXPECT_EQ(GetLineContentKind(Standard::kPal, 334),
-            LineContentKind::kVbiBlanking);
+TEST(SignalTimingModelTest, PalSecondFieldVbiBoundaryStartsActiveAtLine336) {
+  // ITU-R BT.1700 Annex 1 Part B Table 2 item j: field blanking (25H + a)
+  // runs from line 311 to the end of line 335.
   EXPECT_EQ(GetLineContentKind(Standard::kPal, 335),
+            LineContentKind::kVbiBlanking);
+  EXPECT_EQ(GetLineContentKind(Standard::kPal, 336),
             LineContentKind::kActivePicture);
+}
+
+TEST(SignalTimingModelTest, PalActiveRasterPlacesField2On336To623) {
+  const ActiveRasterGeometry geometry =
+      GetActiveRasterGeometry(Standard::kPal, 17734475.0);
+
+  EXPECT_EQ(ActiveFrameLineIndex(geometry, 310), 287);
+  EXPECT_EQ(ActiveFrameLineIndex(geometry, 335), -1);
+  EXPECT_EQ(ActiveFrameLineIndex(geometry, 336), 288);
+  EXPECT_EQ(ActiveFrameLineIndex(geometry, 623), 575);
+  EXPECT_EQ(ActiveFrameLineIndex(geometry, 624), -1);
+}
+
+TEST(SignalTimingModelTest, PalLine623PictureEndsBeforeMidLine) {
+  const ActiveRasterGeometry geometry =
+      GetActiveRasterGeometry(Standard::kPal, 17734475.0);
+
+  // Item K: blanking leads the mid-line (32 us) equalizing pulse by 3 us.
+  EXPECT_EQ(ActivePictureEndSamples(geometry, 623),
+            static_cast<int>(std::lround(17734475.0 * 29.0e-6)));
+  EXPECT_LT(ActivePictureEndSamples(geometry, 623), 1135 / 2);
+  EXPECT_EQ(ActivePictureEndSamples(geometry, 622),
+            geometry.active_window_end_samples);
+}
+
+TEST(SignalTimingModelTest, NtscActiveRasterHasNoHalfPictureLine) {
+  const ActiveRasterGeometry geometry =
+      GetActiveRasterGeometry(Standard::kNtsc, 14318181.8);
+
+  EXPECT_EQ(geometry.half_picture_line, 0);
+  EXPECT_EQ(ActivePictureEndSamples(geometry, 263),
+            geometry.active_window_end_samples);
 }
 
 }  // namespace

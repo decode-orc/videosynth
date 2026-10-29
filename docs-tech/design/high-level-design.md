@@ -210,7 +210,7 @@ However, **line timing and source-row addressing inside that frame are field-awa
 For avoidance of doubt, the generator shall apply the following rules:
 
 - **NTSC active-picture line starts (1-indexed frame lines):** field 1 starts at line **22**; field 2 starts at line **284**. Line 21 (field-1 transition) and line 283 (field-2 transition) are not treated as full active-picture lines.
-- **PAL active-picture line starts (1-indexed frame lines):** field 1 starts at line **23**; field 2 starts at line **335**.
+- **PAL active-picture lines (1-indexed frame lines):** field 1 occupies lines **23–310**; field 2 occupies lines **336–623** (BT.1700 Annex 1 Part B Table 2 item j: a 25H + a field-blanking interval from line 311 and from mid-line 623). Line 623 carries picture on its first half only: it opens with a normal line-sync pulse, its picture ends 29 µs after 0H (item K: 3 µs ahead of the mid-line equalising pulse), and its second half holds the first pre-equalising pulse. Line 23 is modelled as a full picture line.
 - **Progressive-to-interlaced row mapping:** for a field-local active line index $n$ (starting at 0), field 1 samples source row $2n+1$ and field 2 samples source row $2n$.
 
 Frame-source raster preservation contract (normative):
@@ -561,7 +561,7 @@ For Y/C output, `output.video_path` must end in `.cvbsy`; the chroma path is der
 
 ### **LaserDisc Digital Audio (EFM) Output**
 
-A project may additionally emit the LaserDisc digital audio channel of one audio channel pair. The stage-by-stage design and its specification mapping are given below.
+A project may additionally emit the LaserDisc digital audio channel of one audio channel pair, on PAL, NTSC or PAL-M. IEC 60856:1986 Amd 2 clause 13 (625-line) and IEC 60857:1986 Amd 2 clause 13 (525-line) define it; no LaserVision standard names PAL-M, and PAL-M discs take the 525-line definition, as their VBI codes do (`StandardHasLaserdiscDigitalAudio`, `model.h`). SECAM is rejected. The stage-by-stage design and its specification mapping are given below.
 
 **Module boundary** — all EFM signal processing lives in a standalone static library `videosynth_efm` (`src/efm/`, `include/videosynth/efm/`, namespace `videosynth::efm`) that has **no dependency on `videosynth_core`**: its API takes 16-bit stereo PCM plus a track table and emits an EFM channel stream. `videosynth_core` links the module, not the reverse, so a decoder, data modes, or RF modulation can be added later without touching the audio subsystem. Its stages are:
 
@@ -575,9 +575,9 @@ A project may additionally emit the LaserDisc digital audio channel of one audio
 
 **Output files** — the EFM extension is the two-file pair defined by the [EFM Extension Format](../cvbs-file-format-specification/docs/extensions/efm-extension-format.md): `<basename>.efm` holds the channel stream as one unsigned byte per pit/land run length (T3–T11), starting at the first frame sync, and `<basename>.efm.meta` is its own SQLite sidecar (schema version 1) carrying one `efm_frame` row per stored video frame — `cvbs_file_id`, `frame_id`, `t_value_offset` and `t_value_count`. Both share the CVBS basename, so the channel pair is not part of either name. `AudioEfmWriter` mirrors the `AudioWavWriter` streaming contract (`BeginWrite` / `AppendFrameAudio` / `FinalizeWrite` / `AbortWrite`), writing the sidecar on finalize, so an aborted run leaves neither file behind. No EFM metadata is written into the core `<basename>.meta` database: the core CVBS schema has no EFM concept, and the extension is self-describing.
 
-**Sample timing** — the EFM path synthesises the selected pair independently at exactly 44 100 Hz (PAL 1764/625 × F_H, IEC 60856:1986 Amd 2, 13.2; NTSC 7007/2500 × F_H, IEC 60857:1986 Amd 2, 13.2) from the same `AudioParameters` as the 48 kHz WAV path — there is no resampling. Per video frame that is 1764 samples for PAL (exact) and the SMPTE 272M-1994 Table 1 sequence for NTSC (147147 samples per 100 frames). Samples are converted from 24-bit to the CD's 16-bit domain by rounding to nearest with saturation.
+**Sample timing** — the EFM path synthesises the selected pair independently at exactly 44 100 Hz (PAL 1764/625 × F_H, IEC 60856:1986 Amd 2, 13.2; NTSC 7007/2500 × F_H, IEC 60857:1986 Amd 2, 13.2) from the same `AudioParameters` as the 48 kHz WAV path — there is no resampling. Per video frame that is 1764 samples for PAL (exact) and the SMPTE 272M-1994 Table 1 sequence for NTSC and PAL-M, which share the 30000/1001 frame rate (147147 samples per 100 frames). Samples are converted from 24-bit to the CD's 16-bit domain by rounding to nearest with saturation.
 
-**Track layout** — every contiguous run of output frames sharing one `programme_area` section is one track, numbered 01, 02, … in output order (maximum 79 tracks). `lead_in` sections carry the repetitive mode-4 TOC (one POINT per track plus A0/A1/A2, with the video-system identification 22 = PAL / 12 = NTSC in the A0 P FRAME field), and `lead_out` sections carry lead-out subcode (TNO = AA). Track boundaries are placed on the nearest subcode section, so a boundary sits within 1/150 s of the video frame carrying the section change. The first 2 s of track 1 are the mandatory pause required by IEC 60908-1999, 17.5.1: digital silence in the EFM stream while the WAV track carries the section's tone.
+**Track layout** — every contiguous run of output frames sharing one `programme_area` section is one track, numbered 01, 02, … in output order (maximum 79 tracks). `lead_in` sections carry the repetitive mode-4 TOC (one POINT per track plus A0/A1/A2, with the video-system identification 22 = PAL / 12 = NTSC (also used for PAL-M, a 525-line disc) in the A0 P FRAME field), and `lead_out` sections carry lead-out subcode (TNO = AA). Track boundaries are placed on the nearest subcode section, so a boundary sits within 1/150 s of the video frame carrying the section change. The first 2 s of track 1 are the mandatory pause required by IEC 60908-1999, 17.5.1: digital silence in the EFM stream while the WAV track carries the section's tone.
 
 **Timing alignment** — t = 0 is common to video frame 0, WAV sample 0, EFM source sample 0, and Q absolute time 00:00:00. The only structural delay is the CIRC interleave, exported as `kCircPipelineLatencyFrames = 108` (ECMA-130, C.9): a complementary decoder emits 108 F1 frames (648 stereo samples, ≈14.69 ms) of warm-up silence before source sample 0, after which decoded PCM is sample-exact against the 44.1 kHz source. The stream is **not** pre-compensated for that delay, so the shared datum with the video and WAV timelines holds.
 
@@ -702,6 +702,8 @@ Normative anchors: sync tip −285.7 mV → code 16; blanking 0 mV → code 240;
 
 Codes 0–3 and 1020–1023 are reserved (excluded values) per both standards and must never appear in output.
 
+The fixed-point path (`MapCompositeFixedToCode`, `RoundShiftRightSigned` in `fixed_point.h`) rounds half away from zero on the magnitude, matching `round` above on both sides of blanking, so every negative level (sync, sub-black, negative chroma) maps to the same code as its positive mirror.
+
 ---
 
 ### **6.2. Half-Line Element Definitions**
@@ -733,7 +735,7 @@ For **PAL (625-line system)**, the vertical blanking interval (VBI) is defined a
 
 | **Line** | **Half-Line Elements** | **Notes**                                          |
 | -------- | ---------------------- | -------------------------------------------------- |
-| 1        | VS, VS                 | Vertical (broad) sync pulses (2.5H nominal, modeled line-granular on lines 1–3). Pre-equalizing pulses for field 1 occupy lines 623–625 of the preceding frame. |
+| 1        | VS, VS                 | Vertical (broad) sync pulses (2.5H nominal, modeled line-granular on lines 1–3). Pre-equalizing pulses for field 1 run from mid-line 623 to line 625 of the preceding frame. |
 | 2        | VS, VS                 | Vertical sync pulse.                               |
 | 3        | VS, VS                 | Vertical sync pulse (end).                         |
 | 4        | EQ, EQ                 | Post-equalizing pulses (2.5H nominal, modeled line-granular on lines 4–5). |
@@ -759,9 +761,10 @@ For **PAL (625-line system)**, the vertical blanking interval (VBI) is defined a
 | 316      | EQ, EQ                 | Post-equalizing pulses.                        |
 | 317      | EQ, EQ                 | Post-equalizing pulses.                        |
 | 318      | EQ, BL                 | Transition out of sync block (mixed half-line).|
-| 319-334  | BL, BL                 | VBI lines (burst on line 319 is subject to the Figure 8 window IV). |
-| 335-622  | Active Video           | Visible content (burst on line 622 is subject to the Figure 8 window III). |
-| 623-625  | EQ, EQ                 | Pre-equalizing pulses for next frame boundary. |
+| 319-335  | BL, BL                 | VBI lines (burst on line 319 is subject to the Figure 8 window IV). |
+| 336-622  | Active Video           | Visible content (burst on line 622 is subject to the Figure 8 window III). |
+| 623      | H, EQ                  | Half picture line: line sync and picture to 29 µs, then the first pre-equalizing pulse at mid-line. No burst (Figure 8 windows I and III). |
+| 624-625  | EQ, EQ                 | Pre-equalizing pulses for next frame boundary. |
 
 
 ---
@@ -881,7 +884,7 @@ cvbs_presets:
 output:
   video_path: "out/pal_test_video.cvbs"
   signal_type: composite      # "composite" (default) or "yc"; for "yc", video_path must end in ".cvbsy"
-  efm_audio:                  # Optional; LaserDisc digital audio (EFM) for one channel pair (PAL/NTSC only)
+  efm_audio:                  # Optional; LaserDisc digital audio (EFM) for one channel pair (PAL/NTSC/PAL-M only)
     pair: 0                   # Channel-pair number 0–7; must be declared by at least one section
 
 line_injections:               # Project-wide laserdisc/VITS settings (sibling of output/sections)
@@ -1000,11 +1003,13 @@ The `chroma_error:` block describes the chroma path of the player that made one 
 | `line_jitter.phase_deg` | float | No | [0.0, 10.0] | Per-line phase standard deviation, in degrees. |
 | `line_jitter.gain` | float | No | [0.0, 0.1] | Per-line gain standard deviation. |
 | `line_jitter.seed` | int | No | any int64 | Fixed jitter seed. If absent, a seed drawn when the pipeline is constructed is used, so the jitter differs between runs. |
+| `include_burst` | bool | No | `true`/`false` | Apply the error to the burst as well (a whole chroma path, or an FM/MTF loss). Default `false`. |
 
 Rules:
-- Block absent → no processing. An empty `chroma_error:` or `line_jitter:` block, an unknown key or a non-numeric value is a parse error; out-of-range or non-finite values are validation errors. SECAM is a validation error (no quadrature chroma).
+- Block absent → no processing. An empty `chroma_error:` or `line_jitter:` block (one setting only `include_burst` counts as empty), an unknown key, a non-numeric value or a non-boolean `include_burst` is a parse error; out-of-range or non-finite values are validation errors. SECAM is a validation error (no quadrature chroma).
 - Gain 1, phase 0 and no jitter (or zero deviations) is not processed, so the output is bit-identical to the block being absent.
-- Picture chroma only: the active window (`GetActiveRasterGeometry`) of horizontal-sync active picture lines, less every project VITS target line. Burst, VBI, VITS and blanking samples are untouched, so a burst-locked decoder sees a real hue/saturation error.
+- Picture chroma by default: the picture window (`GetActiveRasterGeometry`, `ActivePictureEndSamples`) of horizontal-sync active picture lines, less every project VITS target line. Burst, VBI, VITS and blanking samples are untouched, so a burst-locked decoder sees a real hue/saturation error.
+- With `include_burst`, the burst window of every line (`BuildBurstLineWindows`: the burst gate widened by `kBurstWindowGuardSamples = 8` each side, covering the largest channel timing offset) is rotated as well. A picture line's burst takes that line's own θ and g, jitter included; every other line's burst (VBI and VITS lines) takes the constants. The jitter draws are unchanged, so turning the flag on changes the bursts and nothing else. A burst-referenced decoder then sees a gain it can measure and correct and no hue error against burst. The burst is short against the Hilbert transformer and its quadrature is the true transform of the gated burst, so a burst rotation is accurate to about 1° and 3 % (a pure gain is exact).
 - On each picture line `C ← g·(C·cos θ − Ĉ·sin θ)`, where Ĉ is the Hilbert transform of the line's active-window samples alone (zero outside, so burst cannot leak in). The transformer (`DesignChromaHilbertKernel`) is a 47-tap Kaiser-windowed ideal Hilbert FIR (`kChromaHilbertHalfTaps = 23`, β = `kChromaHilbertKaiserBeta = 8`; odd taps only), within 10⁻⁴ of −j from 2 MHz to Nyquist − 2 MHz at both 4fsc rates (2–6.87 MHz at 625-line, 2–5.16 MHz at 525-line), covering every chroma band. The 525-line Nyquist (7.16 MHz) rules out a 2–7 MHz band there.
 - θ and g are the constants plus, with jitter, per-line Gaussian deviations. The jitter RNG is `std::mt19937_64` seeded with `DeriveImpairmentSeed(seed, kChromaJitterSeedDomain, output_frame_index)`; each picture line draws two unit normals in frame order (phase, then gain) whether or not each deviation is set. Chroma error is a capture property, so it is keyed by output position, not disc position.
 - C is not clamped; the output stage quantises it.
@@ -1222,7 +1227,7 @@ The `output.efm_audio:` block selects **one** audio channel pair to be additiona
 
 Constraints:
 
-- **PAL and NTSC only** — LaserDisc digital audio is defined by IEC 60856:1986 Amd 2 clause 13 (PAL) and IEC 60857:1986 Amd 2 clause 13 (NTSC); any other `video_standard_preset` is a validation error.
+- **PAL, NTSC and PAL-M only** — LaserDisc digital audio is defined by IEC 60856:1986 Amd 2 clause 13 (625-line PAL) and IEC 60857:1986 Amd 2 clause 13 (525-line); PAL-M discs take the 525-line definition (NTSC frame rate and sample sequence, 525-line TOC identification). SECAM is a validation error.
 - **The pair must be declared** — if no section declares `pair`, a warning is emitted and no `.efm` file is written.
 - **Track rules** — one track per `programme_area` section, maximum 79 (IEC 60856 Amd 2, 13.5.3.3 / IEC 60857 Amd 2, 13.6.3.3); tracks shorter than 4 s (6 s for track 1, whose first 2 s are the mandatory pause) and a project with no `lead_in` section (no TOC is emitted) produce warnings.
 
@@ -2009,7 +2014,7 @@ Current implementation note:
      - Seed `std::mt19937_64` per frame from a base seed mixed with `section_index` and `global_frame_index`, so output is independent of batch size and thread count. The base seed is the section's `noise_seed` when set (reproducible across runs); otherwise it is drawn once per run from `std::random_device`, so unseeded noise differs between runs.
      - With `spectrum`, draw `samples_per_frame + taps − 1` unit normals and shape them by valid convolution (no edge effects); otherwise draw one unit normal per sample, as before, so unshaped projects keep their exact output.
      - The noise standard deviation at each sample is `sqrt(σ_f² + (k × Y_mV)²)`, applied to the (shaped) unit normal.
-  5. Sum the two layers' fixed-point noise values and add the sum to both Y and C (correlated noise). Y samples are clamped to the legal fixed-point mV composite range for the standard; C samples are not, since zero-centred saturated chroma legitimately exceeds that range — the output stage clamps Y + C and the chroma file.
+  5. Sum the two layers' fixed-point noise values. On Y/C output (`output.signal_type: yc`) add the sum to both Y and C (correlated noise), so each file carries the configured level; on composite output add it to Y only, since the composite sample is Y + C and adding it to both would double the noise (+6 dB). Y samples are clamped to the legal fixed-point mV composite range for the standard; C samples are not, since zero-centred saturated chroma legitimately exceeds that range — the output stage clamps Y + C and the chroma file.
 - **Spectrum shaping** (`NoiseSpectrumFilter`): a 255-tap linear-phase FIR designed by frequency sampling of the interpolated table, a direct inverse real DFT, a Hann window and normalisation to Σh² = 1. Filters are designed once per distinct (sample rate, table) and cached behind a mutex; convolution is direct, so there is no FFT dependency. The cost is paid only by sections that configure a spectrum.
 
 #### **6. Dropout Injection Stage**

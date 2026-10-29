@@ -58,7 +58,14 @@ No other key is accepted in either layer.
 | `shared` without `noise_db` or with `noise_spread_db` | Parse error |
 | Both layers | Their noise values are summed per sample, so the variances add |
 
-Noise is injected on the internal millivolt representation **before quantisation**, so it lands on every synthesised region — VBI lines, blanking and active picture — and survives into the final sample codes. One noise value per sample is added to both Y and C (correlated Y/C noise). Y is then clamped to the legal composite range; C is centred on zero, so saturated chroma is not clipped here, and the output stage clamps the combined signal.
+Noise is injected on the internal millivolt representation **before quantisation**, so it lands on every synthesised region — VBI lines, blanking and active picture — and survives into the final sample codes. `noise_db` is the level of each output signal:
+
+| `output.signal_type` | Where the noise goes | Measured level |
+|----------------------|----------------------|----------------|
+| `composite` | One noise value per sample, added once (to Y before Y + C is formed) | The composite signal is at `noise_db` |
+| `yc` | The same value added to both Y and C (correlated Y/C noise) | The luma and the chroma file are each at `noise_db` |
+
+Y is then clamped to the legal composite range; C is centred on zero, so saturated chroma is not clipped here, and the output stage clamps the combined signal.
 
 ## `spectrum`
 

@@ -452,15 +452,15 @@ TEST(OutputStageTest, WritesCompositeSamplesUsingS16FscEncodingPresetPal) {
   // PAL blanking=256, scale=32: int16 = (code - 256) * 32
   // 0 mV   -> code=256 -> 0
   // 700 mV -> code=844 -> 18816
-  // -300 mV -> code=3 (fixed-point rounds to -253) -> -8096
+  // -300 mV -> -251.99 codes, rounds to -252 -> code=4 -> -8064
   // -600 mV -> sub-sync, passes through unclamped (pilot burst trough) ->
-  // -16160
+  // -503.99 codes, rounds to -504 -> -16128
   const std::vector<std::int16_t> samples = ReadSamples(video_path, 4);
   ASSERT_EQ(samples.size(), 4U);
   EXPECT_EQ(samples[0], 0);
   EXPECT_EQ(samples[1], 18816);
-  EXPECT_EQ(samples[2], -8096);
-  EXPECT_EQ(samples[3], -16160);
+  EXPECT_EQ(samples[2], -8064);
+  EXPECT_EQ(samples[3], -16128);
 
   CvbsMetadata metadata;
   ASSERT_TRUE(ReadCvbsMetadata(metadata_path, &metadata));
@@ -499,13 +499,13 @@ TEST(OutputStageTest, WritesCompositeSamplesUsingS16FscEncodingPresetNtsc) {
   ASSERT_TRUE(output.Write(project, y, c, &errors));
 
   // NTSC blanking=240, scale=32: int16 = (code - 240) * 32
-  // 0 mV -> code=240 -> 0; 700 mV -> code=789 -> 17568; -300 mV -> code=4
-  // (clamped to reserved-low boundary) -> -7552
+  // 0 mV -> code=240 -> 0; 700 mV -> code=789 -> 17568; -300 mV -> -235.2
+  // codes, rounds to -235 -> code=5 -> -7520
   const std::vector<std::int16_t> samples = ReadSamples(video_path, 3);
   ASSERT_EQ(samples.size(), 3U);
   EXPECT_EQ(samples[0], 0);
   EXPECT_EQ(samples[1], 17568);
-  EXPECT_EQ(samples[2], -7552);
+  EXPECT_EQ(samples[2], -7520);
 
   CvbsMetadata metadata;
   ASSERT_TRUE(ReadCvbsMetadata(metadata_path, &metadata));

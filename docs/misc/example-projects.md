@@ -37,16 +37,20 @@ A fourth PAL pressing, D (`pal_pressing_D.yaml`), has pressing A's content, layo
 - [pressing defects](../user-manual/impairments.md#pressing-defects-unflagged-and-disc-anchored-dropouts): `random` dropouts at scale 6 with `anchor: disc` and `flagged: false`, seeded 7004. They sit on the same pictures in every capture and in the replay, and no sidecar records them;
 - capture dropouts: flagged `scratch` dropouts at scale 2, whose seed each capture replaces.
 
-The `stacking-captures` variant derives four captures of every pressing. Each has its own capture seed and keeps the pressing's shared seed, disc-anchored dropout seeds and channel:
+The `stacking-captures` variant derives six captures of every pressing. Each has its own capture seed and keeps the pressing's shared seed and disc-anchored dropout seeds. Captures 1–4 also keep the pressing's channel; capture 5 adds a [chroma error](../reference/chroma-error.md) (a different player) and capture 6 replaces the timing offset with a whole-sample one:
 
-| Capture | Capture seed | Timeline |
-|---------|--------------|----------|
-| `_cap1` | 5101 | PNs 1–16 |
-| `_cap2` | 5202 | Starts later, at PN 5 |
-| `_cap3` | 5303 | Replays the multi-burst range: PNs 1–12, 9–12, 13–16 |
-| `_cap4` | 5404 | PNs 1–16 |
+| Capture | Capture seed | Timeline | Overrides |
+|---------|--------------|----------|-----------|
+| `_cap1` | 5101 | PNs 1–16 | — |
+| `_cap2` | 5202 | Starts later, at PN 5 | — |
+| `_cap3` | 5303 | Replays the multi-burst range: PNs 1–12, 9–12, 13–16 | — |
+| `_cap4` | 5404 | PNs 1–16 | — |
+| `_cap5` | 5505 | PNs 1–16 | `chroma_error`: gain 1.1, phase 3.0° |
+| `_cap6` | 5606 | PNs 1–16 | `channel.timing_offset_samples`: +2.0 |
 
-`stacking-clean` derives an impairment-free truth for every capture (`_capN_clean`). It removes the noise and the dropouts, pressing defects included, but keeps the `channel:` block, because the timing offset, the beat and the smear are part of the pressing. The captures of one pressing then match each other on every picture number, apart from capture noise. Pressings A and B's truths differ by the 0.3-sample offset.
+A `captures` entry in `projects/variants.json` may set `chroma_error` (a mapping that replaces the project's block, or `null` to remove it) and `timing_offset_samples` (written to `channel.timing_offset_samples`), alongside `capture_seed`, `remove_sections` and `repeat_sections`.
+
+`stacking-clean` derives an impairment-free truth for every capture (`_capN_clean`). It removes the noise and the dropouts, pressing defects included, but keeps the `channel:` block, because the timing offset, the beat and the smear are part of the pressing. The captures of one pressing then match each other on every picture number, apart from capture noise and the overrides of captures 5 and 6. Pressings A and B's truths differ by the 0.3-sample offset.
 
 ### Disc-simulation sets
 

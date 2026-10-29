@@ -1938,16 +1938,15 @@ void ValidateEfmAudioOutput(const videosynth::Project& project,
   }
 
   // LaserDisc digital audio is specified for 625-line PAL (IEC 60856:1986
-  // Amd 2, clause 13) and 525-line NTSC (IEC 60857:1986 Amd 2, clause 13)
-  // only; no other standard has an EFM sample-frequency definition.
+  // Amd 2, clause 13) and 525-line discs (IEC 60857:1986 Amd 2, clause 13),
+  // which PAL-M shares; SECAM has no EFM sample-frequency definition.
   const videosynth::Standard standard =
       project.cvbs_presets.video_standard_preset;
-  if (standard != videosynth::Standard::kPal &&
-      standard != videosynth::Standard::kNtsc) {
+  if (!videosynth::StandardHasLaserdiscDigitalAudio(standard)) {
     result->is_valid = false;
     result->errors.push_back(
-        "Project configuration error: output.efm_audio requires a PAL or NTSC "
-        "video_standard_preset; got '" +
+        "Project configuration error: output.efm_audio requires a PAL, NTSC "
+        "or PAL_M video_standard_preset; got '" +
         videosynth::StandardToString(standard) + "'.");
     return;
   }

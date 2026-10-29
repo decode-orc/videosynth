@@ -20,6 +20,7 @@
 #include <system_error>
 
 #include "videosynth/audio_sample_conversion.h"
+#include "videosynth/path_resolution.h"
 
 namespace videosynth {
 
@@ -91,9 +92,7 @@ bool AudioEfmWriter::BeginWrite(const Project& project, int channel_pair,
   }
 
   std::error_code ec;
-  std::filesystem::create_directories(
-      std::filesystem::path(audio_path).parent_path(), ec);
-  if (ec) {
+  if (!CreateParentDirectories(audio_path, &ec)) {
     errors->push_back("Failed to create EFM audio output directory for: " +
                       audio_path + " (" + ec.message() + ")");
     encoder_.Reset();

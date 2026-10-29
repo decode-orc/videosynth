@@ -156,5 +156,73 @@ class CapturesVariantTest(unittest.TestCase):
         self.assertEqual(gen.expand_captures(variant), [variant])
 
 
+CHANNEL_PRESSING = PRESSING.replace(
+    '\nsections:',
+    '\nchroma_error:\n  gain: 1.05\n\nchannel:\n'
+    '  timing_offset_samples: -0.3  # pressing B\n'
+    '  edge_smear:\n    fraction: 0.1\n    tau_samples: 3.0\n\nsections:')
+
+
+class CaptureOverridesTest(unittest.TestCase):
+
+    def test_chroma_error_replaces_existing_block(self):
+        derived = gen.set_chroma_error(
+            CHANNEL_PRESSING,
+            {'phase_deg': 3.0, 'line_jitter': {'gain': 0.01, 'seed': 5}})
+        self.assertNotIn('gain: 1.05', derived)
+        self.assertIn('chroma_error:\n  phase_deg: 3.0\n  line_jitter:\n'
+                      '    gain: 0.01\n    seed: 5\n\nchannel:', derived)
+
+    def test_chroma_error_is_added_before_sections(self):
+        derived = gen.set_chroma_error(PRESSING, {'gain': 0.9})
+        self.assertIn('chroma_error:\n  gain: 0.9\n\nsections:', derived)
+
+    def test_null_chroma_error_removes_block(self):
+        derived = gen.set_chroma_error(CHANNEL_PRESSING, None)
+        self.assertNotIn('chroma_error', derived)
+        self.assertIn('video_path: "{output}/pressing_A.cvbs"\n\nchannel:',
+                      derived)
+        self.assertEqual(gen.set_chroma_error(PRESSING, None), PRESSING)
+
+    def test_timing_offset_rewrites_key_and_keeps_rest_of_channel(self):
+        derived = gen.set_timing_offset(CHANNEL_PRESSING, 1)
+        self.assertEqual(values_of(derived, 'timing_offset_samples'), ['1.0'])
+        self.assertIn('timing_offset_samples: 1.0  # pressing B', derived)
+        self.assertIn('  edge_smear:\n    fraction: 0.1', derived)
+
+    def test_timing_offset_adds_key_or_channel_block(self):
+        no_key = CHANNEL_PRESSING.replace(
+            '  timing_offset_samples: -0.3  # pressing B\n', '')
+        derived = gen.set_timing_offset(no_key, -1.5)
+        self.assertIn('channel:\n  timing_offset_samples: -1.5\n  edge_smear:',
+                      derived)
+        derived = gen.set_timing_offset(PRESSING, 2.0)
+        self.assertIn('channel:\n  timing_offset_samples: 2.0\n\nsections:',
+                      derived)
+
+    def test_timing_offset_rejects_flow_style_channel(self):
+        flow = PRESSING.replace(
+            '\nsections:', '\nchannel: { timing_offset_samples: 0.5 }\n'
+            '\nsections:')
+        with self.assertRaises(ValueError):
+            gen.set_timing_offset(flow, 1.0)
+
+    def test_capture_entries_apply_overrides(self):
+        variant = {
+            'name': 'captures',
+            'sources': [],
+            'captures': [
+                {'name_suffix': '_a', 'chroma_error': {'gain': 1.2}},
+                {'name_suffix': '_b', 'timing_offset_samples': 1.0},
+            ],
+        }
+        first, second = (gen.derive(CHANNEL_PRESSING, d)
+                         for d in gen.expand_captures(variant))
+        self.assertIn('chroma_error:\n  gain: 1.2', first)
+        self.assertEqual(values_of(first, 'timing_offset_samples'), ['-0.3'])
+        self.assertIn('chroma_error:\n  gain: 1.05', second)
+        self.assertEqual(values_of(second, 'timing_offset_samples'), ['1.0'])
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <map>
 #include <string>
+#include <system_error>
 #include <utility>
 
 #include "videosynth/model.h"
@@ -186,6 +187,14 @@ TEST(PathResolutionTest, ResolvePathAgainstBaseNormalises) {
   EXPECT_EQ(ResolvePathAgainstBase("/a/b", "/abs.exr"), "/abs.exr");
   EXPECT_EQ(ResolvePathAgainstBase("", "c/d.exr"), "c/d.exr");
   EXPECT_EQ(ResolvePathAgainstBase("/a/b", ""), "");
+}
+
+TEST(PathResolutionTest, CreateParentDirectoriesAcceptsBareFileName) {
+  // A bare name has an empty parent path; it lives in the working directory,
+  // so there is nothing to create and no filesystem call is made.
+  std::error_code ec = std::make_error_code(std::errc::io_error);
+  EXPECT_TRUE(CreateParentDirectories("capture.cvbs", &ec));
+  EXPECT_FALSE(ec);
 }
 
 }  // namespace

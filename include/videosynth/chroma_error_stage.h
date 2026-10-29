@@ -26,7 +26,10 @@ namespace videosynth {
 // which scales the subcarrier amplitude by g and advances its phase by t.
 // H{C} is formed from the window's own samples only, so burst and blanking
 // never leak into it. Burst, VITS target lines and VBI lines are untouched,
-// so a burst-locked decoder sees a real hue and saturation error. C is
+// so a burst-locked decoder sees a real hue and saturation error. With
+// include_burst the burst window of every line is rotated as well (a picture
+// line's burst by that line's own error), modelling a whole chroma path that
+// a burst-referenced decoder can correct. C is
 // zero-centred and is not clamped: saturated chroma may legitimately exceed
 // the composite limits, and the output stage quantises it.
 //

@@ -137,7 +137,7 @@ output:
     pair: 0
 ```
 
-The presence of the `efm_audio:` block is what enables it. That pair is produced a second time at exactly 44 100 Hz — the laserdisc digital audio rate (IEC 60856/60857 Amd 2 clause 13.2) — and encoded as an IEC 60908 EFM channel stream. Tones are synthesised directly at 44 100 Hz with no resampling; audio files and video soundtracks are read again and resampled to that rate. Its 48 kHz WAV track and every other pair are untouched; the pair's content is declared only once, in the per-section `audio:` blocks.
+The presence of the `efm_audio:` block is what enables it. That pair is produced a second time at exactly 44 100 Hz — the laserdisc digital audio rate (IEC 60856/60857 Amd 2 clause 13.2) — and encoded as an IEC 60908 EFM channel stream. PAL-M, which no LaserVision standard names, follows the 525-line IEC 60857 definition, as its biphase codes do: the NTSC sample sequence and a 525-line disc identification in the table of contents. Tones are synthesised directly at 44 100 Hz with no resampling; audio files and video soundtracks are read again and resampled to that rate. Its 48 kHz WAV track and every other pair are untouched; the pair's content is declared only once, in the per-section `audio:` blocks.
 
 ### What gets written
 
@@ -167,7 +167,7 @@ Because it depends only on `section_type`, a project can produce a proper EFM di
 | Rule | Severity |
 |------|----------|
 | `pair` must be 0–7 | Error |
-| Standard must be PAL or NTSC — no other system has a laserdisc digital audio specification | Error |
+| Standard must be PAL, NTSC or PAL-M — SECAM has no laserdisc digital audio specification | Error |
 | At most 79 `programme_area` sections (one track each) | Error |
 | No section declares the selected pair → no `.efm` is written | Warning |
 | A `programme_area` section shorter than 4 s (6 s for the first, whose leading 2 s are the mandatory pause) | Warning |

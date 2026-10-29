@@ -414,6 +414,12 @@ QWidget* ProjectSettingsEditor::BuildChromaErrorGroup() {
                                  limits::kChromaPhaseMaxDeg, 2, 0.5, tr("°"));
   chroma_phase_spin_->setToolTip(tr("Chroma phase advance (hue error)."));
   form->addRow(tr("Phase:"), chroma_phase_spin_);
+  chroma_include_burst_check_ = new QCheckBox(tr("Include burst"), body);
+  chroma_include_burst_check_->setToolTip(
+      tr("Apply the error to the colour burst too (a whole chroma path), so a "
+         "burst-referenced decoder can correct it. Off: picture chroma only "
+         "(a mis-adjusted picture chroma path)."));
+  form->addRow(QString(), chroma_include_burst_check_);
   layout->addLayout(form);
 
   chroma_jitter_group_ = new QGroupBox(tr("Per-line jitter"), body);
@@ -456,6 +462,7 @@ QWidget* ProjectSettingsEditor::BuildChromaErrorGroup() {
   connect(chroma_error_group_, &QGroupBox::toggled, this, commit);
   body->setVisible(chroma_error_group_->isChecked());
   connect(chroma_jitter_group_, &QGroupBox::toggled, this, commit);
+  connect(chroma_include_burst_check_, &QCheckBox::toggled, this, commit);
   for (QDoubleSpinBox* spin : {chroma_gain_spin_, chroma_phase_spin_,
                                jitter_phase_spin_, jitter_gain_spin_}) {
     connect(spin, &QDoubleSpinBox::valueChanged, this, commit);
@@ -485,6 +492,7 @@ void ProjectSettingsEditor::LoadChannelAndChromaError(const Project& project) {
   chroma_error_group_->setChecked(chroma_error.enabled);
   chroma_gain_spin_->setValue(chroma_error.gain);
   chroma_phase_spin_->setValue(chroma_error.phase_deg);
+  chroma_include_burst_check_->setChecked(chroma_error.include_burst);
   const ChromaJitterParameters& jitter = chroma_error.line_jitter;
   chroma_jitter_group_->setChecked(jitter.enabled);
   jitter_phase_spin_->setValue(jitter.phase_deg);
@@ -714,8 +722,8 @@ QString ProjectSettingsEditor::EfmStatusText(EfmOutputStatus status) const {
   switch (status) {
     case EfmOutputStatus::kUnsupportedStandard:
       return tr(
-          "LaserDisc digital audio is specified for PAL and NTSC only; "
-          "no “.efm” file is written for this standard.");
+          "LaserDisc digital audio is specified for PAL, NTSC and PAL-M "
+          "only; no “.efm” file is written for this standard.");
     case EfmOutputStatus::kPairOutOfRange:
       return tr("Channel pair %1 is outside the supported range 0–7.")
           .arg(pair);
@@ -988,6 +996,7 @@ void ProjectSettingsEditor::CommitChromaError() {
     SetChromaErrorEnabled(&chroma_error, true);
     chroma_error.gain = chroma_gain_spin_->value();
     chroma_error.phase_deg = chroma_phase_spin_->value();
+    chroma_error.include_burst = chroma_include_burst_check_->isChecked();
     SetChromaJitterEnabled(&chroma_error, chroma_jitter_group_->isChecked());
     if (chroma_jitter_group_->isChecked() && stored.line_jitter.enabled) {
       ChromaJitterParameters& jitter = chroma_error.line_jitter;

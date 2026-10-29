@@ -715,6 +715,10 @@ struct ChromaErrorParameters {
   // Chroma phase advance in degrees. Range [-180, 180].
   double phase_deg = 0.0;
   ChromaJitterParameters line_jitter;
+  // Apply the error to the colour burst as well as the picture chroma: a
+  // whole chroma path (or an FM/MTF loss) rather than a mis-adjusted picture
+  // chroma path that leaves the burst alone.
+  bool include_burst = false;
 };
 
 struct Project {
@@ -908,7 +912,8 @@ inline bool operator==(const ChromaJitterParameters& a,
 inline bool operator==(const ChromaErrorParameters& a,
                        const ChromaErrorParameters& b) {
   return a.enabled == b.enabled && a.gain == b.gain &&
-         a.phase_deg == b.phase_deg && a.line_jitter == b.line_jitter;
+         a.phase_deg == b.phase_deg && a.line_jitter == b.line_jitter &&
+         a.include_burst == b.include_burst;
 }
 
 inline bool operator==(const Project& a, const Project& b) {
@@ -957,18 +962,29 @@ inline std::vector<int> ProjectAudioChannelPairs(const Project& project) {
   return pairs;
 }
 
+// True for the standards that carry LaserDisc digital audio (EFM).
+// IEC 60856:1986 Amd 2 clause 13 defines it for 625-line PAL and
+// IEC 60857:1986 Amd 2 clause 13 for 525-line NTSC. PAL-M discs use the
+// 525-line System M LaserVision structure, as the VBI codes do, so they take
+// the IEC 60857 definition: the frame rate, not the colour system, fixes the
+// EFM timing. SECAM has none.
+inline bool StandardHasLaserdiscDigitalAudio(Standard standard) {
+  return standard == Standard::kPal || standard == Standard::kNtsc ||
+         standard == Standard::kPalM;
+}
+
 // Channel pair carrying LaserDisc digital audio (EFM) output, or -1 when the
 // project emits no EFM track. Output is emitted only when the selection is
 // enabled, the pair is declared by at least one section, and the video standard
-// has a LaserDisc digital audio specification: IEC 60856:1986 Amd 2 clause 13
-// (PAL) and IEC 60857:1986 Amd 2 clause 13 (NTSC) define one; no other standard
-// does. The project validator reports the rejected combinations.
+// has a LaserDisc digital audio specification
+// (StandardHasLaserdiscDigitalAudio). The project validator reports the
+// rejected combinations.
 inline int ProjectEfmAudioPair(const Project& project) {
   if (!project.output.efm_audio.enabled) {
     return -1;
   }
-  const Standard standard = project.cvbs_presets.video_standard_preset;
-  if (standard != Standard::kPal && standard != Standard::kNtsc) {
+  if (!StandardHasLaserdiscDigitalAudio(
+          project.cvbs_presets.video_standard_preset)) {
     return -1;
   }
   const std::vector<int> pairs = ProjectAudioChannelPairs(project);

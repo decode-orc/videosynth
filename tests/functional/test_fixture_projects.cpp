@@ -270,7 +270,7 @@ TEST(ProjectFixturesTest, ProgressiveMkvFixturesParseAndValidate) {
     const ValidationResult validation = validator.Validate(project);
     ASSERT_TRUE(validation.is_valid) << fixture;
 
-    ASSERT_EQ(project.sections.size(), 2U);
+    ASSERT_EQ(project.sections.size(), 3U);
     for (const Section& section : project.sections) {
       EXPECT_EQ(section.type, "progressive");
       EXPECT_TRUE(section.duration_frames_all);

@@ -9,6 +9,8 @@
 
 #pragma once
 
+#include <algorithm>
+#include <cmath>
 #include <stdexcept>
 #include <vector>
 
@@ -73,10 +75,13 @@ inline SyncPulseKind GetSyncPulseKind(Standard standard, int line_1based) {
     // normal burst-carrying line (required for the Figure 8 burst-blanking
     // identification). Line-granular framing yields the regions below; mixed
     // half-line combinations are applied by the generation pulse schedule.
+    // Line 623 starts with a normal line-sync pulse: its picture-carrying
+    // first half ends before the mid-line start of the pre-equalizing
+    // sequence, which the pulse schedule adds.
     if (IsLineInRange(line_1based, 4, 5) ||
         IsLineInRange(line_1based, 311, 313) ||
         IsLineInRange(line_1based, 316, 318) ||
-        IsLineInRange(line_1based, 623, 625)) {
+        IsLineInRange(line_1based, 624, 625)) {
       return SyncPulseKind::kEqualizing;
     }
     if (IsLineInRange(line_1based, 1, 3) ||
@@ -106,11 +111,12 @@ inline SyncPulseKind GetSyncPulseKind(Standard standard, int line_1based) {
 
 inline LineContentKind GetLineContentKind(Standard standard, int line_1based) {
   if (Is625LineStandard(standard)) {
-    // ITU-R BT.1700 Annex 1 Part B Table 1 item 1a: 576 active lines implies
-    // active picture starts at lines 23 and 335 in this line-granular 625-line
-    // PAL model so all 576 source rows land on full active-picture lines.
+    // ITU-R BT.1700 Annex 1 Part B Table 1 item 1a and Table 2 item j: 576
+    // active lines with a 25H + a field-blanking interval place active
+    // picture on lines 23-310 and 336-623 (line 623 on its first half only;
+    // see GetActiveRasterGeometry).
     if (IsLineInRange(line_1based, 16, 22) ||
-        IsLineInRange(line_1based, 319, 334)) {
+        IsLineInRange(line_1based, 319, 335)) {
       return LineContentKind::kVbiBlanking;
     }
     return LineContentKind::kActivePicture;
@@ -169,6 +175,32 @@ inline bool BurstEnabledForLine(Standard standard, SyncPulseKind kind) {
   }
   // Baseline model: burst on normal horizontal lines only.
   return kind == SyncPulseKind::kHorizontal;
+}
+
+// Burst gate start and end, in samples after 0H.
+inline int BurstStartSamples(Standard standard, double sample_rate_hz) {
+  // ITU-R BT.470-6 Table 2 item 2.14g: burst gate start after epoch O_H.
+  // M/NTSC: 5.3 µs nominal; B,G,H,I/PAL: 5.6 µs; M/PAL: 5.8 µs.
+  double start_us = 5.6e-6;
+  if (standard == Standard::kNtsc) {
+    start_us = 5.3e-6;
+  } else if (standard == Standard::kPalM) {
+    start_us = 5.8e-6;
+  }
+  return std::max(0, static_cast<int>(std::lround(sample_rate_hz * start_us)));
+}
+
+inline int BurstEndSamples(Standard standard, double sample_rate_hz) {
+  // ITU-R BT.470-6 Table 2 item 2.14g/h: burst gate end = start + duration.
+  // M/NTSC: 5.3+2.67=7.97 µs; B,G,H,I/PAL: 5.6+2.25=7.85 µs (use 8.0 µs);
+  // M/PAL: 5.8+2.52=8.32 µs.
+  double end_us = 8.0e-6;
+  if (standard == Standard::kNtsc) {
+    end_us = 7.97e-6;
+  } else if (standard == Standard::kPalM) {
+    end_us = 8.32e-6;
+  }
+  return std::max(0, static_cast<int>(std::lround(sample_rate_hz * end_us)));
 }
 
 inline LineTimingPrimitive BuildLineTimingPrimitive(Standard standard,

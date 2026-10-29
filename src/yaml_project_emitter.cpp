@@ -171,6 +171,9 @@ void EmitChromaError(YAML::Emitter& out,
     }
     out << YAML::EndMap;
   }
+  if (chroma_error.include_burst) {
+    out << YAML::Key << "include_burst" << YAML::Value << true;
+  }
   out << YAML::EndMap;
 }
 

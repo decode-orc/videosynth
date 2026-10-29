@@ -89,6 +89,25 @@ TEST(ChromaErrorStageTest, ParserDefaultsOmittedKeys) {
   ASSERT_TRUE(result.ok);
   EXPECT_DOUBLE_EQ(result.project.chroma_error.gain, 1.0);
   EXPECT_FALSE(result.project.chroma_error.line_jitter.enabled);
+  EXPECT_FALSE(result.project.chroma_error.include_burst);
+}
+
+TEST(ChromaErrorStageTest, ParserReadsIncludeBurst) {
+  const ParseResult result = ParseWithChromaError(
+      "chroma_error:\n  gain: 0.9\n  include_burst: true\n");
+  ASSERT_TRUE(result.ok) << result.errors.front();
+  EXPECT_TRUE(result.project.chroma_error.include_burst);
+
+  const ParseResult bad = ParseWithChromaError(
+      "chroma_error:\n  gain: 0.9\n  include_burst: sometimes\n");
+  ASSERT_FALSE(bad.ok);
+  EXPECT_EQ(bad.errors[0], "chroma_error.include_burst must be true or false.");
+}
+
+TEST(ChromaErrorStageTest, ParserRejectsIncludeBurstAlone) {
+  // include_burst only widens where an error applies; it is not an error.
+  EXPECT_FALSE(
+      ParseWithChromaError("chroma_error:\n  include_burst: true\n").ok);
 }
 
 TEST(ChromaErrorStageTest, ParserRejectsEmptyBlocks) {
@@ -292,9 +311,10 @@ ChromaLayout MakeLayout(Standard standard) {
   return layout;
 }
 
-SampleRange ActiveRange(const ChromaLayout& layout) {
+// Picture window of one line; PAL line 623 carries picture on its first half.
+SampleRange ActiveRange(const ChromaLayout& layout, int line_1based) {
   return SampleRange{layout.geometry.active_window_start_samples,
-                     layout.geometry.active_window_end_samples};
+                     ActivePictureEndSamples(layout.geometry, line_1based)};
 }
 
 bool IsPictureLine(const ChromaLayout& layout, int line_1based,
@@ -320,11 +340,11 @@ double ChromaPhase(int line_1based) { return 0.3 + (0.7 * line_1based); }
 std::vector<SampleFixed> MakeChromaFrames(const ChromaLayout& layout,
                                           std::size_t frames) {
   std::vector<SampleFixed> buffer(frames * layout.samples_per_frame);
-  const SampleRange active = ActiveRange(layout);
   for (std::size_t f = 0; f < frames; ++f) {
     SampleFixed* frame = buffer.data() + (f * layout.samples_per_frame);
     for (std::size_t li = 0; li < layout.line_samples.size(); ++li) {
       const int line_1based = static_cast<int>(li) + 1;
+      const SampleRange active = ActiveRange(layout, line_1based);
       const int base = layout.line_offsets[li];
       for (int s = 0; s < layout.line_samples[li]; ++s) {
         // fsc = fs / 4 on every 4fsc standard.
@@ -371,7 +391,7 @@ constexpr int kEdgeMargin = 2 * kChromaHilbertHalfTaps;
 Demodulated DemodulateAgainstBurst(const SampleFixed* frame,
                                    const ChromaLayout& layout,
                                    int line_1based) {
-  const SampleRange active = ActiveRange(layout);
+  const SampleRange active = ActiveRange(layout, line_1based);
   int start = active.start + kEdgeMargin;
   int end = active.end - kEdgeMargin;
   end -= (end - start) % 4;
@@ -459,11 +479,11 @@ TEST(ChromaErrorStageTest, BurstVitsAndBlankingAreBitIdentical) {
     std::vector<SampleFixed> output = input;
     ChromaErrorStage(1U).ApplyChromaError(project, schedule, 0U, 2U, &output);
 
-    const SampleRange active = ActiveRange(layout);
     std::size_t changed_picture_samples = 0;
     for (std::size_t f = 0; f < 2U; ++f) {
       for (std::size_t li = 0; li < layout.line_samples.size(); ++li) {
         const int line_1based = static_cast<int>(li) + 1;
+        const SampleRange active = ActiveRange(layout, line_1based);
         const bool picture = IsPictureLine(layout, line_1based, vits_lines);
         const std::size_t base =
             (f * layout.samples_per_frame) +
@@ -481,6 +501,131 @@ TEST(ChromaErrorStageTest, BurstVitsAndBlankingAreBitIdentical) {
       }
     }
     EXPECT_GT(changed_picture_samples, 0U);
+  }
+}
+
+// Burst window of one line, as the stage widens it.
+SampleRange BurstWindow(const ChromaLayout& layout) {
+  return SampleRange{layout.burst.start - kBurstWindowGuardSamples,
+                     layout.burst.end + kBurstWindowGuardSamples};
+}
+
+TEST(ChromaErrorStageTest, IncludeBurstAppliesErrorToBurstOfEveryLine) {
+  constexpr double kGain = 1.3;
+  constexpr double kPhaseDeg = 20.0;
+  for (Standard standard : {Standard::kPal, Standard::kNtsc, Standard::kPalM}) {
+    const ChromaLayout layout = MakeLayout(standard);
+    Project project = MakeChromaProject(standard);
+    project.chroma_error.gain = kGain;
+    project.chroma_error.phase_deg = kPhaseDeg;
+    project.chroma_error.include_burst = true;
+    const auto schedule = MakeSchedule(project, 1U);
+
+    const std::vector<SampleFixed> input = MakeChromaFrames(layout, 1U);
+    std::vector<SampleFixed> output = input;
+    ChromaErrorStage(1U).ApplyChromaError(project, schedule, 0U, 1U, &output);
+
+    const int burst_start = layout.burst.start + 4;
+    int burst_end = layout.burst.end - 4;
+    burst_end -= (burst_end - burst_start) % 2;
+    const SampleRange burst_window = BurstWindow(layout);
+    for (int line = 1; line <= static_cast<int>(layout.lines.size()); ++line) {
+      // VBI and VITS lines' bursts take the error too, not just picture lines.
+      const std::complex<double> ratio =
+          Phasor(output.data(), layout, line, burst_start, burst_end) /
+          Phasor(input.data(), layout, line, burst_start, burst_end);
+      // The gated burst is short against the Hilbert transformer, so its
+      // rotation is a little less exact than the picture's.
+      ASSERT_NEAR(std::abs(ratio), kGain, 0.03 * kGain)
+          << StandardToString(standard) << " line " << line;
+      ASSERT_NEAR(std::arg(ratio) * 180.0 / kPi, kPhaseDeg, 1.5)
+          << StandardToString(standard) << " line " << line;
+
+      // Outside the burst and picture windows nothing moves.
+      const SampleRange active = ActiveRange(layout, line);
+      const bool picture = IsPictureLine(layout, line, {});
+      const int base = layout.line_offsets[static_cast<std::size_t>(line - 1)];
+      for (int s = 0;
+           s < layout.line_samples[static_cast<std::size_t>(line - 1)]; ++s) {
+        const bool in_burst = s >= burst_window.start && s < burst_window.end;
+        const bool in_picture = picture && s >= active.start && s < active.end;
+        if (!in_burst && !in_picture) {
+          ASSERT_EQ(output[static_cast<std::size_t>(base + s)],
+                    input[static_cast<std::size_t>(base + s)])
+              << StandardToString(standard) << " line " << line << " sample "
+              << s;
+        }
+      }
+    }
+  }
+}
+
+TEST(ChromaErrorStageTest, IncludeBurstKeepsPictureHueAgainstBurst) {
+  // A burst-referenced decoder sees picture and burst move together, even
+  // with per-line jitter: the line's burst takes the line's own error.
+  for (Standard standard : {Standard::kPal, Standard::kNtsc}) {
+    const ChromaLayout layout = MakeLayout(standard);
+    Project project = MakeChromaProject(standard);
+    project.chroma_error.gain = 0.8;
+    project.chroma_error.phase_deg = 15.0;
+    project.chroma_error.include_burst = true;
+    project.chroma_error.line_jitter.enabled = true;
+    project.chroma_error.line_jitter.phase_deg = 3.0;
+    project.chroma_error.line_jitter.gain = 0.05;
+    project.chroma_error.line_jitter.seed = 21;
+    project.chroma_error.line_jitter.seed_specified = true;
+    const auto schedule = MakeSchedule(project, 1U);
+
+    const std::vector<SampleFixed> input = MakeChromaFrames(layout, 1U);
+    std::vector<SampleFixed> output = input;
+    ChromaErrorStage(1U).ApplyChromaError(project, schedule, 0U, 1U, &output);
+
+    for (int line = 1; line <= static_cast<int>(layout.lines.size()); ++line) {
+      if (!IsPictureLine(layout, line, {})) {
+        continue;
+      }
+      const Demodulated before =
+          DemodulateAgainstBurst(input.data(), layout, line);
+      const Demodulated after =
+          DemodulateAgainstBurst(output.data(), layout, line);
+      ASSERT_NEAR(WrapRad(after.phase_rad - before.phase_rad) * 180.0 / kPi,
+                  0.0, 1.0)
+          << StandardToString(standard) << " line " << line;
+    }
+  }
+}
+
+TEST(ChromaErrorStageTest, IncludeBurstLeavesPictureErrorUnchanged) {
+  // Turning include_burst on changes the bursts only: the picture chroma,
+  // jitter included, is bit-identical.
+  const ChromaLayout layout = MakeLayout(Standard::kPal);
+  Project project = MakeChromaProject(Standard::kPal);
+  project.chroma_error.gain = 1.1;
+  project.chroma_error.line_jitter.enabled = true;
+  project.chroma_error.line_jitter.gain = 0.02;
+  project.chroma_error.line_jitter.seed = 4;
+  project.chroma_error.line_jitter.seed_specified = true;
+  const auto schedule = MakeSchedule(project, 1U);
+  const std::vector<SampleFixed> input = MakeChromaFrames(layout, 1U);
+
+  std::vector<SampleFixed> picture_only = input;
+  ChromaErrorStage(1U).ApplyChromaError(project, schedule, 0U, 1U,
+                                        &picture_only);
+  project.chroma_error.include_burst = true;
+  std::vector<SampleFixed> with_burst = input;
+  ChromaErrorStage(1U).ApplyChromaError(project, schedule, 0U, 1U, &with_burst);
+
+  const SampleRange burst_window = BurstWindow(layout);
+  for (std::size_t li = 0; li < layout.line_samples.size(); ++li) {
+    for (int s = 0; s < layout.line_samples[li]; ++s) {
+      if (s >= burst_window.start && s < burst_window.end) {
+        continue;
+      }
+      const std::size_t idx =
+          static_cast<std::size_t>(layout.line_offsets[li]) +
+          static_cast<std::size_t>(s);
+      ASSERT_EQ(with_burst[idx], picture_only[idx]) << "line " << li + 1;
+    }
   }
 }
 
@@ -625,7 +770,7 @@ TEST(ChromaErrorStageTest, AmplifiedChromaIsNotClampedToCompositeBounds) {
   const auto schedule = MakeSchedule(project, 1U);
 
   const int line = layout.geometry.first_active_line_field1 + 10;
-  const SampleRange active = ActiveRange(layout);
+  const SampleRange active = ActiveRange(layout, line);
   std::vector<SampleFixed> buffer(layout.samples_per_frame, 0);
   const std::size_t start =
       static_cast<std::size_t>(

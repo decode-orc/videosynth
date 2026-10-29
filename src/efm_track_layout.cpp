@@ -87,17 +87,18 @@ bool BuildEfmTrackLayout(
   }
   *layout = EfmTrackLayout{};
 
-  // IEC 60856:1986 Amd 2 clause 13 (PAL) and IEC 60857:1986 Amd 2 clause 13
-  // (NTSC) are the only LaserDisc digital audio specifications.
-  if (standard != Standard::kPal && standard != Standard::kNtsc) {
+  if (!StandardHasLaserdiscDigitalAudio(standard)) {
     errors->push_back(
-        "EFM audio is only defined for the PAL and NTSC video standards.");
+        "EFM audio is only defined for the PAL, NTSC and PAL-M video "
+        "standards.");
     return false;
   }
   if (output_frame_sections.empty()) {
     errors->push_back("EFM audio requires at least one output frame.");
     return false;
   }
+  // PAL-M discs are 525-line LaserVision discs (IEC 60857), identified as
+  // such in the lead-in TOC.
   layout->table.video_system = standard == Standard::kPal
                                    ? efm::VideoSystem::kPal
                                    : efm::VideoSystem::kNtsc;

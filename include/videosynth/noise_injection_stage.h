@@ -44,10 +44,14 @@ namespace videosynth {
 //   depends on section index or output position, so every capture of one
 //   pressing carries identical pressing noise on the same picture.
 //
-// Both layers are summed and a single noise value is applied to both Y and C
-// at each sample position, producing correlated Y/C noise that matches real
-// analogue sources. Y is then clamped to the legal composite range; C is
-// zero-centred and is left for the output stage, which clamps Y + C.
+// Both layers are summed into a single noise value per sample position, so
+// noise_db is the level of each output signal. On Y/C output
+// (output.signal_type "yc") the value is applied to both Y and C, producing
+// correlated Y/C noise that matches real analogue sources. On composite
+// output it is applied to Y only: the output is Y + C, and adding it to both
+// would double the composite noise. Y is then clamped to the legal composite
+// range; C is zero-centred and is left for the output stage, which clamps
+// Y + C.
 //
 // Capture seeding: by default a random base seed is captured from
 // std::random_device at construction time, so each run of the same project

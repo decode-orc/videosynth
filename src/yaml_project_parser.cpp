@@ -532,7 +532,8 @@ bool ParseChromaError(const YAML::Node& root, Project* project,
     return false;
   }
 
-  const std::set<std::string> keys = {"gain", "phase_deg", "line_jitter"};
+  const std::set<std::string> keys = {"gain", "phase_deg", "line_jitter",
+                                      "include_burst"};
   ValidateAllowedKeys(node, keys, "chroma_error", errors);
   if (!errors->empty()) {
     return false;
@@ -558,6 +559,14 @@ bool ParseChromaError(const YAML::Node& root, Project* project,
       !ParseChromaJitter(node["line_jitter"], &chroma_error.line_jitter,
                          errors)) {
     return false;
+  }
+  if (node["include_burst"]) {
+    try {
+      chroma_error.include_burst = node["include_burst"].as<bool>();
+    } catch (const YAML::Exception&) {
+      errors->push_back("chroma_error.include_burst must be true or false.");
+      return false;
+    }
   }
   chroma_error.enabled = true;
   return true;

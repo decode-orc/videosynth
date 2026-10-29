@@ -238,8 +238,8 @@ inline int AudioSamplesForFrame(Standard standard, std::int64_t frame_index) {
 inline double EfmAudioSampleRateHz() { return 44100.0; }
 
 // Number of 44.1 kHz EFM audio samples carried by stored video frame
-// `frame_index` (zero-based, in output order). Only PAL and NTSC define
-// LaserDisc digital audio; other standards are rejected.
+// `frame_index` (zero-based, in output order). Standards without LaserDisc
+// digital audio (StandardHasLaserdiscDigitalAudio) are rejected.
 //
 // PAL is a constant 1764 samples/frame (1764/625 x fH over 25 frames/s is
 // exact, IEC 60856-1986 Amd 2 13.2). NTSC follows the SMPTE 272M-1994 Section
@@ -247,7 +247,7 @@ inline double EfmAudioSampleRateHz() { return 44100.0; }
 // carrying 147 147 samples, where audio frame numbers (1-based within the
 // sequence, frame number 1 at output frame 0) are 1472 samples for odd frames
 // and 1471 for even frames, except frame numbers 23, 47 and 71 which carry
-// 1471.
+// 1471. PAL-M shares the NTSC frame rate and takes the same sequence.
 inline int EfmAudioSamplesForFrame(Standard standard,
                                    std::int64_t frame_index) {
   if (frame_index < 0) {
@@ -257,7 +257,7 @@ inline int EfmAudioSamplesForFrame(Standard standard,
   if (standard == Standard::kPal) {
     return 1764;
   }
-  if (standard == Standard::kNtsc) {
+  if (standard == Standard::kNtsc || standard == Standard::kPalM) {
     // SMPTE 272M-1994 Section 14.3 Table 1: 44.1 kHz, frame sequence 100.
     const std::int64_t frame_number = (frame_index % 100) + 1;
     if (frame_number % 2 == 0) {

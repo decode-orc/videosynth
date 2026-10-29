@@ -149,8 +149,16 @@ TEST(TimingConstantsTest, AnyHundredNtscEfmFramesCarry147147Samples) {
   }
 }
 
+TEST(TimingConstantsTest, PalMEfmAudioFollowsTheNtscSequence) {
+  for (std::int64_t frame = 0; frame < 200; ++frame) {
+    EXPECT_EQ(EfmAudioSamplesForFrame(Standard::kPalM, frame),
+              EfmAudioSamplesForFrame(Standard::kNtsc, frame))
+        << frame;
+  }
+}
+
 TEST(TimingConstantsTest, EfmAudioRejectsStandardsWithoutLaserDiscAudio) {
-  EXPECT_THROW(EfmAudioSamplesForFrame(Standard::kPalM, 0),
+  EXPECT_THROW(EfmAudioSamplesForFrame(Standard::kSecam, 0),
                std::invalid_argument);
   EXPECT_THROW(EfmAudioSamplesForFrame(Standard::kUnknown, 0),
                std::invalid_argument);

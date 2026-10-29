@@ -562,6 +562,9 @@ TestContext MakeTestContext(Standard standard, bool noise_enabled,
   ctx.project.cvbs_presets.signal_state_preset = "STANDARD_STABLE_LOCKED";
   ctx.project.output.video_path = "/tmp/noise_stage_test.cvbs";
   ctx.project.output.metadata_path = "/tmp/noise_stage_test.meta";
+  // Y/C output carries the noise on both channels, which most tests inspect;
+  // the composite behaviour has its own tests.
+  ctx.project.output.signal_type = "yc";
 
   Section section;
   section.name = "Test";
@@ -710,6 +713,55 @@ TEST(NoiseInjectionTest, YAndCNoiseAreEqualPerSampleAtBlanking) {
   for (std::size_t i = 0; i < n; ++i) {
     ASSERT_EQ(y_full[i], c_full[i]) << "Mismatch at sample " << i;
   }
+}
+
+TEST(NoiseInjectionTest, CompositeOutputAddsNoiseToLumaOnly) {
+  NullLogger logger;
+  NoiseInjectionStage stage(&logger);
+
+  // Composite output is Y + C: the noise must reach it once, at noise_db.
+  auto ctx = MakeTestContext(Standard::kPal, true, 40.0, 0.0);
+  ctx.project.output.signal_type = "composite";
+
+  const std::size_t n =
+      static_cast<std::size_t>(SamplesPerFrame4fsc(Standard::kPal));
+  std::vector<SampleFixed> y(n, MillivoltsToSampleFixed(0.0));
+  std::vector<SampleFixed> c(n, MillivoltsToSampleFixed(0.0));
+  const std::vector<SampleFixed> c_orig = c;
+
+  stage.InjectNoise(ctx.project, ctx.schedule, 0, 1, &y, &c);
+
+  EXPECT_EQ(c, c_orig);
+  std::vector<SampleFixed> composite(n);
+  for (std::size_t i = 0; i < n; ++i) {
+    composite[i] = y[i] + c[i];
+  }
+  // sigma_f_mV = 100 / 10^(40/20) IRE * 7.0 mV/IRE = 7.0 mV.
+  EXPECT_NEAR(ComputeStdDevMv(composite, 0.0), 7.0, 7.0 * 0.02);
+}
+
+TEST(NoiseInjectionTest, CompositeOutputAddsSharedNoiseToLumaOnly) {
+  NullLogger logger;
+  NoiseInjectionStage stage(&logger);
+
+  auto ctx = MakeTestContext(Standard::kPal, false, 40.0, 0.0);
+  ctx.project.output.signal_type = "composite";
+  NoiseParameters& noise = ctx.project.sections[0].noise;
+  noise.shared.enabled = true;
+  noise.shared.noise_db = 40.0;
+  noise.shared.noise_seed = 7;
+  noise.shared.noise_seed_specified = true;
+
+  const std::size_t n =
+      static_cast<std::size_t>(SamplesPerFrame4fsc(Standard::kPal));
+  std::vector<SampleFixed> y(n, MillivoltsToSampleFixed(0.0));
+  std::vector<SampleFixed> c(n, MillivoltsToSampleFixed(0.0));
+  const std::vector<SampleFixed> c_orig = c;
+
+  stage.InjectNoise(ctx.project, ctx.schedule, 0, 1, &y, &c);
+
+  EXPECT_EQ(c, c_orig);
+  EXPECT_NEAR(ComputeStdDevMv(y, 0.0), 7.0, 7.0 * 0.02);
 }
 
 TEST(NoiseInjectionTest, ProportionalNoiseIncreasesNoiseAtWhiteLevel) {
@@ -916,6 +968,7 @@ TEST(NoiseInjectionTest, WhiteCaptureNoiseMatchesLegacyImplementation) {
   Project project;
   project.cvbs_presets.video_standard_preset = Standard::kPal;
   project.cvbs_presets.sample_encoding_preset = "CVBS_U10_4FSC";
+  project.output.signal_type = "yc";
   for (int s = 0; s < 2; ++s) {
     Section section;
     section.name = "S" + std::to_string(s);
@@ -1095,6 +1148,7 @@ Project MakeSharedOnlyProject(std::size_t section_count) {
   Project project;
   project.cvbs_presets.video_standard_preset = Standard::kPal;
   project.cvbs_presets.sample_encoding_preset = "CVBS_U10_4FSC";
+  project.output.signal_type = "yc";
   for (std::size_t s = 0; s < section_count; ++s) {
     Section section;
     section.name = "S" + std::to_string(s);

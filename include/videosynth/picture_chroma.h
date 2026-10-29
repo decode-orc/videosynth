@@ -50,7 +50,12 @@ void HilbertTransformWindow(const std::vector<double>& kernel,
 struct PictureLineWindow {
   std::size_t start = 0;
   std::size_t count = 0;
+  int line_1based = 0;
 };
+
+// Samples kept either side of the burst gate in a burst window, so a burst
+// moved by the channel's largest timing offset (8 samples) stays inside it.
+constexpr int kBurstWindowGuardSamples = 8;
 
 // Picture lines of one 4fsc frame in frame order: the active window of every
 // horizontal-sync active picture line of the active raster, less any line a
@@ -59,5 +64,12 @@ struct PictureLineWindow {
 // Thread-safety: stateless; safe to call concurrently.
 std::vector<PictureLineWindow> BuildPictureLineWindows(const Project& project,
                                                        Standard standard);
+
+// Burst windows of one 4fsc frame, one per frame line in frame order: the
+// burst gate widened by kBurstWindowGuardSamples on each side. A line that
+// carries no burst on a given frame has zero chroma there.
+//
+// Thread-safety: stateless; safe to call concurrently.
+std::vector<PictureLineWindow> BuildBurstLineWindows(Standard standard);
 
 }  // namespace videosynth

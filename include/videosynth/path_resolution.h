@@ -12,6 +12,7 @@
 
 #include <map>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include "videosynth/model.h"
@@ -86,5 +87,10 @@ std::string ResolvePathAgainstBase(const std::string& base_dir,
 // relative paths keep the working-directory-relative behaviour.
 Project ResolveProjectPaths(Project project, const AssetRootMap& roots,
                             const std::string& project_dir, bool anchor_unset);
+
+// Creates the directories that will hold `file_path`. A bare file name lives
+// in the working directory, so it has no parent to create and succeeds. On
+// failure returns false and sets `ec`.
+bool CreateParentDirectories(const std::string& file_path, std::error_code* ec);
 
 }  // namespace videosynth
