@@ -3,7 +3,8 @@
  * Module:      gui_tests
  * Purpose:     Functional tests: the preview service's default synthesizer
  *              reproduces the pipeline's frame output for real colour-bar
- *              content with correct raster geometry
+ *              content with correct raster geometry, including the channel,
+ *              chroma error and luma bandwidth impairments
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -24,6 +25,11 @@
 
 #include "preview_frame_service.h"
 #include "preview_render.h"
+#include "project_document.h"
+#include "project_settings_presenter.h"
+#include "section_block_presenters.h"
+#include "videosynth/channel_stage.h"
+#include "videosynth/chroma_error_stage.h"
 #include "videosynth/generation_stage.h"
 #include "videosynth/model.h"
 #include "videosynth/timing_constants.h"
@@ -143,6 +149,83 @@ TEST(PreviewFunctionalTest, DefaultSynthesizerMatchesGenerationStageOutput) {
   ASSERT_TRUE(PumpUntil([&] { return second_frame != nullptr; }, 30000));
   EXPECT_EQ(second_frame->output_frame_index, 1U);
   EXPECT_EQ(second_frame->y_mv.size(), reference_y.size());
+}
+
+// Requests output frame 0 and waits for it.
+std::shared_ptr<const PreviewFrameData> PreviewFirstFrame(
+    const Project& project) {
+  PreviewFrameService service;
+  service.SetProject(project);
+  std::shared_ptr<const PreviewFrameData> frame;
+  QString failure_message;
+  QObject::connect(&service, &PreviewFrameService::FrameReady,
+                   [&frame](std::shared_ptr<const PreviewFrameData> ready) {
+                     frame = std::move(ready);
+                   });
+  QObject::connect(&service, &PreviewFrameService::PreviewFailed,
+                   [&failure_message](quint64, const QString& message) {
+                     failure_message = message;
+                   });
+  service.RequestFrame(0, {});
+  EXPECT_TRUE(PumpUntil(
+      [&] { return frame != nullptr || !failure_message.isEmpty(); }, 30000));
+  EXPECT_TRUE(failure_message.isEmpty()) << failure_message.toStdString();
+  return frame;
+}
+
+// Edits made through the editors' document commands reach the preview: each
+// fires DocumentChanged (which drives the preview pane's debounced refresh),
+// and the refreshed frame carries the channel, chroma error and luma
+// bandwidth exactly as the pipeline applies them.
+TEST(PreviewFunctionalTest, ImpairmentEditsAreReflectedInThePreview) {
+  const Project clean = MakeColourBarProject(
+      Standard::kPal,
+      AssetPath("videosynth-assets/assets/exr/720x576/75_BARS.exr"));
+  ProjectDocument document;
+  document.ResetProject(clean, QString());
+  int document_changes = 0;
+  QObject::connect(&document, &ProjectDocument::DocumentChanged,
+                   [&document_changes] { ++document_changes; });
+
+  ChannelParameters channel = document.project().channel;
+  SetChannelEnabled(&channel, true);
+  channel.timing_offset_samples = 0.25;
+  SetEdgeSmearEnabled(&channel, true);
+  SetFmBeatEnabled(&channel, true);
+  ASSERT_TRUE(document.SetChannel(channel));
+  ChromaErrorParameters chroma_error = document.project().chroma_error;
+  SetChromaErrorEnabled(&chroma_error, true);
+  chroma_error.gain = 0.9;
+  chroma_error.phase_deg = 5.0;
+  ASSERT_TRUE(document.SetChromaError(chroma_error));
+  Section section = document.project().sections[0];
+  SetLumaBandwidthEnabled(&section, true);
+  ASSERT_TRUE(document.SetSection(0, section));
+  EXPECT_EQ(document_changes, 3);
+
+  const Project& impaired = document.project();
+  const std::shared_ptr<const PreviewFrameData> clean_frame =
+      PreviewFirstFrame(clean);
+  const std::shared_ptr<const PreviewFrameData> frame =
+      PreviewFirstFrame(impaired);
+  ASSERT_NE(clean_frame, nullptr);
+  ASSERT_NE(frame, nullptr);
+  EXPECT_NE(frame->y_mv, clean_frame->y_mv);
+  EXPECT_NE(frame->c_mv, clean_frame->c_mv);
+
+  GenerationStage generation;
+  std::vector<IGenerationStage::FrameScheduleItem> schedule;
+  std::vector<std::string> errors;
+  ASSERT_TRUE(generation.BuildFrameSchedule(impaired, &schedule, &errors));
+  std::vector<SampleFixed> reference_y;
+  std::vector<SampleFixed> reference_c;
+  ASSERT_TRUE(generation.GenerateFrameBatch(
+      impaired, schedule, 0, 1, &reference_y, &reference_c, &errors));
+  ChannelStage().ApplyChannel(impaired, schedule, 0, 1, &reference_y,
+                              &reference_c);
+  ChromaErrorStage().ApplyChromaError(impaired, schedule, 0, 1, &reference_c);
+  EXPECT_EQ(frame->y_mv, reference_y);
+  EXPECT_EQ(frame->c_mv, reference_c);
 }
 
 }  // namespace

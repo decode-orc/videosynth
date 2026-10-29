@@ -27,6 +27,7 @@ EditProjectDialog::EditProjectDialog(const Project& project, QWidget* parent)
   auto* layout = new QVBoxLayout(this);
 
   auto* scroll = new QScrollArea(this);
+  scroll_ = scroll;
   scroll->setWidgetResizable(true);
   scroll->setFrameShape(QFrame::NoFrame);
   auto* content = new QWidget(scroll);
@@ -48,6 +49,23 @@ EditProjectDialog::EditProjectDialog(const Project& project, QWidget* parent)
   layout->addWidget(buttons);
 
   resize(560, 680);
+}
+
+void EditProjectDialog::RevealField(IssueField field) {
+  QWidget* group = settings_editor_->FieldGroup(field);
+  if (group == nullptr) {
+    return;
+  }
+  if (!isVisible()) {
+    // Called before exec(): scroll once the dialog is shown and laid out.
+    QMetaObject::invokeMethod(
+        this, [this, field] { RevealField(field); }, Qt::QueuedConnection);
+    return;
+  }
+  scroll_->ensureWidgetVisible(group);
+  QWidget* focus = settings_editor_->FieldFocusWidget(field);
+  (focus != nullptr && focus->isVisible() ? focus : group)
+      ->setFocus(Qt::OtherFocusReason);
 }
 
 }  // namespace videosynth::gui

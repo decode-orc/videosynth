@@ -123,6 +123,57 @@ void EmitOutputTargets(YAML::Emitter& out, const OutputTargets& output) {
   out << YAML::EndMap;
 }
 
+void EmitChannel(YAML::Emitter& out, const ChannelParameters& channel) {
+  if (!channel.enabled) {
+    return;
+  }
+  out << YAML::Key << "channel" << YAML::Value << YAML::BeginMap;
+  // The block must set at least one key, so a zero offset is written when
+  // nothing else is.
+  if (channel.timing_offset_samples != 0.0 ||
+      (!channel.edge_smear.enabled && !channel.fm_beat.enabled)) {
+    out << YAML::Key << "timing_offset_samples" << YAML::Value
+        << channel.timing_offset_samples;
+  }
+  if (channel.edge_smear.enabled) {
+    out << YAML::Key << "edge_smear" << YAML::Value << YAML::BeginMap;
+    out << YAML::Key << "fraction" << YAML::Value
+        << channel.edge_smear.fraction;
+    out << YAML::Key << "tau_samples" << YAML::Value
+        << channel.edge_smear.tau_samples;
+    out << YAML::EndMap;
+  }
+  if (channel.fm_beat.enabled) {
+    out << YAML::Key << "fm_beat" << YAML::Value << YAML::BeginMap;
+    out << YAML::Key << "carrier_black_hz" << YAML::Value
+        << channel.fm_beat.carrier_black_hz;
+    out << YAML::Key << "level_db" << YAML::Value << channel.fm_beat.level_db;
+    out << YAML::EndMap;
+  }
+  out << YAML::EndMap;
+}
+
+void EmitChromaError(YAML::Emitter& out,
+                     const ChromaErrorParameters& chroma_error) {
+  if (!chroma_error.enabled) {
+    return;
+  }
+  out << YAML::Key << "chroma_error" << YAML::Value << YAML::BeginMap;
+  out << YAML::Key << "gain" << YAML::Value << chroma_error.gain;
+  out << YAML::Key << "phase_deg" << YAML::Value << chroma_error.phase_deg;
+  const ChromaJitterParameters& jitter = chroma_error.line_jitter;
+  if (jitter.enabled) {
+    out << YAML::Key << "line_jitter" << YAML::Value << YAML::BeginMap;
+    out << YAML::Key << "phase_deg" << YAML::Value << jitter.phase_deg;
+    out << YAML::Key << "gain" << YAML::Value << jitter.gain;
+    if (jitter.seed_specified) {
+      out << YAML::Key << "seed" << YAML::Value << jitter.seed;
+    }
+    out << YAML::EndMap;
+  }
+  out << YAML::EndMap;
+}
+
 void EmitLineInjectionCode(YAML::Emitter& out,
                            const Section::LineInjectionCode& code) {
   out << YAML::BeginMap;
@@ -168,10 +219,23 @@ void EmitLineInjections(YAML::Emitter& out, const Section& section) {
   out << YAML::EndSeq;
 }
 
+void EmitNoiseSpectrum(YAML::Emitter& out,
+                       const std::vector<NoiseSpectrumPoint>& spectrum) {
+  if (spectrum.empty()) {
+    return;
+  }
+  out << YAML::Key << "spectrum" << YAML::Value << YAML::BeginSeq;
+  for (const NoiseSpectrumPoint& point : spectrum) {
+    out << YAML::Flow << YAML::BeginSeq << point.frequency_mhz
+        << point.relative_db << YAML::EndSeq;
+  }
+  out << YAML::EndSeq;
+}
+
 void EmitNoise(YAML::Emitter& out, const NoiseParameters& noise) {
-  // The block exists when noise is enabled (noise_db was given) or a bare
-  // seed was specified; both states must survive the round-trip.
-  if (!noise.enabled && !noise.noise_seed_specified) {
+  // The block exists when either layer is present (noise_db was given) or a
+  // bare seed was specified; every state must survive the round-trip.
+  if (!noise.enabled && !noise.noise_seed_specified && !noise.shared.enabled) {
     return;
   }
 
@@ -185,6 +249,33 @@ void EmitNoise(YAML::Emitter& out, const NoiseParameters& noise) {
   }
   if (noise.noise_seed_specified) {
     out << YAML::Key << "noise_seed" << YAML::Value << noise.noise_seed;
+  }
+  if (noise.enabled) {
+    EmitNoiseSpectrum(out, noise.spectrum);
+  }
+  if (noise.shared.enabled) {
+    out << YAML::Key << "shared" << YAML::Value << YAML::BeginMap;
+    out << YAML::Key << "noise_db" << YAML::Value << noise.shared.noise_db;
+    if (noise.shared.noise_seed_specified) {
+      out << YAML::Key << "noise_seed" << YAML::Value
+          << noise.shared.noise_seed;
+    }
+    EmitNoiseSpectrum(out, noise.shared.spectrum);
+    out << YAML::EndMap;
+  }
+  out << YAML::EndMap;
+}
+
+void EmitLumaBandwidth(YAML::Emitter& out,
+                       const LumaBandwidthParameters& luma_bandwidth) {
+  if (!luma_bandwidth.enabled) {
+    return;
+  }
+  out << YAML::Key << "luma_bandwidth" << YAML::Value << YAML::BeginMap;
+  out << YAML::Key << "cutoff_mhz" << YAML::Value << luma_bandwidth.cutoff_mhz;
+  if (luma_bandwidth.transition_mhz != kLumaBandwidthTransitionDefaultMhz) {
+    out << YAML::Key << "transition_mhz" << YAML::Value
+        << luma_bandwidth.transition_mhz;
   }
   out << YAML::EndMap;
 }
@@ -200,6 +291,12 @@ void EmitDropoutBlock(YAML::Emitter& out, const char* key,
   out << YAML::Key << "scale" << YAML::Value << block.scale;
   if (block.seed_specified) {
     out << YAML::Key << "seed" << YAML::Value << block.seed;
+  }
+  if (!block.flagged) {
+    out << YAML::Key << "flagged" << YAML::Value << false;
+  }
+  if (block.anchor == DropoutAnchor::kDisc) {
+    out << YAML::Key << "anchor" << YAML::Value << "disc";
   }
   out << YAML::EndMap;
 }
@@ -363,6 +460,7 @@ void EmitSection(YAML::Emitter& out, const Section& section) {
     out << YAML::Key << "end_frame" << YAML::Value << section.end_frame;
   }
   EmitLineInjections(out, section);
+  EmitLumaBandwidth(out, section.luma_bandwidth);
   EmitNoise(out, section.noise);
   EmitDropouts(out, section.dropouts);
   EmitOsd(out, section.osd);
@@ -385,6 +483,8 @@ std::string YamlProjectEmitter::EmitString(const Project& project) const {
   EmitCvbsPresets(out, project.cvbs_presets);
   EmitOutputTargets(out, project.output);
   EmitProjectLineInjections(out, project.line_injections);
+  EmitChannel(out, project.channel);
+  EmitChromaError(out, project.chroma_error);
 
   out << YAML::Key << "sections" << YAML::Value << YAML::BeginSeq;
   for (const Section& section : project.sections) {

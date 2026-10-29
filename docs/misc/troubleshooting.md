@@ -6,7 +6,7 @@ Common validation errors and what to do about each.
 
 ### `Top-level YAML contains unsupported field: 'x'`
 
-Only five top-level blocks exist: `project`, `cvbs_presets`, `output`, `line_injections` and `sections`. Check for a typo, or for a key that belongs one level deeper.
+Only seven top-level blocks exist: `project`, `cvbs_presets`, `output`, `line_injections`, `channel`, `chroma_error` and `sections`. Check for a typo, or for a key that belongs one level deeper.
 
 The same message shape appears for every block — `section contains unsupported field: 'duration_frame'`, `cvbs_presets contains unsupported field: 'field_order'`. Unknown keys are always errors, never silently ignored.
 
@@ -185,13 +185,53 @@ You have set `start_value: 1` on `picture_number` in a later section, which re-a
 
 ## Impairments
 
+### `channel block must set at least one of: timing_offset_samples`
+
+An empty `channel:` block configures nothing. Omit the block for an ideal channel, or set `timing_offset_samples`.
+
+### `timing_offset_samples must be in the range [-8.0, 8.0]`
+
+The offset is meant for sub-sample and few-sample alignment errors between pressings. Larger shifts are not a timing impairment; change the content instead. See [channel](../reference/channel.md).
+
+### `chroma_error block must set at least one of: gain, phase_deg, line_jitter`
+
+An empty `chroma_error:` block configures nothing. Omit the block for an error-free chroma path. The same applies to an empty `line_jitter:`, which must set its `phase_deg` or `gain`; a `seed` alone draws nothing.
+
+### `Chroma error validation error: … must be in the range …`
+
+The ranges model a mis-adjusted but working player: half to one and a half times saturation, any hue, and per-line jitter up to 10° and 0.1 gain. See [chroma_error](../reference/chroma-error.md).
+
+### `chroma_error is not supported for SECAM`
+
+SECAM carries its colour as frequency-modulated subcarriers, with no quadrature chroma to rotate. Remove the `chroma_error:` block from SECAM projects.
+
 ### `noise_spread_db requires noise_db to be specified`
 
 `noise_spread_db` is relative to the floor, so it needs one. Add `noise_db`.
 
+### `spectrum requires noise_db to be specified`
+
+A top-level `spectrum` shapes the capture layer, which only exists when `noise_db` is set. Add `noise_db`, or move the table under `shared:` if it describes the pressing.
+
 ### Noise values out of range
 
-`noise_db` must be 20.0–61.0, and `noise_db − noise_spread_db` must be at least 20.0. Below 20 dB the noise approaches the amplitude of sync; above 61 dB it is smaller than the quantisation floor.
+`noise_db` must be 20.0–61.0, and `noise_db − noise_spread_db` must be at least 20.0. Below 20 dB the noise approaches the amplitude of sync; above 61 dB it is smaller than the quantisation floor. `shared.noise_db` has the same 20.0–61.0 range.
+
+### `spectrum frequency must be in the range` / `strictly ascending` / `relative_db must be in the range`
+
+Spectrum breakpoints run from 0 MHz up to the 4fsc Nyquist frequency (8.867 MHz for PAL, 7.159 MHz for NTSC, 7.151 MHz for PAL-M, whatever the `sample_encoding_preset`), each frequency higher than the one before, with levels between −60 and +40 dB.
+
+### `noise.shared does not take noise_spread_db`
+
+Pressing noise has a constant level so that it is identical in every capture. Remove `noise_spread_db` from `shared:`; level-dependent noise belongs on the capture layer.
+
+### `noise.shared requires noise_db` / `shared.noise_seed is required`
+
+The pressing layer needs a level and a seed. The seed is what makes several captures share the same pressing noise — give every project of one pressing the same value.
+
+### `pressing noise falls back to output position`
+
+A warning. On a CAV disc, a section with `shared:` but no `picture_number` code has no picture number to key its pressing noise on, so it uses the output position instead. Captures that start at different points will not share that section's pressing noise. Add a `picture_number` code, or accept the fallback for lead-in and lead-out sections.
 
 ### `dropouts block has no active type`
 

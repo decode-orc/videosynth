@@ -69,6 +69,10 @@ Every dock can be hidden, floated or rearranged; **View → Panels** toggles the
 - **CVBS Presets** — video standard, sample encoding, signal state, and the standard-specific options (PAL pilot burst, NTSC VBI burst, NTSC black setup override, SECAM field identification). The NTSC VBI burst is not implemented yet: ticking it makes the project fail validation. The signal state follows the standard: `STANDARD_STABLE_UNLOCKED` for [SECAM](video-signal.md#secam-chroma), `STANDARD_STABLE_LOCKED` otherwise. Options that do not apply to the selected standard are disabled rather than hidden.
 - **Output** — video path and signal type, plus the optional EFM digital audio channel-pair selection.
 - **Laserdisc & VITS** — disc format (CAV/CLV), VITS placement policy and the VITS set. SECAM projects have no laserdisc format, so the disc format and laserdisc placement are disabled.
+- **Channel (pressing)** — the [`channel:` block](../reference/channel.md): a sub-sample **timing offset**, plus optional **Edge smear** (fraction and time constant) and **FM beat (herringbone)** (carrier at black and level). These describe the pressing, so every project of one pressing should use the same values. The FM beat is modelled for PAL only and is disabled for other standards.
+- **Chroma error (capture)** — the [`chroma_error:` block](../reference/chroma-error.md): chroma **gain** and **phase**, plus optional **Per-line jitter** (phase and gain deviations, with an optional fixed seed). It is not available for SECAM.
+
+Ticking a group that was off fills in typical values, which you can then edit. Changing the standard in the New Project dialog clears an FM beat or chroma error the new standard cannot carry.
 
 Clicking **Create** asks where to save the project. The file is written as part of creation, so `{project}`-relative paths and the preview always have a real anchor.
 
@@ -109,9 +113,22 @@ The centre pane is a set of collapsible groups covering everything a section hol
 
 **Line injections** — the laserdisc code checklist for this section. See [Laserdisc discs](laserdisc.md).
 
-**Noise injection** — noise floor (Black PSNR), white spread and an optional fixed seed. See [Impairments](impairments.md).
+**Luma bandwidth limit** — a low-pass on the picture luma, set by its **cutoff** (the −6 dB point) and **transition width**. The cutoff's upper limit follows the standard and the transition width. See [Luma bandwidth](impairments.md#luma-bandwidth).
 
-**Dropouts** — random (Poisson) and scratch severity scales, each with an optional fixed seed.
+**Noise injection** — two independent layers. See [Impairments](impairments.md).
+
+- **Capture layer** — noise floor (Black PSNR), white spread, an optional fixed seed and a **Spectrum** table.
+- **Shared (pressing) layer** — noise level, seed and its own **Spectrum** table. The layer is keyed by disc position, so captures that share these settings carry identical pressing noise. It always has a seed; ticking the group sets one.
+
+Each **Spectrum** table lists breakpoints as frequency (MHz) and level (dB). **Add point** appends a point above the last one, and **Remove point** deletes the selected one. An empty table gives white noise.
+
+**Dropouts** — random (Poisson) and scratch dropouts, each with:
+
+- a severity **Scale** and an optional fixed seed;
+- an **Anchor**: *Section (this capture)*, or *Disc (pressing defect)* so every capture of the pressing carries the same events. Choosing *Disc* ticks **Fixed seed** if it was off, because a disc anchor needs one;
+- **Record in dropout sidecar**. Untick it for dropouts that damage the signal but are not recorded, like dropouts a player fails to detect.
+
+See [Pressing defects](impairments.md#pressing-defects-unflagged-and-disc-anchored-dropouts).
 
 **On-screen display** — the overlay list, with text, position, scale and foreground/background luma per overlay. The available substitution tokens are listed beneath the text field.
 
@@ -155,7 +172,7 @@ Frames are cached, so scrubbing back and forth is cheap. When a project edit inv
 
 Validation runs continuously in the background, debounced so typing does not trigger a run per keystroke. The Issues dock lists every error and warning; the status bar summarises as *Project valid* or *n error(s), m warning(s)*.
 
-Double-clicking an issue selects the section it relates to; for a project-level issue it opens **Edit Project…**.
+Double-clicking an issue selects the section it relates to and scrolls to the group the issue names: luma bandwidth, the capture or shared noise layer, or random or scratch dropouts. For a project-level issue it opens **Edit Project…**, scrolled to the **Channel** or **Chroma error** group when the issue is about one of them.
 
 Errors block generation. Warnings do not — they flag things that are legal but probably not what you meant, such as a scratch whose lifespan is longer than the section it lives in.
 

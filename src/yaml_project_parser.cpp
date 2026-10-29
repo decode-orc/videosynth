@@ -95,6 +95,76 @@ bool ParseDurationFrames(const YAML::Node& section_node, Section* section,
   return true;
 }
 
+// Parses a noise `spectrum:` table: a sequence of [MHz, relative dB] pairs.
+// Value ranges and ordering are checked by the validator.
+bool ParseNoiseSpectrum(const YAML::Node& spectrum_node,
+                        const std::string& context,
+                        std::vector<NoiseSpectrumPoint>* spectrum,
+                        std::vector<std::string>* errors) {
+  if (!spectrum_node.IsSequence()) {
+    errors->push_back(context +
+                      " must be a sequence of [frequency_mhz, relative_db] "
+                      "pairs.");
+    return false;
+  }
+  spectrum->clear();
+  for (const YAML::Node& point_node : spectrum_node) {
+    if (!point_node.IsSequence() || point_node.size() != 2U) {
+      errors->push_back(context +
+                        " entries must be [frequency_mhz, relative_db] "
+                        "pairs.");
+      return false;
+    }
+    try {
+      spectrum->push_back(NoiseSpectrumPoint{point_node[0].as<double>(),
+                                             point_node[1].as<double>()});
+    } catch (const YAML::Exception&) {
+      errors->push_back(context + " entries must be numeric pairs.");
+      return false;
+    }
+  }
+  return true;
+}
+
+// Parses the `noise.shared:` pressing-noise layer.
+bool ParseSharedNoise(const YAML::Node& shared_node,
+                      SharedNoiseParameters* shared,
+                      std::vector<std::string>* errors) {
+  if (!shared_node.IsMap()) {
+    errors->push_back("section field 'noise.shared' must be a map/object.");
+    return false;
+  }
+  if (shared_node["noise_spread_db"]) {
+    errors->push_back(
+        "section noise validation error: noise.shared does not take "
+        "noise_spread_db; pressing noise has no level dependence.");
+    return false;
+  }
+  const std::set<std::string> shared_keys = {"noise_db", "noise_seed",
+                                             "spectrum"};
+  if (!ValidateAllowedKeys(shared_node, shared_keys, "section.noise.shared",
+                           errors)) {
+    return false;
+  }
+  if (!shared_node["noise_db"]) {
+    errors->push_back(
+        "section noise validation error: noise.shared requires noise_db.");
+    return false;
+  }
+  shared->enabled = true;
+  shared->noise_db = shared_node["noise_db"].as<double>();
+  if (shared_node["noise_seed"]) {
+    shared->noise_seed = shared_node["noise_seed"].as<int64_t>();
+    shared->noise_seed_specified = true;
+  }
+  if (shared_node["spectrum"]) {
+    return ParseNoiseSpectrum(shared_node["spectrum"],
+                              "section field 'noise.shared.spectrum'",
+                              &shared->spectrum, errors);
+  }
+  return true;
+}
+
 bool ParseLineInjectionCodes(const YAML::Node& codes_node,
                              Section::LineInjection* injection,
                              std::vector<std::string>* errors) {
@@ -210,6 +280,286 @@ bool ParseLineInjections(const YAML::Node& section_node, Section* section,
     section->line_injections.push_back(injection);
   }
 
+  return true;
+}
+
+// Reads one numeric key into *value. Returns false, with an error naming the
+// key, when the value is not a number.
+bool ParseNumber(const YAML::Node& node, const std::string& key,
+                 const std::string& context, double* value,
+                 std::vector<std::string>* errors) {
+  try {
+    *value = node[key].as<double>();
+  } catch (const YAML::Exception&) {
+    errors->push_back(context + "." + key + " must be a number.");
+    return false;
+  }
+  return true;
+}
+
+// Parses `section.luma_bandwidth:`, the per-section luma bandwidth limit.
+bool ParseLumaBandwidth(const YAML::Node& node,
+                        LumaBandwidthParameters* luma_bandwidth,
+                        std::vector<std::string>* errors) {
+  const std::string context = "section.luma_bandwidth";
+  if (!node.IsMap()) {
+    errors->push_back(context + " must be a map/object.");
+    return false;
+  }
+  const std::set<std::string> keys = {"cutoff_mhz", "transition_mhz"};
+  ValidateAllowedKeys(node, keys, context, errors);
+  if (!errors->empty()) {
+    return false;
+  }
+  if (!node["cutoff_mhz"]) {
+    errors->push_back(context + " is missing required field: 'cutoff_mhz'.");
+    return false;
+  }
+  if (!ParseNumber(node, "cutoff_mhz", context, &luma_bandwidth->cutoff_mhz,
+                   errors)) {
+    return false;
+  }
+  if (node["transition_mhz"] &&
+      !ParseNumber(node, "transition_mhz", context,
+                   &luma_bandwidth->transition_mhz, errors)) {
+    return false;
+  }
+  luma_bandwidth->enabled = true;
+  return true;
+}
+
+// Parses one `section.dropouts.random:` or `section.dropouts.scratch:` block.
+template <typename DropoutBlock>
+bool ParseDropoutType(const YAML::Node& node, const std::string& name,
+                      DropoutBlock* block, std::vector<std::string>* errors) {
+  const std::string context = "section.dropouts." + name;
+  if (!node.IsMap()) {
+    errors->push_back(context + " must be a map/object.");
+    return false;
+  }
+  const std::set<std::string> keys = {"scale", "seed", "flagged", "anchor"};
+  ValidateAllowedKeys(node, keys, context, errors);
+  if (!errors->empty()) {
+    return false;
+  }
+  block->scale = node["scale"].as<int>(0);
+  if (block->scale > 0) {
+    block->enabled = true;
+  }
+  if (node["seed"]) {
+    block->seed = node["seed"].as<int64_t>();
+    block->seed_specified = true;
+  }
+  if (node["flagged"]) {
+    try {
+      block->flagged = node["flagged"].as<bool>();
+    } catch (const YAML::Exception&) {
+      errors->push_back(context + ".flagged must be true or false.");
+      return false;
+    }
+  }
+  if (node["anchor"]) {
+    const std::string anchor = node["anchor"].as<std::string>("");
+    if (anchor == "section") {
+      block->anchor = DropoutAnchor::kSection;
+    } else if (anchor == "disc") {
+      block->anchor = DropoutAnchor::kDisc;
+    } else {
+      errors->push_back(context + ".anchor must be 'section' or 'disc'; got '" +
+                        anchor + "'.");
+      return false;
+    }
+  }
+  return true;
+}
+
+// Parses `channel.edge_smear:`, the readout edge smear.
+bool ParseEdgeSmear(const YAML::Node& node, EdgeSmearParameters* edge_smear,
+                    std::vector<std::string>* errors) {
+  if (!node.IsMap()) {
+    errors->push_back("channel.edge_smear must be a map/object.");
+    return false;
+  }
+  const std::set<std::string> keys = {"fraction", "tau_samples"};
+  ValidateAllowedKeys(node, keys, "channel.edge_smear", errors);
+  if (!errors->empty()) {
+    return false;
+  }
+  const std::string context = "channel.edge_smear";
+  for (const std::string& key : keys) {
+    if (!node[key]) {
+      errors->push_back(context + " is missing required field: '" + key + "'.");
+      return false;
+    }
+  }
+  if (!ParseNumber(node, "fraction", context, &edge_smear->fraction, errors) ||
+      !ParseNumber(node, "tau_samples", context, &edge_smear->tau_samples,
+                   errors)) {
+    return false;
+  }
+  edge_smear->enabled = true;
+  return true;
+}
+
+// Parses `channel.fm_beat:`, the PAL FM-beat herringbone.
+bool ParseFmBeat(const YAML::Node& node, FmBeatParameters* fm_beat,
+                 std::vector<std::string>* errors) {
+  if (!node.IsMap()) {
+    errors->push_back("channel.fm_beat must be a map/object.");
+    return false;
+  }
+  const std::set<std::string> keys = {"carrier_black_hz", "level_db"};
+  ValidateAllowedKeys(node, keys, "channel.fm_beat", errors);
+  if (!errors->empty()) {
+    return false;
+  }
+  const std::string context = "channel.fm_beat";
+  if (!node["level_db"]) {
+    errors->push_back(context + " is missing required field: 'level_db'.");
+    return false;
+  }
+  if (!ParseNumber(node, "level_db", context, &fm_beat->level_db, errors)) {
+    return false;
+  }
+  if (node["carrier_black_hz"] &&
+      !ParseNumber(node, "carrier_black_hz", context,
+                   &fm_beat->carrier_black_hz, errors)) {
+    return false;
+  }
+  fm_beat->enabled = true;
+  return true;
+}
+
+// Parses the project-wide `channel:` block: impairments of the pressing that
+// apply to every frame (the FM beat, the edge smear and the sub-sample timing
+// offset).
+bool ParseChannel(const YAML::Node& root, Project* project,
+                  std::vector<std::string>* errors) {
+  if (!root["channel"]) {
+    return true;
+  }
+
+  const YAML::Node node = root["channel"];
+  if (!node.IsMap()) {
+    errors->push_back("Top-level 'channel' must be a map/object.");
+    return false;
+  }
+
+  const std::set<std::string> keys = {"timing_offset_samples", "edge_smear",
+                                      "fm_beat"};
+  ValidateAllowedKeys(node, keys, "channel", errors);
+  if (!errors->empty()) {
+    return false;
+  }
+
+  if (!node["timing_offset_samples"] && !node["edge_smear"] &&
+      !node["fm_beat"]) {
+    errors->push_back(
+        "channel block must set at least one of: timing_offset_samples, "
+        "edge_smear, fm_beat.");
+    return false;
+  }
+
+  ChannelParameters& channel = project->channel;
+  if (node["timing_offset_samples"] &&
+      !ParseNumber(node, "timing_offset_samples", "channel",
+                   &channel.timing_offset_samples, errors)) {
+    return false;
+  }
+  if (node["edge_smear"] &&
+      !ParseEdgeSmear(node["edge_smear"], &channel.edge_smear, errors)) {
+    return false;
+  }
+  if (node["fm_beat"] &&
+      !ParseFmBeat(node["fm_beat"], &channel.fm_beat, errors)) {
+    return false;
+  }
+  channel.enabled = true;
+  return true;
+}
+
+// Parses `chroma_error.line_jitter:`, the per-line Gaussian jitter.
+bool ParseChromaJitter(const YAML::Node& node, ChromaJitterParameters* jitter,
+                       std::vector<std::string>* errors) {
+  if (!node.IsMap()) {
+    errors->push_back("chroma_error.line_jitter must be a map/object.");
+    return false;
+  }
+  const std::set<std::string> keys = {"phase_deg", "gain", "seed"};
+  ValidateAllowedKeys(node, keys, "chroma_error.line_jitter", errors);
+  if (!errors->empty()) {
+    return false;
+  }
+  if (!node["phase_deg"] && !node["gain"]) {
+    errors->push_back(
+        "chroma_error.line_jitter must set at least one of: phase_deg, "
+        "gain.");
+    return false;
+  }
+  const std::string context = "chroma_error.line_jitter";
+  if (node["phase_deg"] &&
+      !ParseNumber(node, "phase_deg", context, &jitter->phase_deg, errors)) {
+    return false;
+  }
+  if (node["gain"] &&
+      !ParseNumber(node, "gain", context, &jitter->gain, errors)) {
+    return false;
+  }
+  if (node["seed"]) {
+    try {
+      jitter->seed = node["seed"].as<int64_t>();
+    } catch (const YAML::Exception&) {
+      errors->push_back("chroma_error.line_jitter.seed must be an integer.");
+      return false;
+    }
+    jitter->seed_specified = true;
+  }
+  jitter->enabled = true;
+  return true;
+}
+
+// Parses the project-wide `chroma_error:` block: the chroma gain and phase
+// error of this capture's player.
+bool ParseChromaError(const YAML::Node& root, Project* project,
+                      std::vector<std::string>* errors) {
+  if (!root["chroma_error"]) {
+    return true;
+  }
+
+  const YAML::Node node = root["chroma_error"];
+  if (!node.IsMap()) {
+    errors->push_back("Top-level 'chroma_error' must be a map/object.");
+    return false;
+  }
+
+  const std::set<std::string> keys = {"gain", "phase_deg", "line_jitter"};
+  ValidateAllowedKeys(node, keys, "chroma_error", errors);
+  if (!errors->empty()) {
+    return false;
+  }
+
+  if (!node["gain"] && !node["phase_deg"] && !node["line_jitter"]) {
+    errors->push_back(
+        "chroma_error block must set at least one of: gain, phase_deg, "
+        "line_jitter.");
+    return false;
+  }
+
+  ChromaErrorParameters& chroma_error = project->chroma_error;
+  if (node["gain"] &&
+      !ParseNumber(node, "gain", "chroma_error", &chroma_error.gain, errors)) {
+    return false;
+  }
+  if (node["phase_deg"] && !ParseNumber(node, "phase_deg", "chroma_error",
+                                        &chroma_error.phase_deg, errors)) {
+    return false;
+  }
+  if (node["line_jitter"] &&
+      !ParseChromaJitter(node["line_jitter"], &chroma_error.line_jitter,
+                         errors)) {
+    return false;
+  }
+  chroma_error.enabled = true;
   return true;
 }
 
@@ -440,7 +790,8 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
     }
 
     const std::set<std::string> root_keys = {
-        "project", "cvbs_presets", "output", "line_injections", "sections"};
+        "project", "cvbs_presets", "output",  "line_injections",
+        "channel", "chroma_error", "sections"};
     ValidateAllowedKeys(root, root_keys, "Top-level YAML", &result.errors);
     if (!result.errors.empty()) {
       return result;
@@ -550,6 +901,14 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
       return result;
     }
 
+    if (!ParseChannel(root, &result.project, &result.errors)) {
+      return result;
+    }
+
+    if (!ParseChromaError(root, &result.project, &result.errors)) {
+      return result;
+    }
+
     for (const YAML::Node& section_node : root["sections"]) {
       if (!section_node.IsMap()) {
         result.errors.push_back("Each section entry must be a map/object.");
@@ -565,6 +924,7 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
                                                   "source",
                                                   "start_frame",
                                                   "end_frame",
+                                                  "luma_bandwidth",
                                                   "noise",
                                                   "dropouts",
                                                   "osd",
@@ -617,8 +977,8 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
               "section field 'noise' must be a map/object.");
           return result;
         }
-        const std::set<std::string> noise_keys = {"noise_db", "noise_spread_db",
-                                                  "noise_seed"};
+        const std::set<std::string> noise_keys = {
+            "noise_db", "noise_spread_db", "noise_seed", "spectrum", "shared"};
         ValidateAllowedKeys(noise_node, noise_keys, "section.noise",
                             &result.errors);
         if (!result.errors.empty()) {
@@ -628,6 +988,12 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
           result.errors.push_back(
               "section noise validation error: noise_spread_db requires "
               "noise_db to be specified.");
+          return result;
+        }
+        if (!noise_node["noise_db"] && noise_node["spectrum"]) {
+          result.errors.push_back(
+              "section noise validation error: spectrum requires noise_db to "
+              "be specified (use noise.shared.spectrum for pressing noise).");
           return result;
         }
         if (noise_node["noise_db"]) {
@@ -640,6 +1006,23 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
           section.noise.noise_seed = noise_node["noise_seed"].as<int64_t>();
           section.noise.noise_seed_specified = true;
         }
+        if (noise_node["spectrum"] &&
+            !ParseNoiseSpectrum(noise_node["spectrum"],
+                                "section field 'noise.spectrum'",
+                                &section.noise.spectrum, &result.errors)) {
+          return result;
+        }
+        if (noise_node["shared"] &&
+            !ParseSharedNoise(noise_node["shared"], &section.noise.shared,
+                              &result.errors)) {
+          return result;
+        }
+      }
+
+      if (section_node["luma_bandwidth"] &&
+          !ParseLumaBandwidth(section_node["luma_bandwidth"],
+                              &section.luma_bandwidth, &result.errors)) {
+        return result;
       }
 
       if (section_node["dropouts"]) {
@@ -657,50 +1040,15 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
         }
         section.dropouts.block_present = true;
 
-        if (dropouts_node["random"]) {
-          const YAML::Node rnd = dropouts_node["random"];
-          if (!rnd.IsMap()) {
-            result.errors.push_back(
-                "section.dropouts.random must be a map/object.");
-            return result;
-          }
-          const std::set<std::string> rnd_keys = {"scale", "seed"};
-          ValidateAllowedKeys(rnd, rnd_keys, "section.dropouts.random",
-                              &result.errors);
-          if (!result.errors.empty()) {
-            return result;
-          }
-          section.dropouts.random.scale = rnd["scale"].as<int>(0);
-          if (section.dropouts.random.scale > 0) {
-            section.dropouts.random.enabled = true;
-          }
-          if (rnd["seed"]) {
-            section.dropouts.random.seed = rnd["seed"].as<int64_t>();
-            section.dropouts.random.seed_specified = true;
-          }
+        if (dropouts_node["random"] &&
+            !ParseDropoutType(dropouts_node["random"], "random",
+                              &section.dropouts.random, &result.errors)) {
+          return result;
         }
-
-        if (dropouts_node["scratch"]) {
-          const YAML::Node scr = dropouts_node["scratch"];
-          if (!scr.IsMap()) {
-            result.errors.push_back(
-                "section.dropouts.scratch must be a map/object.");
-            return result;
-          }
-          const std::set<std::string> scr_keys = {"scale", "seed"};
-          ValidateAllowedKeys(scr, scr_keys, "section.dropouts.scratch",
-                              &result.errors);
-          if (!result.errors.empty()) {
-            return result;
-          }
-          section.dropouts.scratch.scale = scr["scale"].as<int>(0);
-          if (section.dropouts.scratch.scale > 0) {
-            section.dropouts.scratch.enabled = true;
-          }
-          if (scr["seed"]) {
-            section.dropouts.scratch.seed = scr["seed"].as<int64_t>();
-            section.dropouts.scratch.seed_specified = true;
-          }
+        if (dropouts_node["scratch"] &&
+            !ParseDropoutType(dropouts_node["scratch"], "scratch",
+                              &section.dropouts.scratch, &result.errors)) {
+          return result;
         }
       }
 

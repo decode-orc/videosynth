@@ -513,6 +513,176 @@ sections:
 )");
 }
 
+TEST(YamlProjectEmitterTest, NoiseSpectrumAndSharedLayerRoundTrip) {
+  ExpectRoundTrip(R"(
+cvbs_presets:
+  video_standard_preset: PAL
+output:
+  video_path: out/video.cvbs
+sections:
+  - name: BothLayers
+    type: progressive
+    source: assets/bars.exr
+    duration_frames: 10
+    noise:
+      noise_db: 46.0
+      noise_spread_db: 4.0
+      noise_seed: 1001
+      spectrum:
+        - [0.0, 0.0]
+        - [3.5, 4.0]
+        - [6.0, 10.25]
+      shared:
+        noise_db: 44.0
+        noise_seed: 77
+        spectrum:
+          - [1.5, -3.0]
+          - [5.0, 6.0]
+  - name: SharedOnly
+    type: progressive
+    source: assets/bars.exr
+    duration_frames: 10
+    noise:
+      shared:
+        noise_db: 50.0
+        noise_seed: 5
+)");
+}
+
+TEST(YamlProjectEmitterTest, ChannelBlockRoundTrip) {
+  ExpectRoundTrip(R"(
+cvbs_presets:
+  video_standard_preset: PAL
+output:
+  video_path: out/video.cvbs
+channel:
+  timing_offset_samples: -0.3
+sections:
+  - name: Bars
+    type: progressive
+    source: assets/bars.exr
+    duration_frames: 10
+)");
+}
+
+TEST(YamlProjectEmitterTest, ChannelEdgeSmearAndFmBeatRoundTrip) {
+  ExpectRoundTrip(R"(
+cvbs_presets:
+  video_standard_preset: PAL
+output:
+  video_path: out/video.cvbs
+channel:
+  timing_offset_samples: 0.25
+  edge_smear:
+    fraction: 0.12
+    tau_samples: 3.5
+  fm_beat:
+    carrier_black_hz: 7079000
+    level_db: -24.0
+sections:
+  - name: Bars
+    type: progressive
+    source: assets/bars.exr
+    duration_frames: 10
+)");
+  // A block without a timing offset round-trips without one.
+  ExpectRoundTrip(R"(
+cvbs_presets:
+  video_standard_preset: PAL
+output:
+  video_path: out/video.cvbs
+channel:
+  fm_beat:
+    level_db: -30.0
+sections:
+  - name: Bars
+    type: progressive
+    source: assets/bars.exr
+    duration_frames: 10
+)");
+}
+
+TEST(YamlProjectEmitterTest, AbsentChannelBlockIsNotEmitted) {
+  Project project;
+  project.cvbs_presets.video_standard_preset = Standard::kPal;
+  project.output.video_path = "out/video.cvbs";
+  const std::string yaml = YamlProjectEmitter().EmitString(project);
+  EXPECT_EQ(yaml.find("channel"), std::string::npos) << yaml;
+}
+
+TEST(YamlProjectEmitterTest, ChromaErrorBlockRoundTrip) {
+  ExpectRoundTrip(R"(
+cvbs_presets:
+  video_standard_preset: NTSC
+output:
+  video_path: out/video.cvbs
+chroma_error:
+  gain: 1.05
+  phase_deg: 2.0
+  line_jitter:
+    phase_deg: 0.5
+    gain: 0.01
+    seed: 5
+sections:
+  - name: Bars
+    type: progressive
+    source: assets/bars.exr
+    duration_frames: 10
+)");
+}
+
+TEST(YamlProjectEmitterTest, ChromaErrorWithUnseededJitterRoundTrip) {
+  ExpectRoundTrip(R"(
+cvbs_presets:
+  video_standard_preset: PAL
+output:
+  video_path: out/video.cvbs
+chroma_error:
+  phase_deg: -3.5
+  line_jitter:
+    gain: 0.02
+sections:
+  - name: Bars
+    type: progressive
+    source: assets/bars.exr
+    duration_frames: 10
+)");
+}
+
+TEST(YamlProjectEmitterTest, AbsentChromaErrorBlockIsNotEmitted) {
+  Project project;
+  project.cvbs_presets.video_standard_preset = Standard::kPal;
+  project.output.video_path = "out/video.cvbs";
+  const std::string yaml = YamlProjectEmitter().EmitString(project);
+  EXPECT_EQ(yaml.find("chroma_error"), std::string::npos) << yaml;
+}
+
+TEST(YamlProjectEmitterTest, SharedNoiseOnlyBlockEmitsNoCaptureKeys) {
+  Project project;
+  project.cvbs_presets.video_standard_preset = Standard::kPal;
+  project.output.video_path = "out/video.cvbs";
+  Section section;
+  section.name = "SharedOnly";
+  section.type = "progressive";
+  section.source = "assets/bars.exr";
+  section.duration_frames = 10;
+  section.noise.shared.enabled = true;
+  section.noise.shared.noise_db = 50.0;
+  section.noise.shared.noise_seed = 5;
+  section.noise.shared.noise_seed_specified = true;
+  project.sections.push_back(section);
+
+  const std::string emitted = YamlProjectEmitter().EmitString(project);
+  EXPECT_NE(emitted.find("shared:"), std::string::npos);
+  EXPECT_EQ(emitted.find("noise_spread_db"), std::string::npos);
+  EXPECT_EQ(emitted.find("spectrum"), std::string::npos);
+
+  const ParseResult reparsed = YamlProjectParser().ParseString(emitted);
+  ASSERT_TRUE(reparsed.ok);
+  EXPECT_FALSE(reparsed.project.sections[0].noise.enabled);
+  EXPECT_EQ(reparsed.project.sections[0].noise, section.noise);
+}
+
 TEST(YamlProjectEmitterTest, DropoutBlocksRoundTripScalesAndSeeds) {
   ExpectRoundTrip(R"(
 cvbs_presets:
@@ -538,6 +708,29 @@ sections:
       scratch:
         scale: 20
         seed: -99
+)");
+}
+
+TEST(YamlProjectEmitterTest, LumaBandwidthRoundTripsWithAndWithoutTransition) {
+  ExpectRoundTrip(R"(
+cvbs_presets:
+  video_standard_preset: PAL
+output:
+  video_path: out/video.cvbs
+sections:
+  - name: Soft
+    type: progressive
+    source: assets/bars.exr
+    duration_frames: 10
+    luma_bandwidth:
+      cutoff_mhz: 3.2
+  - name: Softer
+    type: progressive
+    source: assets/bars.exr
+    duration_frames: 10
+    luma_bandwidth:
+      cutoff_mhz: 2.5
+      transition_mhz: 0.8
 )");
 }
 

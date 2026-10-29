@@ -11,12 +11,27 @@
 
 #include <QAbstractListModel>
 #include <QString>
+#include <string>
 #include <vector>
 
 #include "videosynth/model.h"
 #include "videosynth/results.h"
 
 namespace videosynth::gui {
+
+// The editor field group a validation issue concerns, so activating the
+// issue can reveal that group. kNone leaves navigation at the section (or
+// project) level.
+enum class IssueField {
+  kNone,
+  kCaptureNoise,
+  kSharedNoise,
+  kRandomDropouts,
+  kScratchDropouts,
+  kLumaBandwidth,
+  kChannel,
+  kChromaError,
+};
 
 // One validation finding presented in the issues dock.
 struct ValidationIssue {
@@ -28,7 +43,16 @@ struct ValidationIssue {
   // issues. Used by the issue-activation hook to navigate to the offending
   // editor (navigation lands with the section editors).
   int section_index = -1;
+  // Field group the message names (ClassifyIssueField).
+  IssueField field = IssueField::kNone;
 };
+
+// Classifies a validator message by the block it concerns, from the message
+// prefix ("Noise validation error", "Channel validation error", ...) and the
+// key named after the section reference ("shared.", "random.", ...).
+//
+// Thread-safety: thread-safe (pure function).
+IssueField ClassifyIssueField(const std::string& message);
 
 // Converts a ValidationResult into presentable issues, attributing each
 // message to a section by matching the quoted section name the validator
@@ -51,6 +75,7 @@ class ValidationIssuesModel : public QAbstractListModel {
   enum Roles {
     kSeverityRole = Qt::UserRole + 1,  // int(ValidationIssue::Severity)
     kSectionIndexRole,                 // int, -1 = project level
+    kFieldRole,                        // int(IssueField)
   };
 
   explicit ValidationIssuesModel(QObject* parent = nullptr);

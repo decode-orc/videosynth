@@ -335,5 +335,53 @@ TEST(DeterministicOutputTest, SingleAndMultiThreadRunsAreByteIdentical) {
   std::filesystem::remove_all(output_dir, ec);
 }
 
+// Adds shaped capture noise and a shaped shared (pressing) layer to every
+// section of the deterministic project.
+void AddLayeredNoise(Project* project) {
+  for (Section& section : project->sections) {
+    section.noise.spectrum = {{0.0, 0.0}, {3.5, 4.0}, {6.0, 10.0}};
+    section.noise.shared.enabled = true;
+    section.noise.shared.noise_db = 44.0;
+    section.noise.shared.noise_seed = 77;
+    section.noise.shared.noise_seed_specified = true;
+    section.noise.shared.spectrum = {{0.0, 3.0}, {5.0, -3.0}};
+  }
+}
+
+TEST(DeterministicOutputTest, LayeredNoiseIsByteIdenticalAcrossThreadCounts) {
+  const std::filesystem::path output_dir =
+      std::filesystem::temp_directory_path() / "videosynth_layered_noise";
+  std::filesystem::create_directories(output_dir);
+
+  Project sequential_project = MakeDeterministicProject(output_dir, "threads1");
+  Project parallel_project = MakeDeterministicProject(output_dir, "threads8");
+  AddLayeredNoise(&sequential_project);
+  AddLayeredNoise(&parallel_project);
+
+  {
+    NullLogger logger;
+    ProgressiveFrameSourceProbe probe;
+    ProjectValidator validator(&probe, &logger);
+    const ValidationResult validation = validator.Validate(sequential_project);
+    for (const std::string& error : validation.errors) {
+      ADD_FAILURE() << "Validation error: " << error;
+    }
+    ASSERT_TRUE(validation.is_valid);
+  }
+
+  ASSERT_TRUE(RunPipelineOnce(sequential_project, 1));
+  ASSERT_TRUE(RunPipelineOnce(parallel_project, 8));
+
+  const std::vector<char> sequential_composite =
+      ReadFileBytes(sequential_project.output.video_path);
+  ASSERT_FALSE(sequential_composite.empty());
+  EXPECT_EQ(sequential_composite,
+            ReadFileBytes(parallel_project.output.video_path))
+      << "CVBS sample stream differs between 1-thread and 8-thread runs.";
+
+  std::error_code ec;
+  std::filesystem::remove_all(output_dir, ec);
+}
+
 }  // namespace
 }  // namespace videosynth

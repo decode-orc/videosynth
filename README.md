@@ -37,9 +37,12 @@ The project ships two front ends built from the same pipeline:
   biphase and FM codes (IEC 60856/60857).
 - **Laserdisc disc simulation**: CAV/CLV picture numbers, chapters, programme
   status codes, lead-in/out, picture stop, PAL pilot burst.
-- **Per-section impairments**: two-component Gaussian noise (floor plus
-  proportional) and dropout injection (random surface dropouts and persistent
-  scratches) with a SQLite dropout sidecar.
+- **Impairments**: two-component Gaussian noise (floor plus proportional)
+  with optional spectral shaping and a shared pressing layer; dropout
+  injection (random surface dropouts and persistent scratches) with a SQLite
+  dropout sidecar, flagged or unflagged; pressing channel effects (sub-sample
+  timing offset, edge smear, PAL FM-beat herringbone); chroma gain and phase
+  error; and a per-section luma bandwidth limit.
 - **Multi-track audio**: up to eight stereo channel pairs at 48 kHz/24-bit,
   each carrying test tones, a WAV/FLAC file or the source video's soundtrack,
   plus EFM audio for laserdisc projects.
@@ -289,8 +292,8 @@ The `long-form` projects write hundreds of gigabytes each (~383 GB PAL,
 excluded from the suites below; run them by hand with `--output-root` pointing
 at storage that can hold the result.
 
-Derived variants (the impairment-free `stacking-clean` set and the Y/C
-`stacking-yc` set) are generated into `build/generated-projects/` at build time
+Derived variants (the `stacking-captures` set, the impairment-free
+`stacking-clean` set and the Y/C `stacking-yc` set) are generated into `build/generated-projects/` at build time
 by [scripts/generate_test_projects.py](scripts/generate_test_projects.py) and
 are not committed. Add a variant by editing `variants.json`, not by copying
 YAML.

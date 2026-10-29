@@ -35,7 +35,39 @@ int FindSectionIndex(const Project& project, const std::string& message) {
   return -1;
 }
 
+bool StartsWith(const std::string& value, const std::string& prefix) {
+  return value.compare(0, prefix.size(), prefix) == 0;
+}
+
 }  // namespace
+
+IssueField ClassifyIssueField(const std::string& message) {
+  if (StartsWith(message, "Channel validation error")) {
+    return IssueField::kChannel;
+  }
+  if (StartsWith(message, "Chroma error validation error")) {
+    return IssueField::kChromaError;
+  }
+  if (StartsWith(message, "Luma bandwidth validation error")) {
+    return IssueField::kLumaBandwidth;
+  }
+  // Keys follow the quoted section name; looking only past it keeps a section
+  // name such as 'shared.intro' from steering the classification.
+  const std::size_t name_end = message.find("': ");
+  const std::string detail =
+      name_end == std::string::npos ? message : message.substr(name_end + 3);
+  if (StartsWith(message, "Noise ")) {
+    return (StartsWith(detail, "shared.") ||
+            detail.find("noise.shared") != std::string::npos)
+               ? IssueField::kSharedNoise
+               : IssueField::kCaptureNoise;
+  }
+  if (StartsWith(message, "Dropout ")) {
+    return StartsWith(detail, "scratch.") ? IssueField::kScratchDropouts
+                                          : IssueField::kRandomDropouts;
+  }
+  return IssueField::kNone;
+}
 
 std::vector<ValidationIssue> BuildValidationIssues(
     const Project& project, const ValidationResult& result) {
@@ -47,6 +79,7 @@ std::vector<ValidationIssue> BuildValidationIssues(
     issue.severity = ValidationIssue::Severity::kError;
     issue.message = QString::fromStdString(message);
     issue.section_index = FindSectionIndex(project, message);
+    issue.field = ClassifyIssueField(message);
     issues.push_back(issue);
   }
   for (const std::string& message : result.warnings) {
@@ -54,6 +87,7 @@ std::vector<ValidationIssue> BuildValidationIssues(
     issue.severity = ValidationIssue::Severity::kWarning;
     issue.message = QString::fromStdString(message);
     issue.section_index = FindSectionIndex(project, message);
+    issue.field = ClassifyIssueField(message);
     issues.push_back(issue);
   }
 
@@ -85,6 +119,8 @@ QVariant ValidationIssuesModel::data(const QModelIndex& index, int role) const {
       return static_cast<int>(issue.severity);
     case kSectionIndexRole:
       return issue.section_index;
+    case kFieldRole:
+      return static_cast<int>(issue.field);
     case Qt::ForegroundRole:
       return QBrush(theme_tokens::IssueSeverityColor(
           issue.severity == ValidationIssue::Severity::kError, dark_theme_));

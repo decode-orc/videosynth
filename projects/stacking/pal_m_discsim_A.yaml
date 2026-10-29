@@ -14,7 +14,8 @@
 # Noise/dropout: moderate — noise_db 43.0, scale 8, seed 1001.
 # Backward skip: MultiBurst_PreSkip_A (17–20) → MultiBurst_Replay_A (17–24).
 #   Replay uses a different noise seed (9901) to simulate fresh electronic noise;
-#   the dropout seed is unchanged because disc surface defects are repeatable.
+#   the dropout seed is unchanged, and the dropouts are disc-anchored, so the
+#   replay repeats the first play's dropouts on PNs 17–20 as a real disc would.
 
 project:
   name: PalMDiscSimA
@@ -53,9 +54,11 @@ sections:
       random:
         scale: 8
         seed: 1001
+        anchor: disc
       scratch:
         scale: 8
         seed: 1001
+        anchor: disc
     line_injections:
       - type: laserdisc
         codes:
@@ -90,9 +93,11 @@ sections:
       random:
         scale: 8
         seed: 1001
+        anchor: disc
       scratch:
         scale: 8
         seed: 1001
+        anchor: disc
     line_injections:
       - type: laserdisc
         codes:
@@ -127,9 +132,11 @@ sections:
       random:
         scale: 8
         seed: 1001
+        anchor: disc
       scratch:
         scale: 8
         seed: 1001
+        anchor: disc
     line_injections:
       - type: laserdisc
         codes:
@@ -164,9 +171,11 @@ sections:
       random:
         scale: 8
         seed: 1001
+        anchor: disc
       scratch:
         scale: 8
         seed: 1001
+        anchor: disc
     line_injections:
       - type: laserdisc
         codes:
@@ -201,9 +210,11 @@ sections:
       random:
         scale: 8
         seed: 1001
+        anchor: disc
       scratch:
         scale: 8
         seed: 1001
+        anchor: disc
     line_injections:
       - type: laserdisc
         codes:
@@ -238,9 +249,11 @@ sections:
       random:
         scale: 8
         seed: 1001
+        anchor: disc
       scratch:
         scale: 8
         seed: 1001
+        anchor: disc
     line_injections:
       - type: laserdisc
         codes:

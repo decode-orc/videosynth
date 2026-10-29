@@ -77,12 +77,35 @@ Unknown keys are rejected outright, at every level, naming the offending key and
 - NTSC and PAL-M discs (any project with `disc_type` set) must carry a `virs` VITS entry.
 - *Warning*: a CAV chapter shorter than 30 frames. Chapters that include a `duration_frames: all` section, and CLV chapters, are not checked.
 
+### Channel
+
+- `timing_offset_samples` in −8.0 to 8.0.
+- `edge_smear.fraction` in 0.0–0.5; `edge_smear.tau_samples` above 0 and at most 100.
+- `fm_beat:` on any standard but 625-line PAL is an error. `fm_beat.carrier_black_hz` in 6.9–7.3 MHz; `fm_beat.level_db` in −60.0 to 0.0.
+- Values that are not finite are errors.
+- A non-numeric value, an unknown key, an empty `channel:` block, an `edge_smear:` block without both `fraction` and `tau_samples`, or an `fm_beat:` block without `level_db` is a parse error.
+
+### Chroma error
+
+- `gain` in 0.5–1.5; `phase_deg` in −180.0 to 180.0; `line_jitter.phase_deg` in 0.0–10.0; `line_jitter.gain` in 0.0–0.1. Values that are not finite are errors.
+- `chroma_error:` on a SECAM project is an error.
+- A non-numeric value, an unknown key, an empty `chroma_error:` block or an empty `line_jitter:` block is a parse error.
+
+### Luma bandwidth
+
+- `luma_bandwidth.transition_mhz` in 0.1–2.0; `luma_bandwidth.cutoff_mhz` from 0.5 MHz up to 2 f_sc less half the transition.
+- `luma_bandwidth` without `cutoff_mhz`, a non-numeric value or an unknown key is a parse error.
+
 ### Noise and dropouts
 
 - `noise_db` in 20.0–61.0; `noise_spread_db` ≥ 0; `noise_db − noise_spread_db` ≥ 20.0.
-- `noise_spread_db` without `noise_db` is an error.
+- `noise_spread_db` or `spectrum` without `noise_db` is an error.
+- `spectrum` tables (capture and `shared`): at least one point, frequencies strictly ascending in 0 to the 4fsc Nyquist frequency (for every encoding preset), `relative_db` in −60.0 to +40.0.
+- `shared`: `noise_db` is required and in 20.0–61.0; `noise_seed` is required; `noise_spread_db` is an error.
 - Dropout `scale` values in 0–20, with at least one of them 1–20; a `dropouts:` block that disables everything is an error — omit the block instead.
+- A dropout type with `anchor: disc` needs a `seed`. An `anchor` other than `section` or `disc`, or a non-boolean `flagged`, is a parse error.
 - *Warning*: spread noise with no VITS on the White SNR measurement line.
+- *Warning*: `noise.shared` on a CAV section without a `picture_number` code (pressing noise falls back to output position).
 - *Warning*: scratch lifespan longer than the section.
 
 ### Audio and EFM

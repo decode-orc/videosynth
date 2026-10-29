@@ -13,6 +13,8 @@
 #   PNs 33–40: Y_CB_CR_RAMPS.exr
 #
 # Noise/dropout: moderate — noise_db 43.0, scale 8, seed 2002.
+# Dropouts are disc-anchored (anchor: disc): keyed by picture number, so a
+#   replayed range repeats the first play's dropouts as a real disc would.
 # Forward skip: MultiBurst_PreGap_B (17–20) → MultiBurst_PostGap_B (start_value 23).
 
 project:
@@ -52,9 +54,11 @@ sections:
       random:
         scale: 8
         seed: 2002
+        anchor: disc
       scratch:
         scale: 8
         seed: 2002
+        anchor: disc
     line_injections:
       - type: laserdisc
         codes:
@@ -89,9 +93,11 @@ sections:
       random:
         scale: 8
         seed: 2002
+        anchor: disc
       scratch:
         scale: 8
         seed: 2002
+        anchor: disc
     line_injections:
       - type: laserdisc
         codes:
@@ -126,9 +132,11 @@ sections:
       random:
         scale: 8
         seed: 2002
+        anchor: disc
       scratch:
         scale: 8
         seed: 2002
+        anchor: disc
     line_injections:
       - type: laserdisc
         codes:
@@ -163,9 +171,11 @@ sections:
       random:
         scale: 8
         seed: 2002
+        anchor: disc
       scratch:
         scale: 8
         seed: 2002
+        anchor: disc
     line_injections:
       - type: laserdisc
         codes:
@@ -200,9 +210,11 @@ sections:
       random:
         scale: 8
         seed: 2002
+        anchor: disc
       scratch:
         scale: 8
         seed: 2002
+        anchor: disc
     line_injections:
       - type: laserdisc
         codes:
@@ -237,9 +249,11 @@ sections:
       random:
         scale: 8
         seed: 2002
+        anchor: disc
       scratch:
         scale: 8
         seed: 2002
+        anchor: disc
     line_injections:
       - type: laserdisc
         codes:

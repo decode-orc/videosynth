@@ -1,0 +1,193 @@
+# PAL Pressing C — base project for a multi-capture stacking set
+#
+# One pressing of a 16-frame CAV laserdisc (PNs 1–16), like pressings A and B
+# but cut from a glass master that recorded the FM-beat herringbone and read
+# back with a soft edge. The captures of this pressing are not committed:
+# projects/variants.json (stacking-captures) derives four of them, each with
+# its own capture seed, one starting later (at PN 5) and one replaying the
+# multi-burst range (PNs 9–12). Their impairment-free truths come from the
+# stacking-clean variant, which keeps the channel block: the beat and the
+# smear are part of this pressing's truth.
+#
+# What belongs to the pressing, and is identical in every capture of it:
+#   - noise.shared: pressing noise keyed by picture number, seed 7003;
+#   - channel.fm_beat: the beat between the FM video carrier (7.088 MHz at
+#     black) and the colour signal, 24 dB below the chroma at 50 IRE. It
+#     shows as herringbone in saturated flat colour: the bars and the ramps;
+#   - channel.edge_smear: 12% of the signal smeared with a 3-sample time
+#     constant;
+#   - channel.timing_offset_samples: 0.15, so it arrives 0.15 sample later
+#     than pressing A.
+# What belongs to one capture: the capture noise layer (noise_db,
+# noise_spread_db, noise_seed, spectrum), whose seed the variants replace.
+#
+# Content layout:
+#   PNs  1–4:  100_BARS.exr
+#   PNs  5–8:  TESTCARD-F.exr
+#   PNs  9–12: MULTIBURST.exr
+#   PNs 13–16: Y_CB_CR_RAMPS.exr
+# Sections are four frames long, a whole colour-field sequence, so a capture
+# that starts later or replays a section stays in subcarrier phase.
+
+project:
+  name: PalPressingC
+  version: "1.0"
+  description: PAL pressing C — shared noise seed 7003, FM beat, edge smear, timing offset 0.15
+
+cvbs_presets:
+  video_standard_preset: PAL
+  sample_encoding_preset: CVBS_U10_4FSC
+  signal_state_preset: STANDARD_STABLE_LOCKED
+  pal_laserdisc_pilot_burst: true
+
+output:
+  video_path: "{output}/videosynth_pal_pressing_C.cvbs"
+
+line_injections:
+  disc_type: CAV
+  vits:
+    - vits_type: uk-national
+      target_lines: [19]
+
+channel:
+  timing_offset_samples: 0.15
+  edge_smear:
+    fraction: 0.12
+    tau_samples: 3.0
+  fm_beat:
+    carrier_black_hz: 7088000
+    level_db: -24.0
+
+sections:
+
+  # ---------------------------------------------------------------------------
+  # PNs 1–4: 100% colour bars
+  # ---------------------------------------------------------------------------
+  - name: Bars
+    type: progressive
+    source: "{bundled}/exr/720x576/100_BARS.exr"
+    duration_frames: 4
+    section_type: programme_area
+    noise:
+      # Capture layer: FM-demodulated noise rises towards high frequencies.
+      noise_db: 46.0
+      noise_spread_db: 3.0
+      noise_seed: 1001
+      spectrum:
+        - [0.0, 0.0]
+        - [3.0, 3.0]
+        - [6.0, 9.0]
+      # Pressing layer: the same on every capture of pressing C.
+      shared:
+        noise_db: 49.0
+        noise_seed: 7003
+        spectrum:
+          - [0.0, 0.0]
+          - [2.0, -2.0]
+          - [5.0, -6.0]
+    line_injections:
+      - type: laserdisc
+        codes:
+          - code_type: picture_number
+            start_value: 1
+          - code_type: programme_status
+            programme_status: "0x8DC000"
+
+  # ---------------------------------------------------------------------------
+  # PNs 5–8: testcard-f
+  # ---------------------------------------------------------------------------
+  - name: Testcard
+    type: progressive
+    source: "{bundled}/exr/720x576/TESTCARD-F.exr"
+    duration_frames: 4
+    section_type: programme_area
+    noise:
+      # Capture layer: FM-demodulated noise rises towards high frequencies.
+      noise_db: 46.0
+      noise_spread_db: 3.0
+      noise_seed: 1001
+      spectrum:
+        - [0.0, 0.0]
+        - [3.0, 3.0]
+        - [6.0, 9.0]
+      # Pressing layer: the same on every capture of pressing C.
+      shared:
+        noise_db: 49.0
+        noise_seed: 7003
+        spectrum:
+          - [0.0, 0.0]
+          - [2.0, -2.0]
+          - [5.0, -6.0]
+    line_injections:
+      - type: laserdisc
+        codes:
+          - code_type: picture_number
+            start_value: 5
+          - code_type: programme_status
+            programme_status: "0x8DC000"
+
+  # ---------------------------------------------------------------------------
+  # PNs 9–12: multi-burst
+  # ---------------------------------------------------------------------------
+  - name: MultiBurst
+    type: progressive
+    source: "{bundled}/exr/720x576/MULTIBURST.exr"
+    duration_frames: 4
+    section_type: programme_area
+    noise:
+      # Capture layer: FM-demodulated noise rises towards high frequencies.
+      noise_db: 46.0
+      noise_spread_db: 3.0
+      noise_seed: 1001
+      spectrum:
+        - [0.0, 0.0]
+        - [3.0, 3.0]
+        - [6.0, 9.0]
+      # Pressing layer: the same on every capture of pressing C.
+      shared:
+        noise_db: 49.0
+        noise_seed: 7003
+        spectrum:
+          - [0.0, 0.0]
+          - [2.0, -2.0]
+          - [5.0, -6.0]
+    line_injections:
+      - type: laserdisc
+        codes:
+          - code_type: picture_number
+            start_value: 9
+          - code_type: programme_status
+            programme_status: "0x8DC000"
+
+  # ---------------------------------------------------------------------------
+  # PNs 13–16: Y/Cb/Cr ramps
+  # ---------------------------------------------------------------------------
+  - name: Ramps
+    type: progressive
+    source: "{bundled}/exr/720x576/Y_CB_CR_RAMPS.exr"
+    duration_frames: 4
+    section_type: programme_area
+    noise:
+      # Capture layer: FM-demodulated noise rises towards high frequencies.
+      noise_db: 46.0
+      noise_spread_db: 3.0
+      noise_seed: 1001
+      spectrum:
+        - [0.0, 0.0]
+        - [3.0, 3.0]
+        - [6.0, 9.0]
+      # Pressing layer: the same on every capture of pressing C.
+      shared:
+        noise_db: 49.0
+        noise_seed: 7003
+        spectrum:
+          - [0.0, 0.0]
+          - [2.0, -2.0]
+          - [5.0, -6.0]
+    line_injections:
+      - type: laserdisc
+        codes:
+          - code_type: picture_number
+            start_value: 13
+          - code_type: programme_status
+            programme_status: "0x8DC000"

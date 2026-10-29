@@ -147,8 +147,11 @@ class DropoutInjectionStage {
 
   // Derives the deterministic scratch event set for a section. Pure function
   // of its arguments, so per-frame recomputation is order-independent.
+  // section_disc_start is the disc frame index of the section's first frame;
+  // it keys disc-anchored scratches in place of section_index.
   static std::vector<ScratchEvent> ComputeScratchEvents(
-      const Section& section, std::size_t section_index, int lines_per_frame,
+      const Section& section, std::size_t section_index,
+      std::uint64_t section_disc_start, int lines_per_frame,
       int samples_per_line, uint64_t run_base_seed);
 
   // Writes a single dropout_run row to the sidecar.
@@ -156,11 +159,13 @@ class DropoutInjectionStage {
                        int64_t sample_count, int severity);
 
   // Applies random dropout events for one frame after overlap resolution,
-  // appending sidecar rows to out_rows.
+  // appending sidecar rows to out_rows (null for unflagged dropouts).
+  // disc_frame keys disc-anchored random dropouts in place of
+  // (section_index, global_frame).
   void ProcessRandomDropouts(
       const Section& section, std::size_t section_index,
-      std::size_t global_frame, int samples_per_frame, int lines_per_frame,
-      int samples_per_line, int64_t frame_id,
+      std::size_t global_frame, std::uint64_t disc_frame, int samples_per_frame,
+      int lines_per_frame, int samples_per_line, int64_t frame_id,
       const std::vector<std::pair<int, int>>& scratch_intervals,
       const SignalLevels& levels, SampleFixed clamp_min, SampleFixed clamp_max,
       std::vector<SampleFixed>* y_mv, std::vector<SampleFixed>* c_mv,
@@ -168,7 +173,7 @@ class DropoutInjectionStage {
       std::vector<DropoutSidecarRow>* out_rows) const;
 
   // Applies scratch dropout events for one frame, appending sidecar rows to
-  // out_rows.
+  // out_rows (null for unflagged scratches).
   static void ProcessScratchDropouts(
       const std::vector<ScratchEvent>& scratch_events, int samples_per_line,
       int64_t frame_id, int frame_index_in_section,
@@ -178,8 +183,8 @@ class DropoutInjectionStage {
       std::size_t frame_buffer_offset, int samples_per_frame,
       std::vector<DropoutSidecarRow>* out_rows);
 
-  // Splits a run at any active-picture boundary, appending sidecar rows and
-  // applying the signal push for each resulting sub-run.
+  // Applies the signal push for a run and appends its sidecar rows, split at
+  // any active-picture boundary. A null out_rows records nothing (unflagged).
   static void ApplyAndRecordRun(
       int sample_start, int sample_count, int direction, double push_fraction,
       int64_t frame_id, int active_picture_start, int active_picture_end,

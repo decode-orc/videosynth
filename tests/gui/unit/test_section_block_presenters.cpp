@@ -2,7 +2,7 @@
  * File:        test_section_block_presenters.cpp
  * Module:      gui_tests
  * Purpose:     Unit tests for the optional-block mapping layer (audio,
- *              noise, dropouts, OSD)
+ *              noise, dropouts, luma bandwidth, OSD)
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -65,6 +65,26 @@ TEST(SectionBlockPresenterTest, NoiseEnableEmitsBlockDisableRemovesIt) {
   EXPECT_EQ(project.sections[0].noise, NoiseParameters{});
 }
 
+TEST(SectionBlockPresenterTest, NoiseToggleKeepsSharedPressingLayer) {
+  Project project = MakeValidProject();
+  Section& section = project.sections[0];
+  section.noise.shared.enabled = true;
+  section.noise.shared.noise_db = 44.0;
+  section.noise.shared.noise_seed = 77;
+  section.noise.shared.noise_seed_specified = true;
+  section.noise.shared.spectrum = {{0.0, 0.0}, {6.0, 10.0}};
+  const SharedNoiseParameters shared = section.noise.shared;
+
+  SetNoiseBlockEnabled(&section, true);
+  EXPECT_TRUE(section.noise.enabled);
+  EXPECT_EQ(section.noise.shared, shared);
+
+  SetNoiseBlockEnabled(&section, false);
+  EXPECT_FALSE(section.noise.enabled);
+  EXPECT_EQ(section.noise.shared, shared);
+  EXPECT_NE(EmitYaml(project).find("shared:"), std::string::npos);
+}
+
 TEST(SectionBlockPresenterTest, DropoutEnableEmitsBlockDisableRemovesIt) {
   Project project = MakeValidProject();
   EXPECT_EQ(EmitYaml(project).find("dropouts:"), std::string::npos);
@@ -81,6 +101,290 @@ TEST(SectionBlockPresenterTest, DropoutEnableEmitsBlockDisableRemovesIt) {
   SetRandomDropoutsEnabled(&project.sections[0], false);
   SetScratchDropoutsEnabled(&project.sections[0], false);
   EXPECT_EQ(EmitYaml(project).find("dropouts:"), std::string::npos);
+}
+
+// Emits the project and parses it back, as a save and reload would.
+Project RoundTrip(const Project& project) {
+  YamlProjectParser parser;
+  const ParseResult parsed = parser.ParseString(EmitYaml(project));
+  EXPECT_TRUE(parsed.ok) << (parsed.errors.empty() ? "" : parsed.errors[0]);
+  return parsed.project;
+}
+
+TEST(SectionBlockPresenterTest, SharedNoiseEnableSeedsAValidSeededLayer) {
+  Project project = MakeValidProject();
+  Section& section = project.sections[0];
+  SetSharedNoiseEnabled(&section, true);
+  EXPECT_TRUE(section.noise.shared.enabled);
+  EXPECT_TRUE(section.noise.shared.noise_seed_specified);
+  EXPECT_FALSE(section.noise.enabled);
+  std::string error;
+  EXPECT_TRUE(ProjectIsValid(project, &error)) << error;
+  EXPECT_EQ(RoundTrip(project), project);
+
+  SetSharedNoiseEnabled(&section, false);
+  EXPECT_EQ(section.noise, NoiseParameters{});
+  EXPECT_EQ(EmitYaml(project).find("shared:"), std::string::npos);
+}
+
+TEST(SectionBlockPresenterTest, SharedNoiseEnableKeepsAnExistingLayer) {
+  Section section;
+  SetSharedNoiseEnabled(&section, true);
+  section.noise.shared.noise_db = 40.0;
+  section.noise.shared.noise_seed = 77;
+  SetSharedNoiseEnabled(&section, true);
+  EXPECT_EQ(section.noise.shared.noise_db, 40.0);
+  EXPECT_EQ(section.noise.shared.noise_seed, 77);
+}
+
+TEST(SectionBlockPresenterTest, SpectrumPointsStepUpAndStopAtTheMaximum) {
+  std::vector<NoiseSpectrumPoint> spectrum;
+  AddNoiseSpectrumPoint(&spectrum, 3.0);
+  ASSERT_EQ(spectrum.size(), 1U);
+  EXPECT_EQ(spectrum[0].frequency_mhz, 0.0);
+  EXPECT_EQ(spectrum[0].relative_db, 0.0);
+
+  spectrum[0].relative_db = -6.0;
+  AddNoiseSpectrumPoint(&spectrum, 3.0);
+  ASSERT_EQ(spectrum.size(), 2U);
+  EXPECT_EQ(spectrum[1].frequency_mhz, 1.0);
+  EXPECT_EQ(spectrum[1].relative_db, -6.0);
+
+  // Closer to the maximum than a full step: halfway instead.
+  spectrum[1].frequency_mhz = 2.5;
+  AddNoiseSpectrumPoint(&spectrum, 3.0);
+  ASSERT_EQ(spectrum.size(), 3U);
+  EXPECT_EQ(spectrum[2].frequency_mhz, 2.75);
+
+  spectrum[2].frequency_mhz = 3.0;
+  AddNoiseSpectrumPoint(&spectrum, 3.0);
+  EXPECT_EQ(spectrum.size(), 3U);
+}
+
+TEST(SectionBlockPresenterTest, RemoveSpectrumPointIgnoresOutOfRangeRows) {
+  std::vector<NoiseSpectrumPoint> spectrum = {
+      {0.0, 0.0}, {1.0, -3.0}, {2.0, -6.0}};
+  RemoveNoiseSpectrumPoint(&spectrum, 3);
+  RemoveNoiseSpectrumPoint(&spectrum, -1);
+  EXPECT_EQ(spectrum.size(), 3U);
+  RemoveNoiseSpectrumPoint(&spectrum, 1);
+  ASSERT_EQ(spectrum.size(), 2U);
+  EXPECT_EQ(spectrum[1].frequency_mhz, 2.0);
+}
+
+TEST(SectionBlockPresenterTest, AddedSpectrumPointsValidateOnEveryStandard) {
+  for (const Standard standard :
+       {Standard::kPal, Standard::kNtsc, Standard::kPalM}) {
+    Project project = MakeValidProject();
+    project.cvbs_presets.video_standard_preset = standard;
+    Section& section = project.sections[0];
+    SetNoiseBlockEnabled(&section, true);
+    SetSharedNoiseEnabled(&section, true);
+    const double max_mhz = NoiseSpectrumMaxFrequencyMhz(standard);
+    // Enough presses to run into the maximum.
+    for (int i = 0; i < 40; ++i) {
+      AddNoiseSpectrumPoint(&section.noise.spectrum, max_mhz);
+      AddNoiseSpectrumPoint(&section.noise.shared.spectrum, max_mhz);
+    }
+    section.noise.spectrum.back().frequency_mhz = max_mhz;
+    std::string error;
+    EXPECT_TRUE(ProjectIsValid(project, &error))
+        << StandardToString(standard) << ": " << error;
+
+    section.noise.spectrum.back().frequency_mhz = max_mhz + 0.01;
+    EXPECT_FALSE(ProjectIsValid(project, nullptr));
+  }
+}
+
+TEST(SectionBlockPresenterTest, SpectrumEditsRoundTripToTheModel) {
+  Project project = MakeValidProject();
+  Section& section = project.sections[0];
+  SetNoiseBlockEnabled(&section, true);
+  section.noise.spectrum = {{0.0, 0.0}, {2.0, -12.5}, {4.0, -30.0}};
+  SetSharedNoiseEnabled(&section, true);
+  section.noise.shared.spectrum = {{1.0, 6.0}, {3.5, -3.0}};
+  std::string error;
+  ASSERT_TRUE(ProjectIsValid(project, &error)) << error;
+  EXPECT_EQ(RoundTrip(project), project);
+}
+
+TEST(SectionBlockPresenterTest, SpectrumLevelLimitsMirrorValidator) {
+  Project project = MakeValidProject();
+  Section& section = project.sections[0];
+  SetNoiseBlockEnabled(&section, true);
+  section.noise.spectrum = {{0.0, editor_limits::kNoiseSpectrumRelativeDbMin},
+                            {1.0, editor_limits::kNoiseSpectrumRelativeDbMax}};
+  std::string error;
+  EXPECT_TRUE(ProjectIsValid(project, &error)) << error;
+  section.noise.spectrum[0].relative_db -= 0.1;
+  EXPECT_FALSE(ProjectIsValid(project, nullptr));
+  section.noise.spectrum[0].relative_db += 0.1;
+  section.noise.spectrum[1].relative_db += 0.1;
+  EXPECT_FALSE(ProjectIsValid(project, nullptr));
+}
+
+TEST(SectionBlockPresenterTest, DiscAnchorFixesASeedWhenNoneIsSet) {
+  Project project = MakeValidProject();
+  Section& section = project.sections[0];
+  SetRandomDropoutsEnabled(&section, true);
+  SetScratchDropoutsEnabled(&section, true);
+  SetRandomDropoutAnchor(&section, DropoutAnchor::kDisc);
+  SetScratchDropoutAnchor(&section, DropoutAnchor::kDisc);
+  EXPECT_EQ(section.dropouts.random.anchor, DropoutAnchor::kDisc);
+  EXPECT_TRUE(section.dropouts.random.seed_specified);
+  EXPECT_EQ(section.dropouts.scratch.anchor, DropoutAnchor::kDisc);
+  EXPECT_TRUE(section.dropouts.scratch.seed_specified);
+  std::string error;
+  EXPECT_TRUE(ProjectIsValid(project, &error)) << error;
+
+  // Without the seed the validator rejects a disc anchor.
+  section.dropouts.random.seed_specified = false;
+  section.dropouts.random.seed = 0;
+  EXPECT_FALSE(ProjectIsValid(project, nullptr));
+}
+
+TEST(SectionBlockPresenterTest, AnchorChangesKeepAnExistingSeed) {
+  Section section;
+  SetRandomDropoutsEnabled(&section, true);
+  section.dropouts.random.seed_specified = true;
+  section.dropouts.random.seed = 4242;
+  SetRandomDropoutAnchor(&section, DropoutAnchor::kDisc);
+  EXPECT_EQ(section.dropouts.random.seed, 4242);
+  SetRandomDropoutAnchor(&section, DropoutAnchor::kSection);
+  EXPECT_EQ(section.dropouts.random.anchor, DropoutAnchor::kSection);
+  EXPECT_TRUE(section.dropouts.random.seed_specified);
+  EXPECT_EQ(section.dropouts.random.seed, 4242);
+}
+
+TEST(SectionBlockPresenterTest, FlaggedAndAnchorEditsRoundTripToTheModel) {
+  Project project = MakeValidProject();
+  Section& section = project.sections[0];
+  SetRandomDropoutsEnabled(&section, true);
+  SetScratchDropoutsEnabled(&section, true);
+  section.dropouts.random.flagged = false;
+  SetRandomDropoutAnchor(&section, DropoutAnchor::kDisc);
+  section.dropouts.scratch.flagged = false;
+  std::string error;
+  ASSERT_TRUE(ProjectIsValid(project, &error)) << error;
+  EXPECT_EQ(RoundTrip(project), project);
+}
+
+TEST(SectionBlockPresenterTest, LumaBandwidthEnableSeedsAValidLimit) {
+  for (const Standard standard :
+       {Standard::kPal, Standard::kNtsc, Standard::kPalM}) {
+    Project project = MakeValidProject();
+    project.cvbs_presets.video_standard_preset = standard;
+    Section& section = project.sections[0];
+    SetLumaBandwidthEnabled(&section, true);
+    EXPECT_TRUE(section.luma_bandwidth.enabled);
+    EXPECT_EQ(section.luma_bandwidth.transition_mhz,
+              kLumaBandwidthTransitionDefaultMhz);
+    std::string error;
+    EXPECT_TRUE(ProjectIsValid(project, &error)) << error;
+    EXPECT_EQ(RoundTrip(project), project);
+
+    SetLumaBandwidthEnabled(&section, false);
+    EXPECT_EQ(section.luma_bandwidth, LumaBandwidthParameters{});
+    EXPECT_EQ(EmitYaml(project).find("luma_bandwidth"), std::string::npos);
+  }
+}
+
+TEST(SectionBlockPresenterTest, LumaBandwidthLimitsMirrorValidator) {
+  for (const Standard standard :
+       {Standard::kPal, Standard::kNtsc, Standard::kPalM}) {
+    SCOPED_TRACE(StandardToString(standard));
+    Project project = MakeValidProject();
+    project.cvbs_presets.video_standard_preset = standard;
+    Section& section = project.sections[0];
+    SetLumaBandwidthEnabled(&section, true);
+    LumaBandwidthParameters& bandwidth = section.luma_bandwidth;
+    for (const double transition :
+         {editor_limits::kLumaBandwidthTransitionMinMhz,
+          kLumaBandwidthTransitionDefaultMhz,
+          editor_limits::kLumaBandwidthTransitionMaxMhz}) {
+      bandwidth.transition_mhz = transition;
+      const double max_cutoff = LumaBandwidthMaxCutoffMhz(standard, transition);
+      bandwidth.cutoff_mhz = max_cutoff;
+      EXPECT_TRUE(ProjectIsValid(project, nullptr)) << transition;
+      bandwidth.cutoff_mhz = max_cutoff + 0.01;
+      EXPECT_FALSE(ProjectIsValid(project, nullptr)) << transition;
+      bandwidth.cutoff_mhz = editor_limits::kLumaBandwidthCutoffMinMhz;
+      EXPECT_TRUE(ProjectIsValid(project, nullptr)) << transition;
+      bandwidth.cutoff_mhz -= 0.01;
+      EXPECT_FALSE(ProjectIsValid(project, nullptr)) << transition;
+    }
+    bandwidth.cutoff_mhz = 3.0;
+    bandwidth.transition_mhz =
+        editor_limits::kLumaBandwidthTransitionMinMhz - 0.01;
+    EXPECT_FALSE(ProjectIsValid(project, nullptr));
+    bandwidth.transition_mhz =
+        editor_limits::kLumaBandwidthTransitionMaxMhz + 0.01;
+    EXPECT_FALSE(ProjectIsValid(project, nullptr));
+  }
+}
+
+TEST(SectionBlockPresenterTest, ApplySectionEditDeltaMirrorsNoiseLayersApart) {
+  Section before;
+  before.name = "Edited";
+  Section target;
+  target.name = "Target";
+  SetNoiseBlockEnabled(&target, true);
+  target.noise.noise_db = 30.0;
+
+  // Adding the shared layer leaves the target's own capture layer alone.
+  Section after = before;
+  SetSharedNoiseEnabled(&after, true);
+  after.noise.shared.noise_seed = 99;
+  Section mirrored = ApplySectionEditDelta(before, after, target);
+  EXPECT_EQ(mirrored.noise.shared, after.noise.shared);
+  EXPECT_TRUE(mirrored.noise.enabled);
+  EXPECT_EQ(mirrored.noise.noise_db, 30.0);
+
+  // A capture-layer edit leaves the target's shared layer alone.
+  Section shared_target = target;
+  SetSharedNoiseEnabled(&shared_target, true);
+  shared_target.noise.shared.noise_seed = 5;
+  Section capture_after = before;
+  SetNoiseBlockEnabled(&capture_after, true);
+  capture_after.noise.spectrum = {{0.0, 0.0}, {2.0, -10.0}};
+  mirrored = ApplySectionEditDelta(before, capture_after, shared_target);
+  EXPECT_EQ(mirrored.noise.spectrum, capture_after.noise.spectrum);
+  EXPECT_EQ(mirrored.noise.noise_db, capture_after.noise.noise_db);
+  EXPECT_EQ(mirrored.noise.shared.noise_seed, 5);
+}
+
+TEST(SectionBlockPresenterTest, ApplySectionEditDeltaMirrorsLumaBandwidth) {
+  Section before;
+  Section after = before;
+  SetLumaBandwidthEnabled(&after, true);
+  after.luma_bandwidth.cutoff_mhz = 2.5;
+  Section target;
+  target.name = "Target";
+  const Section mirrored = ApplySectionEditDelta(before, after, target);
+  EXPECT_EQ(mirrored.luma_bandwidth, after.luma_bandwidth);
+  EXPECT_EQ(mirrored.name, "Target");
+
+  // An unrelated edit never overwrites the target's own limit.
+  Section limited = target;
+  SetLumaBandwidthEnabled(&limited, true);
+  limited.luma_bandwidth.cutoff_mhz = 4.0;
+  Section renamed = before;
+  renamed.source = "assets/other.exr";
+  EXPECT_EQ(ApplySectionEditDelta(before, renamed, limited).luma_bandwidth,
+            limited.luma_bandwidth);
+}
+
+TEST(SectionBlockPresenterTest, ApplySectionEditDeltaMirrorsFlaggedAndAnchor) {
+  Section before;
+  SetRandomDropoutsEnabled(&before, true);
+  Section after = before;
+  after.dropouts.random.flagged = false;
+  SetRandomDropoutAnchor(&after, DropoutAnchor::kDisc);
+  Section target;
+  SetScratchDropoutsEnabled(&target, true);
+  const Section mirrored = ApplySectionEditDelta(before, after, target);
+  EXPECT_EQ(mirrored.dropouts.random, after.dropouts.random);
+  EXPECT_EQ(mirrored.dropouts.scratch, target.dropouts.scratch);
 }
 
 TEST(SectionBlockPresenterTest, AddChannelPairEmitsBlockClearRemovesIt) {

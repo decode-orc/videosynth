@@ -21,6 +21,8 @@
 #include <thread>
 #include <vector>
 
+#include "videosynth/channel_stage.h"
+#include "videosynth/chroma_error_stage.h"
 #include "videosynth/dropout_injection_stage.h"
 #include "videosynth/fixed_point.h"
 #include "videosynth/generation_stage.h"
@@ -106,6 +108,8 @@ class PreviewFrameService : public QObject {
     const Project* project = nullptr;
     const std::vector<IGenerationStage::FrameScheduleItem>* schedule = nullptr;
     IGenerationStage* generation = nullptr;
+    const ChannelStage* channel = nullptr;
+    const ChromaErrorStage* chroma_error = nullptr;
     const NoiseInjectionStage* noise = nullptr;
     const DropoutInjectionStage* dropouts = nullptr;
     const IProgressiveFrameProvider* source_provider = nullptr;
@@ -122,8 +126,9 @@ class PreviewFrameService : public QObject {
   static constexpr int kDefaultCacheCapacity = 4;
 
   // synthesizer: callable executed on the worker thread for each frame; when
-  // empty, the default (GenerateFrameBatch + optional noise/dropout stages +
-  // progressive source decode) is used.
+  // empty, the default (GenerateFrameBatch + channel and chroma error
+  // stages + optional noise/dropout stages + progressive source decode) is
+  // used.
   explicit PreviewFrameService(SynthesizeFrameFn synthesizer = {},
                                int cache_capacity = kDefaultCacheCapacity,
                                QObject* parent = nullptr);
@@ -184,6 +189,8 @@ class PreviewFrameService : public QObject {
   struct ScheduleContext {
     Project project;
     GenerationStage generation;
+    ChannelStage channel;
+    ChromaErrorStage chroma_error;
     NoiseInjectionStage noise{nullptr};
     DropoutInjectionStage dropouts{nullptr};
     ProgressiveFrameSource source_provider;

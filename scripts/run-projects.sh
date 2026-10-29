@@ -21,7 +21,7 @@ output_root="$build_dir/project-output"
 suite_dirs() {
   case "$1" in
     general)  echo "projects/general projects/general-yc" ;;
-    stacking) echo "projects/stacking @generated-projects/stacking-clean @generated-projects/stacking-yc" ;;
+    stacking) echo "projects/stacking @generated-projects/stacking-captures @generated-projects/stacking-clean @generated-projects/stacking-yc" ;;
     *)        return 1 ;;
   esac
 }

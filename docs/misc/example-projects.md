@@ -16,7 +16,45 @@ The repository ships a set of hand-authored projects under `projects/`, covering
 !!! warning "The long-form projects are very large"
     They write hundreds of gigabytes each — roughly 383 GB for PAL and 309 GB for NTSC of composite samples, plus about 3.1 GB of audio. They are deliberately excluded from the automated suites; run them by hand with `--output-root` pointing at storage that can hold the result.
 
-Derived variants — the impairment-free `stacking-clean` set and the Y/C `stacking-yc` set — are generated into `build/generated-projects/` at build time and are not committed. Add a variant by editing `variants.json`, not by copying YAML.
+Derived variants — the `stacking-captures` set, the impairment-free `stacking-clean` set and the Y/C `stacking-yc` set — are generated into `build/generated-projects/` at build time and are not committed. Add a variant by editing `variants.json`, not by copying YAML.
+
+### Pressings and captures
+
+`projects/stacking/` also holds two pressings, A and B, for each of PAL, NTSC and PAL-M (`<standard>_pressing_A.yaml`, `<standard>_pressing_B.yaml`). Each is a 16-frame CAV disc (PNs 1–16) with:
+
+- a shaped capture noise layer;
+- a shaped [shared (pressing) noise layer](../user-manual/impairments.md#pressing-noise-and-capture-noise), seeded 7001 for pressing A and 7002 for pressing B;
+- a [`channel:` timing offset](../reference/channel.md) of 0.0 samples for A and −0.3 for B.
+
+PAL also has a third pressing, C (`pal_pressing_C.yaml`), with the same content and layout. Its shared noise is seeded 7003, and its `channel:` block adds the two glass-master and readout impairments that are PAL-only or new to it:
+
+- [`fm_beat`](../reference/channel.md#fm_beat) at −24 dB, the FM-beat herringbone, visible in the bars and the colour ramps;
+- [`edge_smear`](../reference/channel.md#edge_smear) with `fraction` 0.12 and `tau_samples` 3.0;
+- a timing offset of 0.15 samples.
+
+A fourth PAL pressing, D (`pal_pressing_D.yaml`), has pressing A's content, layout and channel, shared noise seeded 7004, and two kinds of dropout in every section:
+
+- [pressing defects](../user-manual/impairments.md#pressing-defects-unflagged-and-disc-anchored-dropouts): `random` dropouts at scale 6 with `anchor: disc` and `flagged: false`, seeded 7004. They sit on the same pictures in every capture and in the replay, and no sidecar records them;
+- capture dropouts: flagged `scratch` dropouts at scale 2, whose seed each capture replaces.
+
+The `stacking-captures` variant derives four captures of every pressing. Each has its own capture seed and keeps the pressing's shared seed, disc-anchored dropout seeds and channel:
+
+| Capture | Capture seed | Timeline |
+|---------|--------------|----------|
+| `_cap1` | 5101 | PNs 1–16 |
+| `_cap2` | 5202 | Starts later, at PN 5 |
+| `_cap3` | 5303 | Replays the multi-burst range: PNs 1–12, 9–12, 13–16 |
+| `_cap4` | 5404 | PNs 1–16 |
+
+`stacking-clean` derives an impairment-free truth for every capture (`_capN_clean`). It removes the noise and the dropouts, pressing defects included, but keeps the `channel:` block, because the timing offset, the beat and the smear are part of the pressing. The captures of one pressing then match each other on every picture number, apart from capture noise. Pressings A and B's truths differ by the 0.3-sample offset.
+
+### Disc-simulation sets
+
+The `<standard>_discsim_A`–`_D` projects are four captures of one 40-frame CAV disc, each with its own start, skips and seeds. Their dropouts are disc-anchored (`anchor: disc`), so where a capture replays a range (PNs 17–20 in source A), the replay carries exactly the first play's dropouts, as a real disc would.
+
+### Band-limited luma
+
+`pal_bandlimited.yaml`, `ntsc_bandlimited.yaml` and `pal_m_bandlimited.yaml` are 16-frame CAV discs that play the multi-burst at full bandwidth, then at two [`luma_bandwidth`](../reference/sections.md#luma_bandwidth) cutoffs (5.0 and 3.0 MHz on PAL, 4.2 and 3.0 MHz on NTSC and PAL-M), and finish with a sharp-edged picture at the lower cutoff. Nothing else is impaired, so the luma low-pass is the only difference between sections.
 
 ## Running a suite
 
@@ -78,7 +116,8 @@ scripts/output-hashes.sh
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/generate_test_projects.py` | Derive variant projects from `projects/` (run automatically by the build) |
+| `scripts/generate_test_projects.py` | Derive variant projects from `projects/` (run automatically by the build), including the per-capture seeds and timelines of the pressing sets |
+| `scripts/generate_fm_beat_reference.py` | Rewrite the FM-beat golden vectors (`tests/unit/fm_beat_reference_vectors.h`) from the reference beat model; needs numpy and scipy, and is not part of the build |
 | `scripts/compare_frames.py` | Bit-exact comparison of a picture number across stacking sources |
 | `scripts/compare_frames_detail.py` | As above, split by VBI versus active video |
 | `scripts/convert_progressive_raw_to_exr.py` | Convert raw `yuv422p10le` stills to OpenEXR fixtures |

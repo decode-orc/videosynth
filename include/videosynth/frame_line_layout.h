@@ -1,8 +1,9 @@
 /*
  * File:        frame_line_layout.h
  * Module:      frame_line_layout
- * Purpose:     Per-line sample counts and offsets within a synthesised frame,
- *              shared by the generation stage and the GUI preview.
+ * Purpose:     Per-line sample counts and offsets, and the active picture
+ *              raster, within a synthesised frame; shared by the generation
+ *              stage, the impairment stages and the GUI preview.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -11,6 +12,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <vector>
 
@@ -57,6 +59,73 @@ inline int MaxLineSamples(const std::vector<int>& line_samples) {
     max_samples = std::max(max_samples, samples);
   }
   return max_samples;
+}
+
+// The active picture raster of a 4fsc frame: which frame lines carry picture
+// and the sample window within each of them.
+struct ActiveRasterGeometry {
+  int first_active_line_field1 = 0;
+  int first_active_line_field2 = 0;
+  int active_lines_per_field = 0;
+  int active_window_start_samples = 0;
+  int active_window_end_samples = 0;
+  int active_width_pixels = 720;
+};
+
+inline ActiveRasterGeometry GetActiveRasterGeometry(Standard standard,
+                                                    double sample_rate_hz) {
+  if (Is625LineStandard(standard)) {
+    // ITU-R BT.1700 Annex 1 Part B Table 3: PAL line timing, mapped through
+    // BT.601's 13.5 MHz sampling model. Keep the established PAL line start
+    // anchor at +177 4fsc samples, but limit active-picture synthesis to
+    // the 52.0 us visible-aperture duration.
+    const int active_window_start = 177;
+    const int active_window_end =
+        active_window_start +
+        std::max(1, static_cast<int>(std::lround(sample_rate_hz * 52.0e-6)));
+    return ActiveRasterGeometry{
+        .first_active_line_field1 = 23,
+        .first_active_line_field2 = 335,
+        .active_lines_per_field = 288,
+        .active_window_start_samples = active_window_start,
+        .active_window_end_samples = active_window_end,
+        .active_width_pixels = 720,
+    };
+  }
+
+  const int active_window_start =
+      std::max(0, static_cast<int>(std::lround(sample_rate_hz * 10.5e-6)));
+  const int active_window_end =
+      std::max(active_window_start + 1,
+               static_cast<int>(std::lround(sample_rate_hz * 62.5e-6)));
+
+  return ActiveRasterGeometry{
+      .first_active_line_field1 = 22,
+      .first_active_line_field2 = 284,
+      .active_lines_per_field = 240,
+      .active_window_start_samples = active_window_start,
+      .active_window_end_samples = active_window_end,
+      .active_width_pixels = 720,
+  };
+}
+
+// Index of a frame line within the active raster (field 1 rows first), or -1
+// when the line carries no picture.
+inline int ActiveFrameLineIndex(const ActiveRasterGeometry& geometry,
+                                int line_1based) {
+  if (line_1based >= geometry.first_active_line_field1 &&
+      line_1based < (geometry.first_active_line_field1 +
+                     geometry.active_lines_per_field)) {
+    return line_1based - geometry.first_active_line_field1;
+  }
+  if (line_1based >= geometry.first_active_line_field2 &&
+      line_1based < (geometry.first_active_line_field2 +
+                     geometry.active_lines_per_field)) {
+    return geometry.active_lines_per_field +
+           (line_1based - geometry.first_active_line_field2);
+  }
+
+  return -1;
 }
 
 }  // namespace videosynth

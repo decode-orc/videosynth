@@ -4,13 +4,15 @@ A videosynth project is a single YAML file. This reference documents it block by
 
 ## Top-level structure
 
-There are exactly five top-level blocks. Any other top-level key is a parse error.
+There are exactly seven top-level blocks. Any other top-level key is a parse error.
 
 ```yaml
 project:          # Identity — name, version, description
 cvbs_presets:     # Signal format — standard, encoding, signal state
 output:           # Where the media goes and in what form
 line_injections:  # Project-wide disc format and VITS set
+channel:          # Pressing impairments — timing offset, edge smear, FM beat
+chroma_error:     # Capture chroma gain and phase error
 sections:         # The ordered timeline
 ```
 
@@ -20,6 +22,8 @@ sections:         # The ordered timeline
 | `cvbs_presets` | Yes | [cvbs_presets](cvbs-presets.md) |
 | `output` | Yes | [output](output.md) |
 | `line_injections` | No | [line_injections](line-injections.md) |
+| `channel` | No | [channel](channel.md) |
+| `chroma_error` | No | [chroma_error](chroma-error.md) |
 | `sections` | Yes | [sections](sections.md) |
 
 ## Section blocks
@@ -29,6 +33,7 @@ Each entry in `sections:` may carry these optional sub-blocks:
 | Sub-block | Purpose | Page |
 |-----------|---------|------|
 | `line_injections` | Laserdisc biphase codes for this section | [section line_injections](section-line-injections.md) |
+| `luma_bandwidth` | Low-pass on the picture luma | [sections](sections.md#luma_bandwidth) |
 | `noise` | Gaussian noise injection | [noise](section-noise.md) |
 | `dropouts` | Random and scratch dropouts | [dropouts](section-dropouts.md) |
 | `osd` | On-screen display overlays | [osd](section-osd.md) |
@@ -95,6 +100,17 @@ line_injections:
     - vits_type:
       target_lines:
 
+channel:
+  timing_offset_samples:
+
+chroma_error:
+  gain:
+  phase_deg:
+  line_jitter:
+    phase_deg:
+    gain:
+    seed:
+
 sections:
   - name:
     type:
@@ -113,17 +129,29 @@ sections:
             chapter:
             programme_status:
             users_code:
+    luma_bandwidth:
+      cutoff_mhz:
+      transition_mhz:
     noise:
       noise_db:
       noise_spread_db:
       noise_seed:
+      spectrum:
+      shared:
+        noise_db:
+        noise_seed:
+        spectrum:
     dropouts:
       random:
         scale:
         seed:
+        flagged:
+        anchor:
       scratch:
         scale:
         seed:
+        flagged:
+        anchor:
     osd:
       overlays:
         - text:

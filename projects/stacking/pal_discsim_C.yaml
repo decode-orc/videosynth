@@ -14,6 +14,8 @@
 #   PNs 33–40: Y_CB_CR_RAMPS.exr
 #
 # Noise/dropout: light — noise_db 48.0, scale 6, seed 3003.
+# Dropouts are disc-anchored (anchor: disc): keyed by picture number, so a
+#   replayed range repeats the first play's dropouts as a real disc would.
 # Backward skip: Testcard_PreSkip_C → Testcard_Replay_C (noise_seed 9903).
 # Forward skip: Tartan_PreGap_C (25–28) → Tartan_PostGap_C (start_value 31).
 
@@ -55,9 +57,11 @@ sections:
       random:
         scale: 6
         seed: 3003
+        anchor: disc
       scratch:
         scale: 6
         seed: 3003
+        anchor: disc
     line_injections:
       - type: laserdisc
         codes:
@@ -90,9 +94,11 @@ sections:
       random:
         scale: 6
         seed: 3003
+        anchor: disc
       scratch:
         scale: 6
         seed: 3003
+        anchor: disc
     line_injections:
       - type: laserdisc
         codes:
@@ -125,9 +131,11 @@ sections:
       random:
         scale: 6
         seed: 3003
+        anchor: disc
       scratch:
         scale: 6
         seed: 3003
+        anchor: disc
     line_injections:
       - type: laserdisc
         codes:
@@ -160,9 +168,11 @@ sections:
       random:
         scale: 6
         seed: 3003
+        anchor: disc
       scratch:
         scale: 6
         seed: 3003
+        anchor: disc
     line_injections:
       - type: laserdisc
         codes:
@@ -195,9 +205,11 @@ sections:
       random:
         scale: 6
         seed: 3003
+        anchor: disc
       scratch:
         scale: 6
         seed: 3003
+        anchor: disc
     line_injections:
       - type: laserdisc
         codes:
@@ -230,9 +242,11 @@ sections:
       random:
         scale: 6
         seed: 3003
+        anchor: disc
       scratch:
         scale: 6
         seed: 3003
+        anchor: disc
     line_injections:
       - type: laserdisc
         codes:
@@ -265,9 +279,11 @@ sections:
       random:
         scale: 6
         seed: 3003
+        anchor: disc
       scratch:
         scale: 6
         seed: 3003
+        anchor: disc
     line_injections:
       - type: laserdisc
         codes:

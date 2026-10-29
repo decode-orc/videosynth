@@ -685,11 +685,14 @@ bool MainWindow::OnSaveAs() {
   return SaveToPath(path);
 }
 
-void MainWindow::OnEditProject() {
+void MainWindow::OnEditProject() { EditProject(IssueField::kNone); }
+
+void MainWindow::EditProject(IssueField field) {
   if (!document_->is_open()) {
     return;
   }
   EditProjectDialog dialog(document_->project(), this);
+  dialog.RevealField(field);
   if (dialog.exec() != QDialog::Accepted) {
     return;
   }
@@ -700,6 +703,8 @@ void MainWindow::OnEditProject() {
   document_->SetCvbsPresets(edited.cvbs_presets);
   document_->SetProjectLineInjections(edited.line_injections);
   document_->SetOutputTargets(edited.output);
+  document_->SetChannel(edited.channel);
+  document_->SetChromaError(edited.chroma_error);
   statusBar()->showMessage(tr("Project settings updated"), 3000);
 }
 
@@ -709,18 +714,21 @@ void MainWindow::OnIssueActivated(const QModelIndex& index) {
   }
   const int section_index =
       index.data(ValidationIssuesModel::kSectionIndexRole).toInt();
+  const auto field = static_cast<IssueField>(
+      index.data(ValidationIssuesModel::kFieldRole).toInt());
   emit IssueNavigationRequested(section_index);
 
-  // Section issues focus that section's editor; project-level issues open the
-  // Edit Project dialog.
+  // Section issues focus that section's editor, revealing the field group the
+  // issue names; project-level issues open the Edit Project dialog at it.
   if (section_index >= 0 && section_index < document_->section_count()) {
     section_list_dock_->SelectSection(section_index);
     section_editor_->SetCurrentSection(section_index);
+    section_editor_->RevealField(field);
     statusBar()->showMessage(
         tr("Issue relates to section %1").arg(section_index + 1), 3000);
   } else {
     statusBar()->showMessage(tr("Project-level issue"), 3000);
-    OnEditProject();
+    EditProject(field);
   }
 }
 

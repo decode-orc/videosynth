@@ -73,9 +73,11 @@ A frame template cache holds the parts of a frame that do not change between fra
 | Video standard, sample encoding, signal state | Project | [`cvbs_presets`](../reference/cvbs-presets.md) |
 | Output paths, signal type, EFM selection | Project | [`output`](../reference/output.md) |
 | Disc format (CAV/CLV), VITS placement, VITS set | Project | [`line_injections`](../reference/line-injections.md) |
+| Pressing timing offset, edge smear, FM beat | Project | [`channel`](../reference/channel.md) |
+| Capture chroma gain and phase error | Project | [`chroma_error`](../reference/chroma-error.md) |
 | Picture source, duration, disc section type | Section | [`sections[]`](../reference/sections.md) |
 | Laserdisc biphase codes | Section | [`sections[].line_injections`](../reference/section-line-injections.md) |
-| Noise, dropouts | Section | [`noise`](../reference/section-noise.md), [`dropouts`](../reference/section-dropouts.md) |
+| Noise, dropouts, luma bandwidth | Section | [`noise`](../reference/section-noise.md), [`dropouts`](../reference/section-dropouts.md), [`luma_bandwidth`](../reference/sections.md#luma_bandwidth) |
 | Audio channel pairs | Section | [`audio`](../reference/section-audio.md) |
 | On-screen display overlays | Section | [`osd`](../reference/section-osd.md) |
 

@@ -1,7 +1,8 @@
 /*
  * File:        project_settings_editor.h
  * Module:      gui
- * Purpose:     Form editor for project info, CVBS presets, and output targets
+ * Purpose:     Form editor for project info, CVBS presets, line injections,
+ *              channel and chroma error impairments, and output targets
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -15,9 +16,12 @@
 
 #include "project_document.h"
 #include "project_settings_presenter.h"
+#include "validation_issues_model.h"
 
 class QCheckBox;
 class QComboBox;
+class QDoubleSpinBox;
+class QGroupBox;
 class QGridLayout;
 class QLabel;
 class QLineEdit;
@@ -27,9 +31,10 @@ class QPushButton;
 namespace videosynth::gui {
 
 // Editor for the project-level YAML blocks (project:, cvbs_presets:,
-// output:). Every control maps 1:1 to a Project field and commits through
-// ProjectDocument commands; standard-dependent enablement follows
-// BuildProjectSettingsFormState so invalid combinations cannot be entered.
+// line_injections:, channel:, chroma_error:, output:). Every control maps 1:1
+// to a Project field and commits through ProjectDocument commands;
+// standard-dependent enablement follows BuildProjectSettingsFormState so
+// invalid combinations cannot be entered.
 //
 // Thread-safety: NOT thread-safe. GUI (main) thread only.
 class ProjectSettingsEditor : public QWidget {
@@ -45,6 +50,11 @@ class ProjectSettingsEditor : public QWidget {
   // dialog calls this with `false` so it is shown read-only.
   void SetStandardEditable(bool editable);
 
+  // The group holding `field` (kChannel, kChromaError) and the input to focus
+  // in it, for validation issue navigation; null for other fields.
+  QWidget* FieldGroup(IssueField field) const;
+  QWidget* FieldFocusWidget(IssueField field) const;
+
  private:
   void BuildUi();
   void LoadFromDocument();
@@ -54,6 +64,12 @@ class ProjectSettingsEditor : public QWidget {
   void CommitCvbsPresets();
   void CommitLineInjections();
   void CommitOutputTargets();
+  void CommitChannel();
+  void CommitChromaError();
+
+  QWidget* BuildChannelGroup();
+  QWidget* BuildChromaErrorGroup();
+  void LoadChannelAndChromaError(const Project& project);
 
   // Rebuilds the VITS checklist from the standard's catalogue and the current
   // model. Called only on external/standard changes (never from a VITS widget's
@@ -113,6 +129,29 @@ class ProjectSettingsEditor : public QWidget {
   // LaserDisc digital audio (EFM): enable plus the single channel pair the
   // stream is encoded from. The hint reports why no stream is written when the
   // selection is inert.
+  // channel: (pressing impairments). The FM-beat group is disabled outside
+  // 625-line PAL; fm_beat_hint_ says why.
+  QGroupBox* channel_group_ = nullptr;
+  QDoubleSpinBox* timing_offset_spin_ = nullptr;
+  QGroupBox* edge_smear_group_ = nullptr;
+  QDoubleSpinBox* edge_smear_fraction_spin_ = nullptr;
+  QDoubleSpinBox* edge_smear_tau_spin_ = nullptr;
+  QGroupBox* fm_beat_group_ = nullptr;
+  QDoubleSpinBox* fm_beat_carrier_spin_ = nullptr;
+  QDoubleSpinBox* fm_beat_level_spin_ = nullptr;
+  QLabel* fm_beat_hint_ = nullptr;
+
+  // chroma_error: (capture impairment), disabled for SECAM.
+  QGroupBox* chroma_error_group_ = nullptr;
+  QDoubleSpinBox* chroma_gain_spin_ = nullptr;
+  QDoubleSpinBox* chroma_phase_spin_ = nullptr;
+  QGroupBox* chroma_jitter_group_ = nullptr;
+  QDoubleSpinBox* jitter_phase_spin_ = nullptr;
+  QDoubleSpinBox* jitter_gain_spin_ = nullptr;
+  QCheckBox* jitter_seed_check_ = nullptr;
+  QLineEdit* jitter_seed_edit_ = nullptr;
+  QLabel* chroma_error_hint_ = nullptr;
+
   QCheckBox* efm_check_ = nullptr;
   QComboBox* efm_pair_combo_ = nullptr;
   QLabel* efm_hint_ = nullptr;

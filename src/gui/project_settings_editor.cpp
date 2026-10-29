@@ -1,7 +1,8 @@
 /*
  * File:        project_settings_editor.cpp
  * Module:      gui
- * Purpose:     Form editor for project info, CVBS presets, and output targets
+ * Purpose:     Form editor for project info, CVBS presets, line injections,
+ *              channel and chroma error impairments, and output targets
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -12,6 +13,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
+#include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -51,6 +53,12 @@ videosynth::VitsPlacement VitsPlacementFromComboIndex(int index) {
     default:
       return videosynth::VitsPlacement::kStandard;
   }
+}
+
+int64_t ParseSeed(const QString& text) {
+  bool ok = false;
+  const qlonglong value = text.trimmed().toLongLong(&ok);
+  return ok ? static_cast<int64_t>(value) : 0;
 }
 
 int ComboIndexFromVitsPlacement(videosynth::VitsPlacement placement) {
@@ -209,6 +217,9 @@ void ProjectSettingsEditor::BuildUi() {
   connect(disc_type_combo_, &QComboBox::activated, this,
           &ProjectSettingsEditor::CommitLineInjections);
 
+  layout->addWidget(BuildChannelGroup());
+  layout->addWidget(BuildChromaErrorGroup());
+
   // --- output: -------------------------------------------------------------
   auto* output_group = new QGroupBox(tr("Output"), this);
   auto* output_form = new QFormLayout(output_group);
@@ -270,6 +281,220 @@ void ProjectSettingsEditor::BuildUi() {
   });
   connect(efm_pair_combo_, &QComboBox::activated, this,
           &ProjectSettingsEditor::CommitOutputTargets);
+}
+
+QWidget* ProjectSettingsEditor::BuildChannelGroup() {
+  namespace limits = project_editor_limits;
+  // --- channel: (pressing impairments) -------------------------------------
+  channel_group_ = new QGroupBox(tr("Channel (pressing)"), this);
+  channel_group_->setCheckable(true);
+  channel_group_->setToolTip(
+      tr("Impairments of the pressing and its readout. Every project of one "
+         "pressing should use the same channel settings."));
+  auto* outer = new QVBoxLayout(channel_group_);
+  outer->setContentsMargins(0, 0, 0, 0);
+  auto* body = new QWidget(channel_group_);
+  auto* layout = new QVBoxLayout(body);
+  auto* form = new QFormLayout();
+
+  const auto make_spin = [](QWidget* parent, double min, double max,
+                            int decimals, double step, const QString& suffix) {
+    auto* spin = new QDoubleSpinBox(parent);
+    spin->setRange(min, max);
+    spin->setDecimals(decimals);
+    spin->setSingleStep(step);
+    spin->setSuffix(suffix);
+    // Commit on Enter or focus loss, not per keystroke.
+    spin->setKeyboardTracking(false);
+    CapFieldWidthAtSizeHint(spin);
+    return spin;
+  };
+
+  timing_offset_spin_ =
+      make_spin(body, -limits::kTimingOffsetMaxSamples,
+                limits::kTimingOffsetMaxSamples, 3, 0.05, tr(" samples"));
+  timing_offset_spin_->setToolTip(
+      tr("Sub-sample timing offset in 4fsc samples; positive values make the "
+         "signal arrive later."));
+  form->addRow(tr("Timing offset:"), timing_offset_spin_);
+  layout->addLayout(form);
+
+  edge_smear_group_ = new QGroupBox(tr("Edge smear"), body);
+  edge_smear_group_->setCheckable(true);
+  edge_smear_group_->setToolTip(
+      tr("Readout smear: a fraction of the signal passes through a one-pole "
+         "low-pass, trailing every edge."));
+  auto* smear_form = new QFormLayout(edge_smear_group_);
+  edge_smear_fraction_spin_ =
+      make_spin(edge_smear_group_, 0.0, limits::kEdgeSmearFractionMax, 3, 0.01,
+                QString());
+  smear_form->addRow(tr("Fraction:"), edge_smear_fraction_spin_);
+  edge_smear_tau_spin_ =
+      make_spin(edge_smear_group_, limits::kEdgeSmearTauMinSamples,
+                limits::kEdgeSmearTauMaxSamples, 2, 0.5, tr(" samples"));
+  smear_form->addRow(tr("Time constant:"), edge_smear_tau_spin_);
+  layout->addWidget(edge_smear_group_);
+
+  fm_beat_group_ = new QGroupBox(tr("FM beat (herringbone)"), body);
+  fm_beat_group_->setCheckable(true);
+  fm_beat_group_->setToolTip(
+      tr("The beat between the FM video carrier and the colour signal, "
+         "recorded on the master (625-line PAL only)."));
+  auto* beat_form = new QFormLayout(fm_beat_group_);
+  fm_beat_carrier_spin_ =
+      make_spin(fm_beat_group_, limits::kFmBeatCarrierMinHz,
+                limits::kFmBeatCarrierMaxHz, 0, 1000.0, tr(" Hz"));
+  fm_beat_carrier_spin_->setToolTip(tr("FM video carrier frequency at black."));
+  beat_form->addRow(tr("Carrier at black:"), fm_beat_carrier_spin_);
+  fm_beat_level_spin_ = make_spin(fm_beat_group_, limits::kFmBeatLevelMinDb,
+                                  limits::kFmBeatLevelMaxDb, 1, 1.0, tr(" dB"));
+  fm_beat_level_spin_->setToolTip(
+      tr("Beat level relative to the local chroma amplitude, at the carrier "
+         "for 50 IRE."));
+  beat_form->addRow(tr("Level:"), fm_beat_level_spin_);
+  layout->addWidget(fm_beat_group_);
+  fm_beat_hint_ = new QLabel(
+      tr("The FM beat model is fitted to PAL LaserDisc pressings, so it is "
+         "available for PAL projects only."),
+      body);
+  fm_beat_hint_->setWordWrap(true);
+  layout->addWidget(fm_beat_hint_);
+  outer->addWidget(body);
+
+  const auto commit = [this] {
+    if (!updating_) {
+      CommitChannel();
+    }
+  };
+  connect(channel_group_, &QGroupBox::toggled, body, &QWidget::setVisible);
+  connect(channel_group_, &QGroupBox::toggled, this, commit);
+  body->setVisible(channel_group_->isChecked());
+  connect(edge_smear_group_, &QGroupBox::toggled, this, commit);
+  connect(fm_beat_group_, &QGroupBox::toggled, this, commit);
+  for (QDoubleSpinBox* spin :
+       {timing_offset_spin_, edge_smear_fraction_spin_, edge_smear_tau_spin_,
+        fm_beat_carrier_spin_, fm_beat_level_spin_}) {
+    connect(spin, &QDoubleSpinBox::valueChanged, this, commit);
+  }
+  return channel_group_;
+}
+
+QWidget* ProjectSettingsEditor::BuildChromaErrorGroup() {
+  namespace limits = project_editor_limits;
+  // --- chroma_error: (capture impairment) ----------------------------------
+  chroma_error_group_ = new QGroupBox(tr("Chroma error (capture)"), this);
+  chroma_error_group_->setCheckable(true);
+  chroma_error_group_->setToolTip(
+      tr("Gain and phase error of the player's chroma path, applied to picture "
+         "chroma only: burst, VITS and VBI lines are untouched."));
+  auto* outer = new QVBoxLayout(chroma_error_group_);
+  outer->setContentsMargins(0, 0, 0, 0);
+  auto* body = new QWidget(chroma_error_group_);
+  auto* layout = new QVBoxLayout(body);
+  auto* form = new QFormLayout();
+
+  const auto make_spin = [](QWidget* parent, double min, double max,
+                            int decimals, double step, const QString& suffix) {
+    auto* spin = new QDoubleSpinBox(parent);
+    spin->setRange(min, max);
+    spin->setDecimals(decimals);
+    spin->setSingleStep(step);
+    spin->setSuffix(suffix);
+    spin->setKeyboardTracking(false);
+    CapFieldWidthAtSizeHint(spin);
+    return spin;
+  };
+
+  chroma_gain_spin_ = make_spin(body, limits::kChromaGainMin,
+                                limits::kChromaGainMax, 3, 0.01, QString());
+  chroma_gain_spin_->setToolTip(
+      tr("Chroma gain; 1.0 leaves saturation as is."));
+  form->addRow(tr("Gain:"), chroma_gain_spin_);
+  chroma_phase_spin_ = make_spin(body, -limits::kChromaPhaseMaxDeg,
+                                 limits::kChromaPhaseMaxDeg, 2, 0.5, tr("°"));
+  chroma_phase_spin_->setToolTip(tr("Chroma phase advance (hue error)."));
+  form->addRow(tr("Phase:"), chroma_phase_spin_);
+  layout->addLayout(form);
+
+  chroma_jitter_group_ = new QGroupBox(tr("Per-line jitter"), body);
+  chroma_jitter_group_->setCheckable(true);
+  chroma_jitter_group_->setToolTip(
+      tr("Gaussian gain and phase jitter drawn per line; the values are "
+         "standard deviations."));
+  auto* jitter_form = new QFormLayout(chroma_jitter_group_);
+  jitter_phase_spin_ =
+      make_spin(chroma_jitter_group_, 0.0, limits::kChromaJitterPhaseMaxDeg, 2,
+                0.1, tr("°"));
+  jitter_form->addRow(tr("Phase deviation:"), jitter_phase_spin_);
+  jitter_gain_spin_ =
+      make_spin(chroma_jitter_group_, 0.0, limits::kChromaJitterGainMax, 3,
+                0.005, QString());
+  jitter_form->addRow(tr("Gain deviation:"), jitter_gain_spin_);
+  jitter_seed_check_ = new QCheckBox(tr("Fixed seed"), chroma_jitter_group_);
+  jitter_seed_edit_ = new QLineEdit(chroma_jitter_group_);
+  CapFieldWidthToText(jitter_seed_edit_, QStringLiteral("10,000,000"));
+  auto* seed_row = new QHBoxLayout();
+  seed_row->addWidget(jitter_seed_check_);
+  seed_row->addWidget(jitter_seed_edit_);
+  seed_row->addStretch();
+  jitter_form->addRow(seed_row);
+  layout->addWidget(chroma_jitter_group_);
+  chroma_error_hint_ = new QLabel(
+      tr("Chroma error models a quadrature (PAL/NTSC) chroma path, so it is "
+         "not available for SECAM."),
+      body);
+  chroma_error_hint_->setWordWrap(true);
+  outer->addWidget(body);
+  outer->addWidget(chroma_error_hint_);
+
+  const auto commit = [this] {
+    if (!updating_) {
+      CommitChromaError();
+    }
+  };
+  connect(chroma_error_group_, &QGroupBox::toggled, body, &QWidget::setVisible);
+  connect(chroma_error_group_, &QGroupBox::toggled, this, commit);
+  body->setVisible(chroma_error_group_->isChecked());
+  connect(chroma_jitter_group_, &QGroupBox::toggled, this, commit);
+  for (QDoubleSpinBox* spin : {chroma_gain_spin_, chroma_phase_spin_,
+                               jitter_phase_spin_, jitter_gain_spin_}) {
+    connect(spin, &QDoubleSpinBox::valueChanged, this, commit);
+  }
+  connect(jitter_seed_check_, &QCheckBox::toggled, this, [this](bool checked) {
+    jitter_seed_edit_->setEnabled(checked);
+    if (!updating_) {
+      CommitChromaError();
+    }
+  });
+  connect(jitter_seed_edit_, &QLineEdit::editingFinished, this, commit);
+  return chroma_error_group_;
+}
+
+void ProjectSettingsEditor::LoadChannelAndChromaError(const Project& project) {
+  const ChannelParameters& channel = project.channel;
+  channel_group_->setChecked(channel.enabled);
+  timing_offset_spin_->setValue(channel.timing_offset_samples);
+  edge_smear_group_->setChecked(channel.edge_smear.enabled);
+  edge_smear_fraction_spin_->setValue(channel.edge_smear.fraction);
+  edge_smear_tau_spin_->setValue(channel.edge_smear.tau_samples);
+  fm_beat_group_->setChecked(channel.fm_beat.enabled);
+  fm_beat_carrier_spin_->setValue(channel.fm_beat.carrier_black_hz);
+  fm_beat_level_spin_->setValue(channel.fm_beat.level_db);
+
+  const ChromaErrorParameters& chroma_error = project.chroma_error;
+  chroma_error_group_->setChecked(chroma_error.enabled);
+  chroma_gain_spin_->setValue(chroma_error.gain);
+  chroma_phase_spin_->setValue(chroma_error.phase_deg);
+  const ChromaJitterParameters& jitter = chroma_error.line_jitter;
+  chroma_jitter_group_->setChecked(jitter.enabled);
+  jitter_phase_spin_->setValue(jitter.phase_deg);
+  jitter_gain_spin_->setValue(jitter.gain);
+  jitter_seed_check_->setChecked(jitter.seed_specified);
+  jitter_seed_edit_->setEnabled(jitter.seed_specified);
+  jitter_seed_edit_->setText(
+      jitter.seed_specified
+          ? QString::number(static_cast<qlonglong>(jitter.seed))
+          : QString());
 }
 
 void ProjectSettingsEditor::LoadFromDocument() {
@@ -352,6 +577,8 @@ void ProjectSettingsEditor::LoadFromDocument() {
       efm_pair_combo_->findData(project.output.efm_audio.pair);
   efm_pair_combo_->setCurrentIndex(efm_pair_index >= 0 ? efm_pair_index : 0);
   efm_check_->setChecked(project.output.efm_audio.enabled);
+
+  LoadChannelAndChromaError(project);
 
   ApplyEnablement();
   updating_ = false;
@@ -465,6 +692,15 @@ void ProjectSettingsEditor::ApplyEnablement() {
                "“.cvbsc” chroma file is written alongside it).")
           : QString());
 
+  // A block the standard cannot carry stays enabled while it is set, so the
+  // user can still untick it; the hint explains the validation error.
+  fm_beat_group_->setEnabled(state.fm_beat_editable ||
+                             fm_beat_group_->isChecked());
+  fm_beat_hint_->setVisible(!state.fm_beat_editable);
+  chroma_error_group_->setEnabled(state.chroma_error_editable ||
+                                  chroma_error_group_->isChecked());
+  chroma_error_hint_->setVisible(!state.chroma_error_editable);
+
   efm_check_->setEnabled(state.efm_output_editable);
   efm_pair_combo_->setEnabled(state.efm_pair_editable);
   efm_hint_->setText(EfmStatusText(state.efm_status));
@@ -549,6 +785,11 @@ void ProjectSettingsEditor::CommitCvbsPresets() {
     if (!(output == document_->project().output)) {
       document_->SetOutputTargets(output);
     }
+    // Likewise the FM beat (PAL only) and the chroma error (not SECAM).
+    document_->SetChannel(NormalizeChannelForStandard(
+        document_->project().channel, new_standard));
+    document_->SetChromaError(NormalizeChromaErrorForStandard(
+        document_->project().chroma_error, new_standard));
 
     // The VITS catalogue is standard-specific, so a standard change must
     // reconcile the project VITS set (re-seed under laserdisc placement, drop
@@ -701,6 +942,90 @@ void ProjectSettingsEditor::CommitOutputTargets() {
   document_->SetOutputTargets(output);
   committing_ = false;
   LoadFromDocument();
+}
+
+void ProjectSettingsEditor::CommitChannel() {
+  if (updating_) {
+    return;
+  }
+  const ChannelParameters& stored = document_->project().channel;
+  ChannelParameters channel = stored;
+  if (!channel_group_->isChecked()) {
+    SetChannelEnabled(&channel, false);
+  } else {
+    SetChannelEnabled(&channel, true);
+    channel.timing_offset_samples = timing_offset_spin_->value();
+    // Freshly ticked sub-blocks take the presenter defaults; the widgets
+    // still hold the disabled block's values.
+    SetEdgeSmearEnabled(&channel, edge_smear_group_->isChecked());
+    if (edge_smear_group_->isChecked() && stored.edge_smear.enabled) {
+      channel.edge_smear.fraction = edge_smear_fraction_spin_->value();
+      channel.edge_smear.tau_samples = edge_smear_tau_spin_->value();
+    }
+    SetFmBeatEnabled(&channel, fm_beat_group_->isChecked());
+    if (fm_beat_group_->isChecked() && stored.fm_beat.enabled) {
+      channel.fm_beat.carrier_black_hz = fm_beat_carrier_spin_->value();
+      channel.fm_beat.level_db = fm_beat_level_spin_->value();
+    }
+  }
+  committing_ = true;
+  const bool changed = document_->SetChannel(channel);
+  committing_ = false;
+  if (changed) {
+    LoadFromDocument();
+  }
+}
+
+void ProjectSettingsEditor::CommitChromaError() {
+  if (updating_) {
+    return;
+  }
+  const ChromaErrorParameters& stored = document_->project().chroma_error;
+  ChromaErrorParameters chroma_error = stored;
+  if (!chroma_error_group_->isChecked()) {
+    SetChromaErrorEnabled(&chroma_error, false);
+  } else {
+    SetChromaErrorEnabled(&chroma_error, true);
+    chroma_error.gain = chroma_gain_spin_->value();
+    chroma_error.phase_deg = chroma_phase_spin_->value();
+    SetChromaJitterEnabled(&chroma_error, chroma_jitter_group_->isChecked());
+    if (chroma_jitter_group_->isChecked() && stored.line_jitter.enabled) {
+      ChromaJitterParameters& jitter = chroma_error.line_jitter;
+      jitter.phase_deg = jitter_phase_spin_->value();
+      jitter.gain = jitter_gain_spin_->value();
+      jitter.seed_specified = jitter_seed_check_->isChecked();
+      jitter.seed =
+          jitter.seed_specified ? ParseSeed(jitter_seed_edit_->text()) : 0;
+    }
+  }
+  committing_ = true;
+  const bool changed = document_->SetChromaError(chroma_error);
+  committing_ = false;
+  if (changed) {
+    LoadFromDocument();
+  }
+}
+
+QWidget* ProjectSettingsEditor::FieldGroup(IssueField field) const {
+  switch (field) {
+    case IssueField::kChannel:
+      return channel_group_;
+    case IssueField::kChromaError:
+      return chroma_error_group_;
+    default:
+      return nullptr;
+  }
+}
+
+QWidget* ProjectSettingsEditor::FieldFocusWidget(IssueField field) const {
+  switch (field) {
+    case IssueField::kChannel:
+      return timing_offset_spin_;
+    case IssueField::kChromaError:
+      return chroma_gain_spin_;
+    default:
+      return nullptr;
+  }
 }
 
 void ProjectSettingsEditor::OnStandardChanged() { CommitCvbsPresets(); }

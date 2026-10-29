@@ -13,6 +13,8 @@
 #include <vector>
 
 #include "videosynth/audio_track_generator.h"
+#include "videosynth/channel_stage.h"
+#include "videosynth/chroma_error_stage.h"
 #include "videosynth/dropout_injection_stage.h"
 #include "videosynth/interfaces.h"
 #include "videosynth/noise_injection_stage.h"
@@ -31,7 +33,8 @@ namespace videosynth {
 //
 // When RunOptions::threads resolves to more than one worker, the pipeline
 // internally spawns a FrameSynthesisPool for the run: frame synthesis
-// (IGenerationStage::GenerateFrameBatch, NoiseInjectionStage::InjectNoise,
+// (IGenerationStage::GenerateFrameBatch, ChannelStage::ApplyChannel,
+// ChromaErrorStage::ApplyChromaError, NoiseInjectionStage::InjectNoise,
 // DropoutInjectionStage::ComputeFrameDropouts) executes concurrently on pool
 // workers, while output, sidecar-row commits, audio, and observer callbacks
 // stay on the run thread in frame order. Output is byte-identical to the
@@ -54,8 +57,8 @@ class VideoSynthPipeline {
                      AudioTrackGenerator* audio_generator = nullptr);
 
   // Orchestrates the full pipeline from a project file:
-  //   parse -> RunProject (validate -> generate -> noise -> dropout ->
-  //   output).
+  //   parse -> RunProject (validate -> generate -> channel -> chroma error ->
+  //   noise -> dropout -> output).
   //
   // Args:
   //   options: Contains project path and runtime configuration.
@@ -71,7 +74,13 @@ class VideoSynthPipeline {
            CancellationToken* cancellation = nullptr);
 
   // Orchestrates the pipeline for an already-parsed project:
-  //   validate -> generate -> noise -> dropout -> output.
+  //   validate -> generate -> channel -> chroma error -> noise -> dropout ->
+  //   output.
+  //
+  // The channel and chroma error stages are owned by the pipeline rather than
+  // injected: each is immutable during a run and a no-op unless the project
+  // declares its block (`channel:`, `chroma_error:`). The chroma error stage
+  // draws its unseeded-jitter base seed when the pipeline is constructed.
   //
   // Relative paths inside the project (section sources, output targets) are
   // used as-is; callers must resolve them before invoking this method.
@@ -104,6 +113,8 @@ class VideoSynthPipeline {
   IOutputStage* output_;
   ILogger* logger_;
   AudioTrackGenerator* audio_generator_;
+  ChannelStage channel_;
+  ChromaErrorStage chroma_error_;
 };
 
 }  // namespace videosynth

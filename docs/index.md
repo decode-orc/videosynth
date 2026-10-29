@@ -21,7 +21,7 @@ Both read and write the same YAML project file, and both produce byte-identical 
 - **Picture content** from validated progressive sources — OpenEXR stills and MKV/MP4 video clips in any FFmpeg-decodable codec, colour-normalised to BT.601.
 - **Vertical interval test signals** (VITS) — the EBU, ITU, NTC-7, FCC and VIRS families.
 - **Laserdisc VBI metadata** — IEC 60856/60857 24-bit biphase codes and NTSC 40-bit FM codes: picture numbers, programme time codes, chapters, picture stops, programme status, lead-in and lead-out.
-- **Impairments** — two-component Gaussian noise and dropout simulation (random surface events and persistent scratches), with a dropout sidecar database.
+- **Impairments** — two-component Gaussian noise with optional spectral shaping and a shared pressing layer, dropout simulation (random surface events and persistent scratches, flagged in a sidecar database or left unflagged), pressing channel effects (sub-sample timing offset, edge smear, PAL FM-beat herringbone), chroma gain and phase error, and a per-section luma bandwidth limit.
 - **Audio** — up to eight stereo channel pairs at 48 kHz/24-bit, plus laserdisc EFM digital audio.
 - **On-screen display** burn-in text with substitution tokens for picture number, timecode and frame number.
 

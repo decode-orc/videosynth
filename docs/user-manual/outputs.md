@@ -55,7 +55,7 @@ Recording the git commit in the sidecar is deliberate: a generated file always s
 
 ## The dropout sidecar
 
-`<name>.dropouts.meta` (schema version 5) carries one `dropout_run` row per contiguous dropout, listing the frame, first sample, length and a severity of `25` (non-visible VBI) or `75` (intersecting the active picture). It is ground truth against which a dropout detector can be scored directly. See [Impairments](impairments.md).
+`<name>.dropouts.meta` (schema version 5) carries one `dropout_run` row per contiguous dropout, listing the frame, first sample, length and a severity of `25` (non-visible VBI) or `75` (intersecting the active picture). It is ground truth against which a dropout detector can be scored directly. Dropouts with `flagged: false` are applied to the signal but have no rows, so they are absent from the sidecar; the sidecar itself is still written whenever any section has dropouts. See [Impairments](impairments.md#pressing-defects-unflagged-and-disc-anchored-dropouts).
 
 ## Audio and EFM
 

@@ -1,8 +1,9 @@
 /*
  * File:        noise_injection_stage.h
  * Module:      noise_injection
- * Purpose:     Applies per-section two-component Gaussian noise to fixed-point
- *              mV Y/C frame buffers before output quantisation.
+ * Purpose:     Applies per-section capture and shared (pressing) Gaussian
+ *              noise to fixed-point mV Y/C frame buffers before output
+ *              quantisation.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -12,40 +13,57 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
+#include <memory>
+#include <mutex>
 #include <vector>
 
 #include "videosynth/fixed_point.h"
 #include "videosynth/interfaces.h"
 #include "videosynth/model.h"
+#include "videosynth/noise_spectrum_filter.h"
 
 namespace videosynth {
 
-// Injects additive Gaussian noise into the Y and C mV-domain sample buffers
-// for sections that have NoiseParameters::enabled == true.
+// Injects additive Gaussian noise into the Y and C mV-domain sample buffers.
+// A section may carry two independent layers.
 //
-// Two noise components are combined:
+// Capture layer (NoiseParameters::enabled), describing one capture:
 //   - Floor noise (sigma_f): zero-mean Gaussian, signal-independent; controls
 //     Black PSNR as measured by orc-gui.
 //   - Proportional noise (k): standard deviation scales with the instantaneous
 //     Y-channel amplitude; makes white noisier than black, controlled by
 //     noise_spread_db.
+//   - Optional spectrum: unit normals are shaped by a NoiseSpectrumFilter
+//     before the per-sample sigma is applied, so the level-dependent term
+//     modulates the shaped noise.
 //
-// A single noise draw is applied to both Y and C buffers at each sample
-// position, producing correlated Y/C noise that matches real analogue sources.
+// Shared (pressing) layer (NoiseParameters::shared), describing the disc:
+//   constant sigma from shared.noise_db, optional spectrum, seeded from
+//   (shared.noise_seed, kSharedNoiseSeedDomain, disc frame index). It never
+//   depends on section index or output position, so every capture of one
+//   pressing carries identical pressing noise on the same picture.
 //
-// Seeding: by default a random base seed is captured from std::random_device at
-// construction time, so each run of the same project produces different noise.
-// Setting NoiseParameters::noise_seed_specified = true in a section causes that
-// section to mix the user-supplied noise_seed into the per-frame seed formula
-// instead, making the output fully deterministic and reproducible across runs.
-// Within a single run, the same (frame, section) pair always produces identical
-// output regardless of batch size.
+// Both layers are summed and a single noise value is applied to both Y and C
+// at each sample position, producing correlated Y/C noise that matches real
+// analogue sources. Y is then clamped to the legal composite range; C is
+// zero-centred and is left for the output stage, which clamps Y + C.
+//
+// Capture seeding: by default a random base seed is captured from
+// std::random_device at construction time, so each run of the same project
+// produces different noise. Setting NoiseParameters::noise_seed_specified =
+// true in a section causes that section to mix the user-supplied noise_seed
+// into the per-frame seed formula instead, making the output fully
+// deterministic and reproducible across runs. Within a single run, the same
+// (frame, section) pair always produces identical output regardless of batch
+// size.
 //
 // Thread-safety: NoiseInjectionStage IS thread-safe for concurrent InjectNoise
 // calls on distinct buffers: the method is const, per-frame RNGs are seeded
 // deterministically from immutable state (run_base_seed_ is fixed at
-// construction), and the logger contract requires thread-safety. Callers must
-// not pass the same buffer to concurrent calls.
+// construction), the spectrum filter cache is mutex-guarded and holds
+// immutable filters, and the logger contract requires thread-safety. Callers
+// must not pass the same buffer to concurrent calls.
 class NoiseInjectionStage {
  public:
   explicit NoiseInjectionStage(ILogger* logger);
@@ -53,12 +71,16 @@ class NoiseInjectionStage {
   // Adds noise to frame buffers in-place.
   //
   // Args:
-  //   project:       Parsed project supplying signal levels and encoding
-  //   preset. schedule:      Frame schedule mapping global frame indices to
-  //   sections. frame_offset:  Index into schedule of the first frame in this
-  //   batch. frame_count:   Number of frames in this batch. y_mv: Y-channel mV
-  //   buffer (frame_count × samples_per_frame). c_mv:          C-channel mV
-  //   buffer (frame_count × samples_per_frame).
+  //   project:      Parsed project supplying signal levels and encoding
+  //                 preset.
+  //   schedule:     Frame schedule mapping global frame indices to sections.
+  //                 The shared layer reads each item's enrichment for the
+  //                 disc frame index and falls back to the schedule position
+  //                 for hand-built schedules without enrichment.
+  //   frame_offset: Index into schedule of the first frame in this batch.
+  //   frame_count:  Number of frames in this batch.
+  //   y_mv:         Y-channel mV buffer (frame_count x samples_per_frame).
+  //   c_mv:         C-channel mV buffer (frame_count x samples_per_frame).
   void InjectNoise(
       const Project& project,
       const std::vector<IGenerationStage::FrameScheduleItem>& schedule,
@@ -66,8 +88,21 @@ class NoiseInjectionStage {
       std::vector<SampleFixed>* y_mv, std::vector<SampleFixed>* c_mv) const;
 
  private:
+  // Returns the shaping filter for a spectrum table, designing it on first
+  // use. Filters are cached per distinct (sample rate, table), so a section's
+  // kernel is designed once per run rather than once per frame.
+  std::shared_ptr<const NoiseSpectrumFilter> FilterFor(
+      const std::vector<NoiseSpectrumPoint>& spectrum,
+      double sample_rate_hz) const;
+
   ILogger* logger_;
   uint64_t run_base_seed_;
+
+  mutable std::mutex filter_cache_mutex_;
+  // Key: {sample_rate_hz, f0, dB0, f1, dB1, ...}.
+  mutable std::map<std::vector<double>,
+                   std::shared_ptr<const NoiseSpectrumFilter>>
+      filter_cache_;
 };
 
 }  // namespace videosynth

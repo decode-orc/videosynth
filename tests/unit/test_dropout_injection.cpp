@@ -10,6 +10,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -461,21 +462,34 @@ TEST(DropoutInjectionTest, FullPushToBlankingReachesBlankingLevel) {
   auto schedule = MakeSchedule(project, 1);
   stage.InjectDropouts(project, schedule, 0, 1, &y_mv, &c_mv);
 
-  // Verify Y and C stay in sync (same displacement).
+  // Verify Y and C stay in sync (same displacement) wherever Y was not held at
+  // the composite limits; C is not clamped.
+  const SampleFixed clamp_min = MillivoltsToSampleFixed(-300.006);
+  const SampleFixed clamp_max = MillivoltsToSampleFixed(908.452);
   for (std::size_t i = 0; i < n; ++i) {
+    if (y_mv[i] == clamp_min || y_mv[i] == clamp_max) {
+      EXPECT_TRUE(y_mv[i] == clamp_max ? c_mv[i] >= y_mv[i]
+                                       : c_mv[i] <= y_mv[i])
+          << "C must carry the unclamped displacement at sample " << i;
+      continue;
+    }
     EXPECT_EQ(y_mv[i], c_mv[i])
         << "Y and C must receive identical displacement at sample " << i;
   }
 }
 
-TEST(DropoutInjectionTest, OutputRemainsClamped) {
-  // All output samples must stay within the PAL legal range.
+TEST(DropoutInjectionTest, LumaRemainsClampedAndChromaIsNot) {
+  // Y must stay within the PAL legal range. C sits below the composite floor,
+  // as saturated chroma does, and carries the same shift unclamped.
   Project project = MakeDropoutProject(20, 10, 5);
 
   const double signal_mv = 350.0;
+  const double chroma_mv = -440.0;
   const std::size_t n = static_cast<std::size_t>(kPalSamplesPerFrame) * 5;
   auto y_mv = MakeBuffer(n, signal_mv);
-  auto c_mv = MakeBuffer(n, signal_mv);
+  auto c_mv = MakeBuffer(n, chroma_mv);
+  const auto y_in = y_mv;
+  const auto c_in = c_mv;
 
   NullLogger logger;
   DropoutInjectionStage stage(&logger);
@@ -486,12 +500,19 @@ TEST(DropoutInjectionTest, OutputRemainsClamped) {
   const SampleFixed clamp_min = MillivoltsToSampleFixed(-300.006);
   const SampleFixed clamp_max = MillivoltsToSampleFixed(908.452);
 
+  bool shifted = false;
   for (std::size_t i = 0; i < n; ++i) {
-    EXPECT_GE(y_mv[i], clamp_min);
-    EXPECT_LE(y_mv[i], clamp_max);
-    EXPECT_GE(c_mv[i], clamp_min);
-    EXPECT_LE(c_mv[i], clamp_max);
+    ASSERT_GE(y_mv[i], clamp_min);
+    ASSERT_LE(y_mv[i], clamp_max);
+    if (y_mv[i] != clamp_min && y_mv[i] != clamp_max) {
+      // Rounding is per channel, so allow one fixed-point step.
+      ASSERT_LE(std::abs((c_mv[i] - c_in[i]) - (y_mv[i] - y_in[i])), 1)
+          << "sample " << i;
+    }
+    shifted = shifted || c_mv[i] != c_in[i];
   }
+  EXPECT_TRUE(shifted);
+  EXPECT_LT(*std::min_element(c_mv.begin(), c_mv.end()), clamp_min);
 }
 
 TEST(DropoutInjectionTest, DeterminismSameSeedSameOutput) {

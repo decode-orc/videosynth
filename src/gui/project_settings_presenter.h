@@ -19,6 +19,27 @@ namespace videosynth::gui {
 // Thread-safety: all functions in this module are thread-safe pure functions
 // over their inputs; ProjectSettingsFormState is a plain data container.
 
+// Channel and chroma error input limits mirrored from
+// ValidateChannelParameters and ValidateChromaErrorParameters
+// (project_validator.cpp) so widgets accept exactly what validation accepts.
+namespace project_editor_limits {
+inline constexpr double kTimingOffsetMaxSamples = 8.0;
+inline constexpr double kEdgeSmearFractionMax = 0.5;
+// tau_samples must be > 0; the editor's smallest step stands in for the open
+// lower bound.
+inline constexpr double kEdgeSmearTauMinSamples = 0.1;
+inline constexpr double kEdgeSmearTauMaxSamples = 100.0;
+inline constexpr double kFmBeatCarrierMinHz = 6.9e6;
+inline constexpr double kFmBeatCarrierMaxHz = 7.3e6;
+inline constexpr double kFmBeatLevelMinDb = -60.0;
+inline constexpr double kFmBeatLevelMaxDb = 0.0;
+inline constexpr double kChromaGainMin = 0.5;
+inline constexpr double kChromaGainMax = 1.5;
+inline constexpr double kChromaPhaseMaxDeg = 180.0;
+inline constexpr double kChromaJitterPhaseMaxDeg = 10.0;
+inline constexpr double kChromaJitterGainMax = 0.1;
+}  // namespace project_editor_limits
+
 // Outcome of the project-level LaserDisc digital audio (EFM) selection.
 enum class EfmOutputStatus {
   // The project does not request EFM output.
@@ -56,6 +77,13 @@ struct ProjectSettingsFormState {
   // and laserdisc VITS placement are unavailable.
   bool laserdisc_editable = true;
 
+  // The FM-beat model is fitted to 625-line PAL LaserDisc pressings, so
+  // channel.fm_beat is offered for PAL only.
+  bool fm_beat_editable = false;
+  // chroma_error models a quadrature (PAL/NTSC) chroma path, so it is not
+  // offered for SECAM.
+  bool chroma_error_editable = true;
+
   // True when signal_type is "yc" and video_path must carry a ".cvbsy" suffix.
   bool video_path_requires_luma_suffix = false;
 
@@ -90,6 +118,27 @@ CvbsPresets NormalizeCvbsPresetsForStandard(CvbsPresets presets);
 // adjusted targets.
 OutputTargets NormalizeOutputTargetsForStandard(OutputTargets output,
                                                 Standard standard);
+
+// Clears channel settings the given standard cannot carry, mirroring
+// ProjectValidator: fm_beat exists for PAL only. The rest of the block is
+// kept. Returns the adjusted channel.
+ChannelParameters NormalizeChannelForStandard(ChannelParameters channel,
+                                              Standard standard);
+
+// Clears the chroma error for SECAM, which has no quadrature chroma path.
+// Returns the adjusted block.
+ChromaErrorParameters NormalizeChromaErrorForStandard(
+    ChromaErrorParameters chroma_error, Standard standard);
+
+// Enable/disable helpers for the project-level channel and chroma error
+// blocks. Disabling resets the block (or sub-block) to its default so the
+// emitter drops it; enabling seeds validator-clean defaults. Enabling a
+// channel sub-block also enables the channel block that holds it.
+void SetChannelEnabled(ChannelParameters* channel, bool enabled);
+void SetEdgeSmearEnabled(ChannelParameters* channel, bool enabled);
+void SetFmBeatEnabled(ChannelParameters* channel, bool enabled);
+void SetChromaErrorEnabled(ChromaErrorParameters* chroma_error, bool enabled);
+void SetChromaJitterEnabled(ChromaErrorParameters* chroma_error, bool enabled);
 
 // Derives the metadata path from a video path: strips a trailing
 // ".cvbs" or ".cvbsy" (else any final extension) and appends ".meta".

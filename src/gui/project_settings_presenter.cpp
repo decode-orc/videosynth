@@ -72,6 +72,14 @@ EfmOutputStatus ClassifyEfmOutput(const Project& project) {
   return EfmOutputStatus::kActive;
 }
 
+// Freshly-enabled channel and chroma impairments: the values of the PAL
+// pressing C example, a visible but plausible pressing.
+constexpr double kDefaultEdgeSmearFraction = 0.12;
+constexpr double kDefaultEdgeSmearTauSamples = 3.0;
+constexpr double kDefaultFmBeatLevelDb = -24.0;
+constexpr double kDefaultJitterPhaseDeg = 0.5;
+constexpr double kDefaultJitterGain = 0.01;
+
 }  // namespace
 
 ProjectSettingsFormState BuildProjectSettingsFormState(const Project& project) {
@@ -93,6 +101,8 @@ ProjectSettingsFormState BuildProjectSettingsFormState(const Project& project) {
   state.pilot_burst_editable = standard == Standard::kPal;
   state.secam_field_identification_editable = standard == Standard::kSecam;
   state.laserdisc_editable = standard != Standard::kSecam;
+  state.fm_beat_editable = standard == Standard::kPal;
+  state.chroma_error_editable = standard != Standard::kSecam;
   state.vbi_burst_editable = standard == Standard::kNtsc;
   state.setup_ire_editable =
       standard == Standard::kNtsc || standard == Standard::kPalM;
@@ -138,6 +148,80 @@ OutputTargets NormalizeOutputTargetsForStandard(OutputTargets output,
     output.efm_audio = EfmAudioOutput{};
   }
   return output;
+}
+
+ChannelParameters NormalizeChannelForStandard(ChannelParameters channel,
+                                              Standard standard) {
+  if (standard != Standard::kPal) {
+    channel.fm_beat = FmBeatParameters{};
+  }
+  return channel;
+}
+
+ChromaErrorParameters NormalizeChromaErrorForStandard(
+    ChromaErrorParameters chroma_error, Standard standard) {
+  if (standard == Standard::kSecam) {
+    return ChromaErrorParameters{};
+  }
+  return chroma_error;
+}
+
+void SetChannelEnabled(ChannelParameters* channel, bool enabled) {
+  if (!enabled) {
+    *channel = ChannelParameters{};
+    return;
+  }
+  channel->enabled = true;
+}
+
+void SetEdgeSmearEnabled(ChannelParameters* channel, bool enabled) {
+  if (!enabled) {
+    channel->edge_smear = EdgeSmearParameters{};
+    return;
+  }
+  channel->enabled = true;
+  if (channel->edge_smear.enabled) {
+    return;
+  }
+  channel->edge_smear.enabled = true;
+  channel->edge_smear.fraction = kDefaultEdgeSmearFraction;
+  channel->edge_smear.tau_samples = kDefaultEdgeSmearTauSamples;
+}
+
+void SetFmBeatEnabled(ChannelParameters* channel, bool enabled) {
+  if (!enabled) {
+    channel->fm_beat = FmBeatParameters{};
+    return;
+  }
+  channel->enabled = true;
+  if (channel->fm_beat.enabled) {
+    return;
+  }
+  channel->fm_beat = FmBeatParameters{};
+  channel->fm_beat.enabled = true;
+  channel->fm_beat.level_db = kDefaultFmBeatLevelDb;
+}
+
+void SetChromaErrorEnabled(ChromaErrorParameters* chroma_error, bool enabled) {
+  if (!enabled) {
+    *chroma_error = ChromaErrorParameters{};
+    return;
+  }
+  chroma_error->enabled = true;
+}
+
+void SetChromaJitterEnabled(ChromaErrorParameters* chroma_error, bool enabled) {
+  if (!enabled) {
+    chroma_error->line_jitter = ChromaJitterParameters{};
+    return;
+  }
+  chroma_error->enabled = true;
+  if (chroma_error->line_jitter.enabled) {
+    return;
+  }
+  chroma_error->line_jitter.enabled = true;
+  chroma_error->line_jitter.phase_deg = kDefaultJitterPhaseDeg;
+  chroma_error->line_jitter.gain = kDefaultJitterGain;
 }
 
 std::string DeriveMetadataPath(const std::string& video_path) {

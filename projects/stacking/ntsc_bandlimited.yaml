@@ -1,0 +1,109 @@
+# NTSC Band-Limited Luma — one 16-frame CAV disc (PNs 1–16)
+#
+# The same multi-burst played back at three luma bandwidths, as from players
+# (or transfers) with different luma frequency responses, then a sharp-edged
+# picture at the lowest one. Nothing else is impaired, so the luma low-pass
+# is all that changes between sections. The Y/C rendering comes from the
+# stacking-yc variant.
+#
+# luma_bandwidth filters the active picture luma only: sync, blanking, the
+# VBI, the VITS lines and the chroma are left exactly as generated.
+#
+# Content layout:
+#   PNs  1–4:  MULTIBURST.exr, full bandwidth (no luma_bandwidth)
+#   PNs  5–8:  MULTIBURST.exr, cutoff 4.2 MHz, default 0.4 MHz transition
+#   PNs  9–12: MULTIBURST.exr, cutoff 3.0 MHz, 0.8 MHz transition
+#   PNs 13–16: SMPTE_BARS_001.exr, cutoff 3.0 MHz, 0.8 MHz transition
+
+project:
+  name: NtscBandLimited
+  version: "1.0"
+  description: NTSC luma bandwidth limit — multi-burst at full, 4.2 MHz and 3.0 MHz
+
+cvbs_presets:
+  video_standard_preset: NTSC
+  sample_encoding_preset: CVBS_U10_4FSC
+  signal_state_preset: STANDARD_STABLE_LOCKED
+
+output:
+  video_path: "{output}/videosynth_ntsc_bandlimited.cvbs"
+
+line_injections:
+  disc_type: CAV
+  vits:
+    - vits_type: virs
+      target_lines: [19, 282]
+
+sections:
+
+  # ---------------------------------------------------------------------------
+  # PNs 1–4: multi-burst, full bandwidth
+  # ---------------------------------------------------------------------------
+  - name: MultiBurst_Full
+    type: progressive
+    source: "{bundled}/exr/720x486/MULTIBURST.exr"
+    duration_frames: 4
+    section_type: programme_area
+    line_injections:
+      - type: laserdisc
+        codes:
+          - code_type: picture_number
+            start_value: 1
+          - code_type: programme_status
+            programme_status: "0x8DC001"
+
+  # ---------------------------------------------------------------------------
+  # PNs 5–8: multi-burst, 4.2 MHz luma
+  # ---------------------------------------------------------------------------
+  - name: MultiBurst_4p2MHz
+    type: progressive
+    source: "{bundled}/exr/720x486/MULTIBURST.exr"
+    duration_frames: 4
+    section_type: programme_area
+    luma_bandwidth:
+      cutoff_mhz: 4.2
+    line_injections:
+      - type: laserdisc
+        codes:
+          - code_type: picture_number
+            start_value: 5
+          - code_type: programme_status
+            programme_status: "0x8DC001"
+
+  # ---------------------------------------------------------------------------
+  # PNs 9–12: multi-burst, 3.0 MHz luma
+  # ---------------------------------------------------------------------------
+  - name: MultiBurst_3p0MHz
+    type: progressive
+    source: "{bundled}/exr/720x486/MULTIBURST.exr"
+    duration_frames: 4
+    section_type: programme_area
+    luma_bandwidth:
+      cutoff_mhz: 3.0
+      transition_mhz: 0.8
+    line_injections:
+      - type: laserdisc
+        codes:
+          - code_type: picture_number
+            start_value: 9
+          - code_type: programme_status
+            programme_status: "0x8DC001"
+
+  # ---------------------------------------------------------------------------
+  # PNs 13–16: SMPTE bars 001, 3.0 MHz luma
+  # ---------------------------------------------------------------------------
+  - name: SmpteBars_3p0MHz
+    type: progressive
+    source: "{bundled}/exr/720x486/SMPTE_BARS_001.exr"
+    duration_frames: 4
+    section_type: programme_area
+    luma_bandwidth:
+      cutoff_mhz: 3.0
+      transition_mhz: 0.8
+    line_injections:
+      - type: laserdisc
+        codes:
+          - code_type: picture_number
+            start_value: 13
+          - code_type: programme_status
+            programme_status: "0x8DC001"

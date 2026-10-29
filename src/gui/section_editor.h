@@ -2,7 +2,8 @@
  * File:        section_editor.h
  * Module:      gui
  * Purpose:     Per-section form editor: source and span, optional audio,
- *              noise, dropout, OSD blocks, and line injections
+ *              luma bandwidth, noise, dropout, OSD blocks, and line
+ *              injections
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -15,8 +16,10 @@
 
 #include "audio_channel_pairs_editor.h"
 #include "line_injections_editor.h"
+#include "noise_spectrum_editor.h"
 #include "project_document.h"
 #include "source_probe_controller.h"
+#include "validation_issues_model.h"
 
 class QCheckBox;
 class QComboBox;
@@ -26,6 +29,7 @@ class QGroupBox;
 class QLabel;
 class QLineEdit;
 class QPushButton;
+class QScrollArea;
 class QSpinBox;
 class QStackedWidget;
 class QTableWidget;
@@ -35,8 +39,9 @@ namespace videosynth::gui {
 // Editor for one section of the project. Widgets stage edits into a copy of
 // the section and commit through ProjectDocument::SetSection; optional YAML
 // blocks are toggled through the section_block_presenters helpers so
-// disabled blocks never emit defaults. Every optional block (audio, noise,
-// dropouts, OSD, line injections) sits in a checkable group whose contents
+// disabled blocks never emit defaults. Every optional block (audio, luma
+// bandwidth, each noise layer, each dropout type, OSD, line injections) sits
+// in a checkable group whose contents
 // are hidden until the box is ticked, so an unused block collapses to a
 // single title row instead of cluttering the form. Source probing runs on the
 // SourceProbeController worker and never blocks the UI.
@@ -66,11 +71,17 @@ class SectionEditor : public QWidget {
   // single-entry list restores plain single-section editing.
   void SetSelectedSections(std::vector<int> indices);
 
+  // Scrolls the group holding `field` into view and focuses its first input
+  // (validation issue navigation). kNone and project-level fields change
+  // nothing.
+  void RevealField(IssueField field);
+
  private:
   void BuildUi();
   QWidget* BuildGeneralGroup();
   QWidget* BuildProbeGroup();
   QWidget* BuildAudioGroup();
+  QWidget* BuildLumaBandwidthGroup();
   QWidget* BuildNoiseGroup();
   QWidget* BuildDropoutsGroup();
   QWidget* BuildOsdGroup();
@@ -95,6 +106,12 @@ class SectionEditor : public QWidget {
   // selection holds fewer than two valid sections (single-section editing).
   std::vector<SectionType> SelectedSectionTypes() const;
   Section SectionFromWidgets() const;
+  // Commits a dropout anchor choice through SetRandomDropoutAnchor /
+  // SetScratchDropoutAnchor, which fix a seed when the disc anchor needs one.
+  void CommitDropoutAnchor(bool scratch);
+  // Re-limits the cutoff spinbox to what the project standard and the current
+  // transition width allow.
+  void UpdateLumaCutoffRange();
   void RequestProbe();
   void UpdateProbeDisplay();
 
@@ -158,6 +175,7 @@ class SectionEditor : public QWidget {
   // from a child widget's own signal handler would free the widget mid-event.
   bool reload_pending_ = false;
 
+  QScrollArea* scroll_ = nullptr;
   QWidget* content_ = nullptr;
   QLabel* placeholder_ = nullptr;
   QLabel* multi_edit_hint_ = nullptr;
@@ -200,22 +218,34 @@ class SectionEditor : public QWidget {
   QGroupBox* audio_group_ = nullptr;
   AudioChannelPairsEditor* audio_editor_ = nullptr;
 
-  // Noise.
+  // Luma bandwidth.
+  QGroupBox* luma_bandwidth_group_ = nullptr;
+  QDoubleSpinBox* luma_cutoff_spin_ = nullptr;
+  QDoubleSpinBox* luma_transition_spin_ = nullptr;
+
+  // Noise: the capture layer (noise_group_) and the shared pressing layer.
   QGroupBox* noise_group_ = nullptr;
   QDoubleSpinBox* noise_db_spin_ = nullptr;
   QDoubleSpinBox* noise_spread_spin_ = nullptr;
   QCheckBox* noise_seed_check_ = nullptr;
   QLineEdit* noise_seed_edit_ = nullptr;
+  NoiseSpectrumEditor* noise_spectrum_editor_ = nullptr;
+  QGroupBox* shared_noise_group_ = nullptr;
+  QDoubleSpinBox* shared_noise_db_spin_ = nullptr;
+  QLineEdit* shared_noise_seed_edit_ = nullptr;
+  NoiseSpectrumEditor* shared_spectrum_editor_ = nullptr;
 
-  // Dropouts.
-  QGroupBox* random_dropouts_group_ = nullptr;
-  QSpinBox* random_scale_spin_ = nullptr;
-  QCheckBox* random_seed_check_ = nullptr;
-  QLineEdit* random_seed_edit_ = nullptr;
-  QGroupBox* scratch_dropouts_group_ = nullptr;
-  QSpinBox* scratch_scale_spin_ = nullptr;
-  QCheckBox* scratch_seed_check_ = nullptr;
-  QLineEdit* scratch_seed_edit_ = nullptr;
+  // Dropouts: one set of widgets per type.
+  struct DropoutWidgets {
+    QGroupBox* group = nullptr;
+    QSpinBox* scale = nullptr;
+    QCheckBox* seed_check = nullptr;
+    QLineEdit* seed_edit = nullptr;
+    QCheckBox* flagged_check = nullptr;
+    QComboBox* anchor_combo = nullptr;
+  };
+  DropoutWidgets random_dropouts_;
+  DropoutWidgets scratch_dropouts_;
 
   // OSD.
   QGroupBox* osd_group_ = nullptr;

@@ -1,0 +1,234 @@
+# PAL Pressing D — base project for a multi-capture stacking set
+#
+# One pressing of a 16-frame CAV laserdisc (PNs 1–16), like pressing A but
+# with pressing defects: places where the disc itself is damaged, which the
+# player's dropout detector does not flag. The captures of this pressing are
+# not committed: projects/variants.json (stacking-captures) derives four of
+# them, each with its own capture seed, one starting later (at PN 5) and one
+# replaying the multi-burst range (PNs 9–12). Their impairment-free truths
+# come from the stacking-clean variant.
+#
+# What belongs to the pressing, and is identical in every capture of it:
+#   - noise.shared: pressing noise keyed by picture number, seed 7004;
+#   - dropouts.random: the pressing defects. anchor: disc keys them by picture
+#     number, so every capture (and the replay) carries them on the same
+#     pictures, and the variants leave their seed alone. flagged: false keeps
+#     them out of the dropout sidecar, as a player would miss them: a stacking
+#     tool has to find them by comparing captures, and since every capture
+#     carries them, stacking alone cannot remove them;
+#   - channel.timing_offset_samples: 0.0, as pressing A.
+# What belongs to one capture: the capture noise layer and the flagged
+# dropouts.scratch events, whose seeds the variants replace.
+#
+# Content layout:
+#   PNs  1–4:  100_BARS.exr
+#   PNs  5–8:  TESTCARD-F.exr
+#   PNs  9–12: MULTIBURST.exr
+#   PNs 13–16: Y_CB_CR_RAMPS.exr
+# Sections are four frames long, a whole colour-field sequence, so a capture
+# that starts later or replays a section stays in subcarrier phase.
+
+project:
+  name: PalPressingD
+  version: "1.0"
+  description: PAL pressing D — shared noise seed 7004, unflagged disc-anchored pressing defects
+
+cvbs_presets:
+  video_standard_preset: PAL
+  sample_encoding_preset: CVBS_U10_4FSC
+  signal_state_preset: STANDARD_STABLE_LOCKED
+  pal_laserdisc_pilot_burst: true
+
+output:
+  video_path: "{output}/videosynth_pal_pressing_D.cvbs"
+
+line_injections:
+  disc_type: CAV
+  vits:
+    - vits_type: uk-national
+      target_lines: [19]
+
+channel:
+  timing_offset_samples: 0.0
+
+sections:
+
+  # ---------------------------------------------------------------------------
+  # PNs 1–4: 100% colour bars
+  # ---------------------------------------------------------------------------
+  - name: Bars
+    type: progressive
+    source: "{bundled}/exr/720x576/100_BARS.exr"
+    duration_frames: 4
+    section_type: programme_area
+    noise:
+      # Capture layer: FM-demodulated noise rises towards high frequencies.
+      noise_db: 46.0
+      noise_spread_db: 3.0
+      noise_seed: 1001
+      spectrum:
+        - [0.0, 0.0]
+        - [3.0, 3.0]
+        - [6.0, 9.0]
+      # Pressing layer: the same on every capture of pressing D.
+      shared:
+        noise_db: 49.0
+        noise_seed: 7004
+        spectrum:
+          - [0.0, 0.0]
+          - [2.0, -2.0]
+          - [5.0, -6.0]
+    dropouts:
+      # Pressing defects: on the disc, so the same in every capture, and
+      # not flagged by the player.
+      random:
+        scale: 6
+        seed: 7004
+        anchor: disc
+        flagged: false
+      # Capture dropouts: flagged, and fresh in every capture.
+      scratch:
+        scale: 2
+        seed: 1001
+    line_injections:
+      - type: laserdisc
+        codes:
+          - code_type: picture_number
+            start_value: 1
+          - code_type: programme_status
+            programme_status: "0x8DC000"
+
+  # ---------------------------------------------------------------------------
+  # PNs 5–8: testcard-f
+  # ---------------------------------------------------------------------------
+  - name: Testcard
+    type: progressive
+    source: "{bundled}/exr/720x576/TESTCARD-F.exr"
+    duration_frames: 4
+    section_type: programme_area
+    noise:
+      # Capture layer: FM-demodulated noise rises towards high frequencies.
+      noise_db: 46.0
+      noise_spread_db: 3.0
+      noise_seed: 1001
+      spectrum:
+        - [0.0, 0.0]
+        - [3.0, 3.0]
+        - [6.0, 9.0]
+      # Pressing layer: the same on every capture of pressing D.
+      shared:
+        noise_db: 49.0
+        noise_seed: 7004
+        spectrum:
+          - [0.0, 0.0]
+          - [2.0, -2.0]
+          - [5.0, -6.0]
+    dropouts:
+      # Pressing defects: on the disc, so the same in every capture, and
+      # not flagged by the player.
+      random:
+        scale: 6
+        seed: 7004
+        anchor: disc
+        flagged: false
+      # Capture dropouts: flagged, and fresh in every capture.
+      scratch:
+        scale: 2
+        seed: 1001
+    line_injections:
+      - type: laserdisc
+        codes:
+          - code_type: picture_number
+            start_value: 5
+          - code_type: programme_status
+            programme_status: "0x8DC000"
+
+  # ---------------------------------------------------------------------------
+  # PNs 9–12: multi-burst
+  # ---------------------------------------------------------------------------
+  - name: MultiBurst
+    type: progressive
+    source: "{bundled}/exr/720x576/MULTIBURST.exr"
+    duration_frames: 4
+    section_type: programme_area
+    noise:
+      # Capture layer: FM-demodulated noise rises towards high frequencies.
+      noise_db: 46.0
+      noise_spread_db: 3.0
+      noise_seed: 1001
+      spectrum:
+        - [0.0, 0.0]
+        - [3.0, 3.0]
+        - [6.0, 9.0]
+      # Pressing layer: the same on every capture of pressing D.
+      shared:
+        noise_db: 49.0
+        noise_seed: 7004
+        spectrum:
+          - [0.0, 0.0]
+          - [2.0, -2.0]
+          - [5.0, -6.0]
+    dropouts:
+      # Pressing defects: on the disc, so the same in every capture, and
+      # not flagged by the player.
+      random:
+        scale: 6
+        seed: 7004
+        anchor: disc
+        flagged: false
+      # Capture dropouts: flagged, and fresh in every capture.
+      scratch:
+        scale: 2
+        seed: 1001
+    line_injections:
+      - type: laserdisc
+        codes:
+          - code_type: picture_number
+            start_value: 9
+          - code_type: programme_status
+            programme_status: "0x8DC000"
+
+  # ---------------------------------------------------------------------------
+  # PNs 13–16: Y/Cb/Cr ramps
+  # ---------------------------------------------------------------------------
+  - name: Ramps
+    type: progressive
+    source: "{bundled}/exr/720x576/Y_CB_CR_RAMPS.exr"
+    duration_frames: 4
+    section_type: programme_area
+    noise:
+      # Capture layer: FM-demodulated noise rises towards high frequencies.
+      noise_db: 46.0
+      noise_spread_db: 3.0
+      noise_seed: 1001
+      spectrum:
+        - [0.0, 0.0]
+        - [3.0, 3.0]
+        - [6.0, 9.0]
+      # Pressing layer: the same on every capture of pressing D.
+      shared:
+        noise_db: 49.0
+        noise_seed: 7004
+        spectrum:
+          - [0.0, 0.0]
+          - [2.0, -2.0]
+          - [5.0, -6.0]
+    dropouts:
+      # Pressing defects: on the disc, so the same in every capture, and
+      # not flagged by the player.
+      random:
+        scale: 6
+        seed: 7004
+        anchor: disc
+        flagged: false
+      # Capture dropouts: flagged, and fresh in every capture.
+      scratch:
+        scale: 2
+        seed: 1001
+    line_injections:
+      - type: laserdisc
+        codes:
+          - code_type: picture_number
+            start_value: 13
+          - code_type: programme_status
+            programme_status: "0x8DC000"

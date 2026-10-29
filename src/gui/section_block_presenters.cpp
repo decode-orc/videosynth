@@ -2,7 +2,7 @@
  * File:        section_block_presenters.cpp
  * Module:      gui
  * Purpose:     Widget-free mapping layer for the optional per-section YAML
- *              blocks (audio, noise, dropouts, OSD)
+ *              blocks (audio, noise, dropouts, luma bandwidth, OSD)
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -15,6 +15,7 @@
 #include <cstdint>
 
 #include "videosynth/progressive_frame_source.h"
+#include "videosynth/timing_constants.h"
 
 namespace videosynth::gui {
 
@@ -36,6 +37,30 @@ const Section::LineInjectionCode* FindCodeOfType(
 // preview measurements yet far from both validator bounds.
 constexpr double kDefaultNoiseDb = 48.0;
 
+// Seed fixed by the editor when a layer or anchor needs one and has none.
+constexpr int64_t kDefaultFixedSeed = 1;
+
+// Spacing of a breakpoint appended to a noise spectrum.
+constexpr double kSpectrumPointStepMhz = 1.0;
+
+// Freshly-enabled luma bandwidth limit: a soft VHS-like picture on every
+// standard, well inside the validator's cutoff range.
+constexpr double kDefaultLumaCutoffMhz = 3.0;
+
+// The 4fsc Nyquist frequency of `standard`, in MHz.
+double NyquistMhz(Standard standard) {
+  return GetTimingConstants(standard).sample_rate_4fsc_hz / 2.0e6;
+}
+
+template <typename Parameters>
+void SetDropoutAnchor(Parameters* parameters, DropoutAnchor anchor) {
+  parameters->anchor = anchor;
+  if (anchor == DropoutAnchor::kDisc && !parameters->seed_specified) {
+    parameters->seed_specified = true;
+    parameters->seed = kDefaultFixedSeed;
+  }
+}
+
 // Freshly-enabled ramp: audible sweep well inside [0, 22000] Hz.
 constexpr double kDefaultRampStartHz = 200.0;
 constexpr double kDefaultRampEndHz = 4000.0;
@@ -43,8 +68,12 @@ constexpr double kDefaultRampEndHz = 4000.0;
 }  // namespace
 
 void SetNoiseBlockEnabled(Section* section, bool enabled) {
+  // The block toggles the capture layer only; the shared (pressing) layer is
+  // independent of it and survives either way.
+  const SharedNoiseParameters shared = section->noise.shared;
   if (!enabled) {
     section->noise = NoiseParameters{};
+    section->noise.shared = shared;
     return;
   }
   if (section->noise.enabled) {
@@ -53,6 +82,7 @@ void SetNoiseBlockEnabled(Section* section, bool enabled) {
   section->noise = NoiseParameters{};
   section->noise.enabled = true;
   section->noise.noise_db = kDefaultNoiseDb;
+  section->noise.shared = shared;
 }
 
 void SetNoiseSeedSpecified(Section* section, bool specified) {
@@ -60,6 +90,50 @@ void SetNoiseSeedSpecified(Section* section, bool specified) {
   if (!specified) {
     section->noise.noise_seed = 0;
   }
+}
+
+void SetSharedNoiseEnabled(Section* section, bool enabled) {
+  SharedNoiseParameters& shared = section->noise.shared;
+  if (!enabled) {
+    shared = SharedNoiseParameters{};
+    return;
+  }
+  if (shared.enabled) {
+    return;
+  }
+  shared = SharedNoiseParameters{};
+  shared.enabled = true;
+  shared.noise_db = kDefaultNoiseDb;
+  shared.noise_seed_specified = true;
+  shared.noise_seed = kDefaultFixedSeed;
+}
+
+double NoiseSpectrumMaxFrequencyMhz(Standard standard) {
+  return NyquistMhz(standard);
+}
+
+void AddNoiseSpectrumPoint(std::vector<NoiseSpectrumPoint>* spectrum,
+                           double max_frequency_mhz) {
+  if (spectrum->empty()) {
+    spectrum->push_back(NoiseSpectrumPoint{});
+    return;
+  }
+  const NoiseSpectrumPoint& last = spectrum->back();
+  if (last.frequency_mhz >= max_frequency_mhz) {
+    return;
+  }
+  NoiseSpectrumPoint next = last;
+  next.frequency_mhz = std::min(last.frequency_mhz + kSpectrumPointStepMhz,
+                                (last.frequency_mhz + max_frequency_mhz) / 2.0);
+  spectrum->push_back(next);
+}
+
+void RemoveNoiseSpectrumPoint(std::vector<NoiseSpectrumPoint>* spectrum,
+                              int row) {
+  if (row < 0 || row >= static_cast<int>(spectrum->size())) {
+    return;
+  }
+  spectrum->erase(spectrum->begin() + row);
 }
 
 void SetRandomDropoutsEnabled(Section* section, bool enabled) {
@@ -86,6 +160,31 @@ void SetScratchDropoutsEnabled(Section* section, bool enabled) {
   section->dropouts.scratch = ScratchDropoutParameters{};
   section->dropouts.scratch.enabled = true;
   section->dropouts.scratch.scale = editor_limits::kDropoutScaleMin;
+}
+
+void SetRandomDropoutAnchor(Section* section, DropoutAnchor anchor) {
+  SetDropoutAnchor(&section->dropouts.random, anchor);
+}
+
+void SetScratchDropoutAnchor(Section* section, DropoutAnchor anchor) {
+  SetDropoutAnchor(&section->dropouts.scratch, anchor);
+}
+
+void SetLumaBandwidthEnabled(Section* section, bool enabled) {
+  if (!enabled) {
+    section->luma_bandwidth = LumaBandwidthParameters{};
+    return;
+  }
+  if (section->luma_bandwidth.enabled) {
+    return;
+  }
+  section->luma_bandwidth = LumaBandwidthParameters{};
+  section->luma_bandwidth.enabled = true;
+  section->luma_bandwidth.cutoff_mhz = kDefaultLumaCutoffMhz;
+}
+
+double LumaBandwidthMaxCutoffMhz(Standard standard, double transition_mhz) {
+  return NyquistMhz(standard) - (transition_mhz / 2.0);
 }
 
 AudioParameters MakeDefaultAudioChannel() {
@@ -317,8 +416,22 @@ Section ApplySectionEditDelta(const Section& before, const Section& after,
     target.end_frame = after.end_frame;
     target.end_frame_specified = after.end_frame_specified;
   }
-  if (!(after.noise == before.noise)) {
+  // The capture and shared noise layers are separate blocks in the editor;
+  // diff them separately so editing one never overwrites the other.
+  if (!(after.noise.shared == before.noise.shared)) {
+    target.noise.shared = after.noise.shared;
+  }
+  NoiseParameters after_capture = after.noise;
+  NoiseParameters before_capture = before.noise;
+  after_capture.shared = SharedNoiseParameters{};
+  before_capture.shared = SharedNoiseParameters{};
+  if (!(after_capture == before_capture)) {
+    const SharedNoiseParameters shared = target.noise.shared;
     target.noise = after.noise;
+    target.noise.shared = shared;
+  }
+  if (!(after.luma_bandwidth == before.luma_bandwidth)) {
+    target.luma_bandwidth = after.luma_bandwidth;
   }
   // Random and scratch dropouts are independent blocks in the editor; diff
   // them separately so toggling one never overwrites the other on targets.

@@ -15,6 +15,8 @@
 #   PNs 33–40: Y_CB_CR_RAMPS.exr (forward skip: 33–34 played, gap 35–36, resume 37–40)
 #
 # Noise/dropout: heavy — noise_db 33.0, scale 14, seed 4004.
+# Dropouts are disc-anchored (anchor: disc): keyed by picture number, so a
+#   replayed range repeats the first play's dropouts as a real disc would.
 # Backward skip: Tartan_PreSkip_D (25–27) → Tartan_Replay_D (noise_seed 9904).
 # Forward skip: Ramps_PreGap_D (33–34) → Ramps_PostGap_D (start_value 37).
 
@@ -56,9 +58,11 @@ sections:
       random:
         scale: 14
         seed: 4004
+        anchor: disc
       scratch:
         scale: 14
         seed: 4004
+        anchor: disc
     line_injections:
       - type: laserdisc
         codes:
@@ -91,9 +95,11 @@ sections:
       random:
         scale: 14
         seed: 4004
+        anchor: disc
       scratch:
         scale: 14
         seed: 4004
+        anchor: disc
     line_injections:
       - type: laserdisc
         codes:
@@ -126,9 +132,11 @@ sections:
       random:
         scale: 14
         seed: 4004
+        anchor: disc
       scratch:
         scale: 14
         seed: 4004
+        anchor: disc
     line_injections:
       - type: laserdisc
         codes:
@@ -161,9 +169,11 @@ sections:
       random:
         scale: 14
         seed: 4004
+        anchor: disc
       scratch:
         scale: 14
         seed: 4004
+        anchor: disc
     line_injections:
       - type: laserdisc
         codes:
@@ -196,9 +206,11 @@ sections:
       random:
         scale: 14
         seed: 4004
+        anchor: disc
       scratch:
         scale: 14
         seed: 4004
+        anchor: disc
     line_injections:
       - type: laserdisc
         codes:
@@ -231,9 +243,11 @@ sections:
       random:
         scale: 14
         seed: 4004
+        anchor: disc
       scratch:
         scale: 14
         seed: 4004
+        anchor: disc
     line_injections:
       - type: laserdisc
         codes:
@@ -266,9 +280,11 @@ sections:
       random:
         scale: 14
         seed: 4004
+        anchor: disc
       scratch:
         scale: 14
         seed: 4004
+        anchor: disc
     line_injections:
       - type: laserdisc
         codes:

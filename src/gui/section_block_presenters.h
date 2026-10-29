@@ -2,7 +2,7 @@
  * File:        section_block_presenters.h
  * Module:      gui
  * Purpose:     Widget-free mapping layer for the optional per-section YAML
- *              blocks (audio, noise, dropouts, OSD)
+ *              blocks (audio, noise, dropouts, luma bandwidth, OSD)
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -28,10 +28,21 @@ namespace editor_limits {
 // Noise: noise-injection-design.md bounds enforced by ValidateNoiseParameters.
 inline constexpr double kNoiseDbMin = 20.0;
 inline constexpr double kNoiseDbMax = 61.0;
+// Noise spectrum breakpoints: relative level bounds enforced by
+// ValidateNoiseSpectrum. Frequencies run from 0 MHz to the 4fsc Nyquist
+// frequency of the project standard (NoiseSpectrumMaxFrequencyMhz).
+inline constexpr double kNoiseSpectrumRelativeDbMin = -60.0;
+inline constexpr double kNoiseSpectrumRelativeDbMax = 40.0;
 // Dropouts: active scale range enforced by ValidateDropoutParameters (0 only
 // as "block disabled", so editors offer 1–20).
 inline constexpr int kDropoutScaleMin = 1;
 inline constexpr int kDropoutScaleMax = 20;
+// Luma bandwidth: bounds enforced by ValidateLumaBandwidth. The cutoff's
+// upper bound depends on the standard and the transition width
+// (LumaBandwidthMaxCutoffMhz).
+inline constexpr double kLumaBandwidthCutoffMinMhz = 0.5;
+inline constexpr double kLumaBandwidthTransitionMinMhz = 0.1;
+inline constexpr double kLumaBandwidthTransitionMaxMhz = 2.0;
 // OSD: glyph scale range enforced by ValidateOsdConfig (fg/bg levels are
 // discrete enums chosen from dropdowns, so no numeric bounds).
 inline constexpr int kOsdScaleMin = 1;
@@ -49,11 +60,45 @@ inline constexpr double kAudioAmplitudeMax = 1.0;
 // from the emitted file (a disabled block must never emit defaults);
 // enabling seeds validator-clean defaults.
 
+// The noise block toggles the capture layer; noise.shared (the pressing
+// layer) is left untouched by both directions.
 void SetNoiseBlockEnabled(Section* section, bool enabled);
 void SetNoiseSeedSpecified(Section* section, bool specified);
 
+// The shared (pressing) noise layer is independent of the capture layer.
+// Enabling seeds a validator-clean level and a fixed seed (the layer requires
+// one); disabling resets it to its default so it is not emitted.
+void SetSharedNoiseEnabled(Section* section, bool enabled);
+
+// Highest breakpoint frequency a noise spectrum accepts for `standard`: the
+// 4fsc Nyquist frequency, in MHz.
+double NoiseSpectrumMaxFrequencyMhz(Standard standard);
+
+// Appends a spectrum breakpoint above the last one: 1 MHz higher at the same
+// level, or halfway between the last breakpoint and `max_frequency_mhz` when
+// that is closer. The first breakpoint is 0 MHz at 0 dB. Nothing is added
+// when the last breakpoint already sits at the maximum.
+void AddNoiseSpectrumPoint(std::vector<NoiseSpectrumPoint>* spectrum,
+                           double max_frequency_mhz);
+// Removes breakpoint `row`; out-of-range rows change nothing.
+void RemoveNoiseSpectrumPoint(std::vector<NoiseSpectrumPoint>* spectrum,
+                              int row);
+
 void SetRandomDropoutsEnabled(Section* section, bool enabled);
 void SetScratchDropoutsEnabled(Section* section, bool enabled);
+
+// Sets a dropout type's anchor. A disc anchor requires a seed, so choosing it
+// on a type without one fixes the seed at 1; the section anchor leaves the
+// seed as it is.
+void SetRandomDropoutAnchor(Section* section, DropoutAnchor anchor);
+void SetScratchDropoutAnchor(Section* section, DropoutAnchor anchor);
+
+// Enabling the luma bandwidth limit seeds a 3.0 MHz cutoff with the default
+// transition; disabling resets the block so it is not emitted.
+void SetLumaBandwidthEnabled(Section* section, bool enabled);
+// Highest cutoff the luma bandwidth limit accepts for `standard` with the
+// given transition width: 2 f_sc less half the transition, in MHz.
+double LumaBandwidthMaxCutoffMhz(Standard standard, double transition_mhz);
 
 // A freshly-enabled audio channel (validator-clean fixed-frequency sine).
 AudioParameters MakeDefaultAudioChannel();
@@ -149,7 +194,9 @@ SourceRangeEditorState SourceRangeEditorStateFor(const Section& section,
 // Multi-select batch editing: mirrors onto `target` exactly the editor-visible
 // fields that differ between `before` and `after` (an edit applied to the
 // primary selected section), leaving everything else in `target` untouched.
-// The name is never mirrored — it identifies the individual section. The three
+// The name is never mirrored — it identifies the individual section. The
+// capture and shared noise layers, and the random and scratch dropout types,
+// mirror independently, as each is a separate block in the editor. The three
 // duration fields propagate as a unit because the editor's widgets couple
 // them (frames vs "all frames" x repeat), as do the three source frame range
 // fields (start_frame, end_frame and whether the end is set). Line injections

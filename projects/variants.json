@@ -9,12 +9,28 @@
   ],
   "variants": [
     {
+      "name": "stacking-captures",
+      "description": "Four captures of each pressing: fresh capture seeds, the pressing's shared noise and channel untouched. Capture 2 starts later (PN 5); capture 3 replays the multi-burst range (PNs 9-12).",
+      "sources": [
+        "stacking/pal_pressing_?.yaml",
+        "stacking/pal_m_pressing_?.yaml",
+        "stacking/ntsc_pressing_?.yaml"
+      ],
+      "captures": [
+        {"name_suffix": "_cap1", "capture_seed": 5101},
+        {"name_suffix": "_cap2", "capture_seed": 5202, "remove_sections": ["Bars"]},
+        {"name_suffix": "_cap3", "capture_seed": 5303, "repeat_sections": ["MultiBurst"]},
+        {"name_suffix": "_cap4", "capture_seed": 5404}
+      ]
+    },
+    {
       "name": "stacking-clean",
-      "description": "Disc-simulation sources with the impairment blocks removed, for reference comparisons against the noisy captures.",
+      "description": "Disc-simulation sources and pressing captures with the impairment blocks removed, for reference comparisons against the noisy captures. The project-level channel block is kept: it is part of the pressing's truth.",
       "sources": [
         "stacking/pal_discsim_?.yaml",
         "stacking/pal_m_discsim_?.yaml",
-        "stacking/ntsc_discsim_?.yaml"
+        "stacking/ntsc_discsim_?.yaml",
+        "stacking-captures/*.yaml"
       ],
       "name_suffix": "_clean",
       "remove_section_blocks": ["noise", "dropouts", "osd"]

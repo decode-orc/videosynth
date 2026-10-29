@@ -165,6 +165,14 @@ add_library(videosynth_core
     src/generation_stage.cpp
     src/logger.cpp
     src/noise_injection_stage.cpp
+    src/noise_spectrum_filter.cpp
+    src/channel_stage.cpp
+    src/chroma_error_stage.cpp
+    src/edge_smear_filter.cpp
+    src/luma_bandwidth_filter.cpp
+    src/fm_beat_model.cpp
+    src/picture_chroma.cpp
+    src/timing_offset_filter.cpp
     src/dropout_injection_stage.cpp
     src/output_stage.cpp
     src/path_resolution.cpp
@@ -260,6 +268,8 @@ if(VIDEOSYNTH_BUILD_GUI)
         src/gui/logging_options.h
         src/gui/main_window.cpp
         src/gui/main_window.h
+        src/gui/noise_spectrum_editor.cpp
+        src/gui/noise_spectrum_editor.h
         src/gui/new_project_dialog.cpp
         src/gui/new_project_dialog.h
         src/gui/picture_view_widget.cpp

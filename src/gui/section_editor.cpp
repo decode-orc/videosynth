@@ -2,7 +2,8 @@
  * File:        section_editor.cpp
  * Module:      gui
  * Purpose:     Per-section form editor: source and span, optional audio,
- *              noise, dropout, OSD blocks, and line injections
+ *              luma bandwidth, noise, dropout, OSD blocks, and line
+ *              injections
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -64,6 +65,10 @@ enum OsdColumn {
   kOsdColumnCount,
 };
 
+// Dropout anchor combo entries, in this order.
+constexpr int kAnchorSectionIndex = 0;
+constexpr int kAnchorDiscIndex = 1;
+
 int64_t ParseSeed(const QString& text) {
   bool ok = false;
   const qlonglong value = text.trimmed().toLongLong(&ok);
@@ -110,6 +115,7 @@ void SectionEditor::BuildUi() {
   outer->addWidget(placeholder_);
 
   auto* scroll = new QScrollArea(this);
+  scroll_ = scroll;
   scroll->setWidgetResizable(true);
   scroll->setFrameShape(QFrame::NoFrame);
   content_ = new QWidget(scroll);
@@ -125,6 +131,7 @@ void SectionEditor::BuildUi() {
   layout->addWidget(BuildGeneralGroup());
   layout->addWidget(BuildProbeGroup());
   layout->addWidget(BuildAudioGroup());
+  layout->addWidget(BuildLumaBandwidthGroup());
   layout->addWidget(BuildNoiseGroup());
   layout->addWidget(BuildDropoutsGroup());
   layout->addWidget(BuildOsdGroup());
@@ -437,8 +444,76 @@ QWidget* SectionEditor::BuildAudioGroup() {
   return audio_group_;
 }
 
+QWidget* SectionEditor::BuildLumaBandwidthGroup() {
+  luma_bandwidth_group_ = new QGroupBox(tr("Luma bandwidth limit"), content_);
+  luma_bandwidth_group_->setCheckable(true);
+  luma_bandwidth_group_->setToolTip(
+      tr("Low-pass filters the picture luma as it is painted, like a "
+         "band-limited source or recorder. Sync, blanking, VBI, VITS, chroma "
+         "and on-screen text are not filtered."));
+  auto* outer = new QVBoxLayout(luma_bandwidth_group_);
+  outer->setContentsMargins(0, 0, 0, 0);
+  auto* body = new QWidget(luma_bandwidth_group_);
+  auto* form = new QFormLayout(body);
+
+  luma_cutoff_spin_ = new QDoubleSpinBox(body);
+  luma_cutoff_spin_->setDecimals(2);
+  luma_cutoff_spin_->setSingleStep(0.1);
+  luma_cutoff_spin_->setSuffix(tr(" MHz"));
+  luma_cutoff_spin_->setKeyboardTracking(false);
+  luma_cutoff_spin_->setToolTip(tr("The -6 dB point of the filter."));
+  luma_cutoff_spin_->setRange(
+      editor_limits::kLumaBandwidthCutoffMinMhz,
+      LumaBandwidthMaxCutoffMhz(Standard::kPal,
+                                kLumaBandwidthTransitionDefaultMhz));
+  CapFieldWidthAtSizeHint(luma_cutoff_spin_);
+  form->addRow(tr("Cutoff:"), luma_cutoff_spin_);
+
+  luma_transition_spin_ = new QDoubleSpinBox(body);
+  luma_transition_spin_->setRange(
+      editor_limits::kLumaBandwidthTransitionMinMhz,
+      editor_limits::kLumaBandwidthTransitionMaxMhz);
+  luma_transition_spin_->setDecimals(2);
+  luma_transition_spin_->setSingleStep(0.1);
+  luma_transition_spin_->setSuffix(tr(" MHz"));
+  luma_transition_spin_->setKeyboardTracking(false);
+  luma_transition_spin_->setToolTip(
+      tr("Full width of the transition band, centred on the cutoff."));
+  CapFieldWidthAtSizeHint(luma_transition_spin_);
+  form->addRow(tr("Transition width:"), luma_transition_spin_);
+  outer->addWidget(body);
+
+  const auto commit = [this] {
+    if (!updating_) {
+      CommitSection();
+    }
+  };
+  connect(luma_bandwidth_group_, &QGroupBox::toggled, body,
+          &QWidget::setVisible);
+  connect(luma_bandwidth_group_, &QGroupBox::toggled, this, commit);
+  body->setVisible(luma_bandwidth_group_->isChecked());
+  connect(luma_cutoff_spin_, &QDoubleSpinBox::valueChanged, this, commit);
+  connect(luma_transition_spin_, &QDoubleSpinBox::valueChanged, this, [this] {
+    UpdateLumaCutoffRange();
+    if (!updating_) {
+      CommitSection();
+    }
+  });
+  return luma_bandwidth_group_;
+}
+
 QWidget* SectionEditor::BuildNoiseGroup() {
-  noise_group_ = new QGroupBox(tr("Noise injection"), content_);
+  auto* group = new QGroupBox(tr("Noise injection"), content_);
+  auto* layout = new QVBoxLayout(group);
+
+  const auto commit = [this] {
+    if (!updating_) {
+      CommitSection();
+    }
+  };
+
+  // Capture layer: this capture's own noise.
+  noise_group_ = new QGroupBox(tr("Capture layer"), group);
   noise_group_->setCheckable(true);
   auto* outer = new QVBoxLayout(noise_group_);
   outer->setContentsMargins(0, 0, 0, 0);
@@ -470,13 +545,12 @@ QWidget* SectionEditor::BuildNoiseGroup() {
   seed_row->addWidget(noise_seed_edit_);
   seed_row->addStretch();
   form->addRow(seed_row);
-  outer->addWidget(body);
 
-  const auto commit = [this] {
-    if (!updating_) {
-      CommitSection();
-    }
-  };
+  noise_spectrum_editor_ = new NoiseSpectrumEditor(body);
+  form->addRow(tr("Spectrum:"), noise_spectrum_editor_);
+  outer->addWidget(body);
+  layout->addWidget(noise_group_);
+
   connect(noise_group_, &QGroupBox::toggled, body, &QWidget::setVisible);
   connect(noise_group_, &QGroupBox::toggled, this, commit);
   body->setVisible(noise_group_->isChecked());
@@ -489,7 +563,48 @@ QWidget* SectionEditor::BuildNoiseGroup() {
     }
   });
   connect(noise_seed_edit_, &QLineEdit::editingFinished, this, commit);
-  return noise_group_;
+  connect(noise_spectrum_editor_, &NoiseSpectrumEditor::SpectrumEdited, this,
+          commit);
+
+  // Shared (pressing) layer: keyed by disc position, so every capture of the
+  // pressing carries the same noise on the same picture.
+  shared_noise_group_ = new QGroupBox(tr("Shared (pressing) layer"), group);
+  shared_noise_group_->setCheckable(true);
+  shared_noise_group_->setToolTip(
+      tr("Noise recorded on the pressing: identical on the same picture in "
+         "every capture that uses the same level, seed and spectrum. It needs "
+         "a fixed seed and has no white spread."));
+  auto* shared_outer = new QVBoxLayout(shared_noise_group_);
+  shared_outer->setContentsMargins(0, 0, 0, 0);
+  auto* shared_body = new QWidget(shared_noise_group_);
+  auto* shared_form = new QFormLayout(shared_body);
+
+  shared_noise_db_spin_ = new QDoubleSpinBox(shared_body);
+  shared_noise_db_spin_->setRange(editor_limits::kNoiseDbMin,
+                                  editor_limits::kNoiseDbMax);
+  shared_noise_db_spin_->setDecimals(1);
+  shared_noise_db_spin_->setSuffix(tr(" dB"));
+  CapFieldWidthAtSizeHint(shared_noise_db_spin_);
+  shared_form->addRow(tr("Noise level (PSNR):"), shared_noise_db_spin_);
+
+  shared_noise_seed_edit_ = new QLineEdit(shared_body);
+  CapFieldWidthToText(shared_noise_seed_edit_, QStringLiteral("10,000,000"));
+  shared_form->addRow(tr("Seed:"), shared_noise_seed_edit_);
+
+  shared_spectrum_editor_ = new NoiseSpectrumEditor(shared_body);
+  shared_form->addRow(tr("Spectrum:"), shared_spectrum_editor_);
+  shared_outer->addWidget(shared_body);
+  layout->addWidget(shared_noise_group_);
+
+  connect(shared_noise_group_, &QGroupBox::toggled, shared_body,
+          &QWidget::setVisible);
+  connect(shared_noise_group_, &QGroupBox::toggled, this, commit);
+  shared_body->setVisible(shared_noise_group_->isChecked());
+  connect(shared_noise_db_spin_, &QDoubleSpinBox::valueChanged, this, commit);
+  connect(shared_noise_seed_edit_, &QLineEdit::editingFinished, this, commit);
+  connect(shared_spectrum_editor_, &NoiseSpectrumEditor::SpectrumEdited, this,
+          commit);
+  return group;
 }
 
 QWidget* SectionEditor::BuildDropoutsGroup() {
@@ -503,9 +618,8 @@ QWidget* SectionEditor::BuildDropoutsGroup() {
   };
 
   const auto build_block = [&](const QString& title,
-                               const QString& scale_tool_tip,
-                               QGroupBox** out_group, QSpinBox** out_scale,
-                               QCheckBox** out_check, QLineEdit** out_edit) {
+                               const QString& scale_tool_tip, bool scratch,
+                               DropoutWidgets* widgets) {
     auto* block = new QGroupBox(title, group);
     block->setCheckable(true);
     auto* outer = new QVBoxLayout(block);
@@ -526,6 +640,20 @@ QWidget* SectionEditor::BuildDropoutsGroup() {
     seed_row->addWidget(edit);
     seed_row->addStretch();
     form->addRow(seed_row);
+    auto* anchor = new QComboBox(body);
+    anchor->insertItem(kAnchorSectionIndex, tr("Section (this capture)"));
+    anchor->insertItem(kAnchorDiscIndex, tr("Disc (pressing defect)"));
+    anchor->setToolTip(
+        tr("Section: events are drawn per section and output frame, so each "
+           "capture differs. Disc: events are drawn per disc position, so "
+           "every capture of the pressing, and a replay of the same pictures, "
+           "carries the same events. Disc needs a fixed seed."));
+    form->addRow(tr("Anchor:"), anchor);
+    auto* flagged = new QCheckBox(tr("Record in dropout sidecar"), body);
+    flagged->setToolTip(
+        tr("Unticked, the dropouts still damage the signal but no rows are "
+           "written for them, like dropouts a player fails to detect."));
+    form->addRow(flagged);
     outer->addWidget(body);
 
     connect(block, &QGroupBox::toggled, body, &QWidget::setVisible);
@@ -539,11 +667,16 @@ QWidget* SectionEditor::BuildDropoutsGroup() {
       }
     });
     connect(edit, &QLineEdit::editingFinished, this, commit);
+    connect(anchor, &QComboBox::activated, this,
+            [this, scratch] { CommitDropoutAnchor(scratch); });
+    connect(flagged, &QCheckBox::toggled, this, commit);
 
-    *out_group = block;
-    *out_scale = scale;
-    *out_check = check;
-    *out_edit = edit;
+    widgets->group = block;
+    widgets->scale = scale;
+    widgets->seed_check = check;
+    widgets->seed_edit = edit;
+    widgets->anchor_combo = anchor;
+    widgets->flagged_check = flagged;
     layout->addWidget(block);
   };
 
@@ -552,16 +685,14 @@ QWidget* SectionEditor::BuildDropoutsGroup() {
       tr("Severity level, not a physical unit: 1 = rare, short dropouts; "
          "20 = frequent, longer ones. Each step raises the expected dropouts "
          "per frame and their length in samples exponentially."),
-      &random_dropouts_group_, &random_scale_spin_, &random_seed_check_,
-      &random_seed_edit_);
+      /*scratch=*/false, &random_dropouts_);
   build_block(
       tr("Scratch"),
       tr("Severity level, not a physical unit: 1 = a couple of brief, narrow "
          "scratches; 20 = many long-lived, wide ones. Each step raises the "
          "scratch count, lifetime in frames, and width in samples "
          "exponentially."),
-      &scratch_dropouts_group_, &scratch_scale_spin_, &scratch_seed_check_,
-      &scratch_seed_edit_);
+      /*scratch=*/true, &scratch_dropouts_);
   return group;
 }
 
@@ -762,7 +893,15 @@ void SectionEditor::LoadFromDocument() {
   UpdateAudioSourceContext();
   audio_editor_->SetChannelPairs(section.audio_channel_pairs);
 
+  // Luma bandwidth.
+  luma_bandwidth_group_->setChecked(section.luma_bandwidth.enabled);
+  luma_transition_spin_->setValue(section.luma_bandwidth.transition_mhz);
+  UpdateLumaCutoffRange();
+  luma_cutoff_spin_->setValue(section.luma_bandwidth.cutoff_mhz);
+
   // Noise.
+  const double spectrum_max_mhz =
+      NoiseSpectrumMaxFrequencyMhz(project.cvbs_presets.video_standard_preset);
   noise_group_->setChecked(section.noise.enabled);
   noise_db_spin_->setValue(section.noise.noise_db);
   noise_spread_spin_->setValue(section.noise.noise_spread_db);
@@ -772,27 +911,35 @@ void SectionEditor::LoadFromDocument() {
       section.noise.noise_seed_specified
           ? QString::number(static_cast<qlonglong>(section.noise.noise_seed))
           : QString());
+  noise_spectrum_editor_->SetSpectrum(section.noise.spectrum, spectrum_max_mhz);
+  const SharedNoiseParameters& shared = section.noise.shared;
+  shared_noise_group_->setChecked(shared.enabled);
+  shared_noise_db_spin_->setValue(shared.noise_db);
+  shared_noise_seed_edit_->setText(
+      shared.noise_seed_specified
+          ? QString::number(static_cast<qlonglong>(shared.noise_seed))
+          : QString());
+  shared_spectrum_editor_->SetSpectrum(shared.spectrum, spectrum_max_mhz);
 
   // Dropouts.
-  const DropoutParameters& dropouts = section.dropouts;
-  random_dropouts_group_->setChecked(dropouts.random.enabled);
-  random_scale_spin_->setValue(
-      qMax(editor_limits::kDropoutScaleMin, dropouts.random.scale));
-  random_seed_check_->setChecked(dropouts.random.seed_specified);
-  random_seed_edit_->setEnabled(dropouts.random.seed_specified);
-  random_seed_edit_->setText(
-      dropouts.random.seed_specified
-          ? QString::number(static_cast<qlonglong>(dropouts.random.seed))
-          : QString());
-  scratch_dropouts_group_->setChecked(dropouts.scratch.enabled);
-  scratch_scale_spin_->setValue(
-      qMax(editor_limits::kDropoutScaleMin, dropouts.scratch.scale));
-  scratch_seed_check_->setChecked(dropouts.scratch.seed_specified);
-  scratch_seed_edit_->setEnabled(dropouts.scratch.seed_specified);
-  scratch_seed_edit_->setText(
-      dropouts.scratch.seed_specified
-          ? QString::number(static_cast<qlonglong>(dropouts.scratch.seed))
-          : QString());
+  const auto load_dropouts = [](const auto& parameters,
+                                const DropoutWidgets& widgets) {
+    widgets.group->setChecked(parameters.enabled);
+    widgets.scale->setValue(
+        qMax(editor_limits::kDropoutScaleMin, parameters.scale));
+    widgets.seed_check->setChecked(parameters.seed_specified);
+    widgets.seed_edit->setEnabled(parameters.seed_specified);
+    widgets.seed_edit->setText(
+        parameters.seed_specified
+            ? QString::number(static_cast<qlonglong>(parameters.seed))
+            : QString());
+    widgets.anchor_combo->setCurrentIndex(
+        parameters.anchor == DropoutAnchor::kDisc ? kAnchorDiscIndex
+                                                  : kAnchorSectionIndex);
+    widgets.flagged_check->setChecked(parameters.flagged);
+  };
+  load_dropouts(section.dropouts.random, random_dropouts_);
+  load_dropouts(section.dropouts.scratch, scratch_dropouts_);
 
   // OSD.
   osd_group_->setChecked(OsdBlockEnabled(section));
@@ -902,7 +1049,21 @@ Section SectionEditor::SectionFromWidgets() const {
                                     ? audio_editor_->channel_pairs()
                                     : std::vector<AudioChannelPair>{};
 
-  // Noise block.
+  // Luma bandwidth block. A freshly ticked group takes the presenter's
+  // defaults; the widgets still hold the disabled block's values.
+  if (luma_bandwidth_group_->isChecked()) {
+    if (section.luma_bandwidth.enabled) {
+      section.luma_bandwidth.cutoff_mhz = luma_cutoff_spin_->value();
+      section.luma_bandwidth.transition_mhz = luma_transition_spin_->value();
+    } else {
+      SetLumaBandwidthEnabled(&section, true);
+    }
+  } else {
+    SetLumaBandwidthEnabled(&section, false);
+  }
+
+  // Noise layers. The capture layer's group owns noise_db/spread/seed and its
+  // spectrum; the shared layer is independent of it.
   if (noise_group_->isChecked()) {
     section.noise.enabled = true;
     section.noise.noise_db = noise_db_spin_->value();
@@ -911,30 +1072,49 @@ Section SectionEditor::SectionFromWidgets() const {
     section.noise.noise_seed = noise_seed_check_->isChecked()
                                    ? ParseSeed(noise_seed_edit_->text())
                                    : 0;
+    section.noise.spectrum = noise_spectrum_editor_->spectrum();
   } else {
     SetNoiseBlockEnabled(&section, false);
+  }
+  if (shared_noise_group_->isChecked() && !section.noise.shared.enabled) {
+    SetSharedNoiseEnabled(&section, true);
+  } else if (shared_noise_group_->isChecked()) {
+    SharedNoiseParameters& shared = section.noise.shared;
+    shared.noise_db = shared_noise_db_spin_->value();
+    // The layer always carries a seed; an empty entry keeps the stored one.
+    if (!shared_noise_seed_edit_->text().trimmed().isEmpty()) {
+      shared.noise_seed_specified = true;
+      shared.noise_seed = ParseSeed(shared_noise_seed_edit_->text());
+    }
+    shared.spectrum = shared_spectrum_editor_->spectrum();
+  } else {
+    SetSharedNoiseEnabled(&section, false);
   }
 
   // Dropout blocks. The group boxes own the block, so a loaded block that
   // enabled nothing is dropped, as the emitter would on save.
   section.dropouts.block_present = false;
-  if (random_dropouts_group_->isChecked()) {
-    section.dropouts.random.enabled = true;
-    section.dropouts.random.scale = random_scale_spin_->value();
-    section.dropouts.random.seed_specified = random_seed_check_->isChecked();
-    section.dropouts.random.seed = random_seed_check_->isChecked()
-                                       ? ParseSeed(random_seed_edit_->text())
-                                       : 0;
+  const auto read_dropouts = [](const DropoutWidgets& widgets,
+                                auto* parameters) {
+    parameters->enabled = true;
+    parameters->scale = widgets.scale->value();
+    parameters->seed_specified = widgets.seed_check->isChecked();
+    parameters->seed = widgets.seed_check->isChecked()
+                           ? ParseSeed(widgets.seed_edit->text())
+                           : 0;
+    parameters->anchor =
+        widgets.anchor_combo->currentIndex() == kAnchorDiscIndex
+            ? DropoutAnchor::kDisc
+            : DropoutAnchor::kSection;
+    parameters->flagged = widgets.flagged_check->isChecked();
+  };
+  if (random_dropouts_.group->isChecked()) {
+    read_dropouts(random_dropouts_, &section.dropouts.random);
   } else {
     SetRandomDropoutsEnabled(&section, false);
   }
-  if (scratch_dropouts_group_->isChecked()) {
-    section.dropouts.scratch.enabled = true;
-    section.dropouts.scratch.scale = scratch_scale_spin_->value();
-    section.dropouts.scratch.seed_specified = scratch_seed_check_->isChecked();
-    section.dropouts.scratch.seed = scratch_seed_check_->isChecked()
-                                        ? ParseSeed(scratch_seed_edit_->text())
-                                        : 0;
+  if (scratch_dropouts_.group->isChecked()) {
+    read_dropouts(scratch_dropouts_, &section.dropouts.scratch);
   } else {
     SetScratchDropoutsEnabled(&section, false);
   }
@@ -1010,6 +1190,77 @@ void SectionEditor::CommitSection() {
     return;
   }
   CommitEditedSection(SectionFromWidgets());
+}
+
+void SectionEditor::CommitDropoutAnchor(bool scratch) {
+  if (updating_ || section_index_ < 0) {
+    return;
+  }
+  Section section = SectionFromWidgets();
+  const DropoutAnchor anchor =
+      (scratch ? scratch_dropouts_ : random_dropouts_)
+                  .anchor_combo->currentIndex() == kAnchorDiscIndex
+          ? DropoutAnchor::kDisc
+          : DropoutAnchor::kSection;
+  if (scratch) {
+    SetScratchDropoutAnchor(&section, anchor);
+  } else {
+    SetRandomDropoutAnchor(&section, anchor);
+  }
+  CommitEditedSection(section);
+}
+
+void SectionEditor::UpdateLumaCutoffRange() {
+  const Standard standard =
+      document_->project().cvbs_presets.video_standard_preset;
+  // The range only grows or shrinks by the transition: never clamp a stored
+  // cutoff the validator would flag, so the issue stays visible.
+  const double maximum = std::max(
+      LumaBandwidthMaxCutoffMhz(standard, luma_transition_spin_->value()),
+      luma_cutoff_spin_->value());
+  const QSignalBlocker blocker(luma_cutoff_spin_);
+  luma_cutoff_spin_->setMaximum(maximum);
+}
+
+void SectionEditor::RevealField(IssueField field) {
+  QWidget* group = nullptr;
+  QWidget* focus = nullptr;
+  switch (field) {
+    case IssueField::kCaptureNoise:
+      group = noise_group_;
+      focus = noise_db_spin_;
+      break;
+    case IssueField::kSharedNoise:
+      group = shared_noise_group_;
+      focus = shared_noise_db_spin_;
+      break;
+    case IssueField::kRandomDropouts:
+      group = random_dropouts_.group;
+      focus = random_dropouts_.scale;
+      break;
+    case IssueField::kScratchDropouts:
+      group = scratch_dropouts_.group;
+      focus = scratch_dropouts_.scale;
+      break;
+    case IssueField::kLumaBandwidth:
+      group = luma_bandwidth_group_;
+      focus = luma_cutoff_spin_;
+      break;
+    case IssueField::kNone:
+    case IssueField::kChannel:
+    case IssueField::kChromaError:
+    default:
+      return;
+  }
+  if (section_index_ < 0) {
+    return;
+  }
+  scroll_->ensureWidgetVisible(group);
+  if (focus->isVisible()) {
+    focus->setFocus(Qt::OtherFocusReason);
+  } else {
+    group->setFocus(Qt::OtherFocusReason);
+  }
 }
 
 void SectionEditor::CommitSourceSelection() {

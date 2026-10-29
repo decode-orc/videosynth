@@ -1062,11 +1062,245 @@ bool ValidateProjectLineInjections(const videosynth::Project& project,
 constexpr int kOrcGuiWhiteSNRLinePal = 19;
 constexpr int kOrcGuiWhiteSNRLineNtsc = 20;
 
+// Noise spectrum relative-level bounds: the table describes a shape, and a
+// 100 dB span covers every realistic channel response.
+constexpr double kNoiseSpectrumRelativeDbMin = -60.0;
+constexpr double kNoiseSpectrumRelativeDbMax = 40.0;
+
+// Checks one noise layer's spectrum table. nyquist_mhz <= 0 skips the upper
+// frequency bound (unknown sample encoding, reported elsewhere).
+void ValidateNoiseSpectrum(
+    const std::vector<videosynth::NoiseSpectrumPoint>& spectrum,
+    const std::string& key, const std::string& section_name, double nyquist_mhz,
+    videosynth::ValidationResult* result) {
+  const std::string prefix =
+      "Noise validation error in section '" + section_name + "': " + key;
+  for (std::size_t i = 0; i < spectrum.size(); ++i) {
+    const videosynth::NoiseSpectrumPoint& point = spectrum[i];
+    if (point.frequency_mhz < 0.0 ||
+        (nyquist_mhz > 0.0 && point.frequency_mhz > nyquist_mhz)) {
+      result->is_valid = false;
+      result->errors.push_back(prefix +
+                               " frequency must be in the range [0.0, " +
+                               std::to_string(nyquist_mhz) +
+                               "] MHz (the 4fsc Nyquist "
+                               "frequency); got " +
+                               std::to_string(point.frequency_mhz) + ".");
+      return;
+    }
+    if (i > 0 && point.frequency_mhz <= spectrum[i - 1].frequency_mhz) {
+      result->is_valid = false;
+      result->errors.push_back(
+          prefix +
+          " frequencies must be strictly ascending; "
+          "got " +
+          std::to_string(point.frequency_mhz) + " MHz after " +
+          std::to_string(spectrum[i - 1].frequency_mhz) + " MHz.");
+      return;
+    }
+    if (point.relative_db < kNoiseSpectrumRelativeDbMin ||
+        point.relative_db > kNoiseSpectrumRelativeDbMax) {
+      result->is_valid = false;
+      result->errors.push_back(
+          prefix + " relative_db must be in the range [-60.0, 40.0]; got " +
+          std::to_string(point.relative_db) + ".");
+      return;
+    }
+  }
+}
+
+// True when the section carries a CAV picture_number code, so its frames are
+// anchored to disc positions.
+bool SectionHasPictureNumberCode(const videosynth::Section& section) {
+  for (const videosynth::Section::LineInjection& injection :
+       section.line_injections) {
+    for (const videosynth::Section::LineInjectionCode& code : injection.codes) {
+      if (code.code_type == "picture_number") {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+void ValidateSharedNoiseParameters(const videosynth::Section& section,
+                                   const std::string& disc_type,
+                                   double nyquist_mhz,
+                                   videosynth::ValidationResult* result) {
+  const videosynth::SharedNoiseParameters& shared = section.noise.shared;
+  if (!shared.enabled) {
+    return;
+  }
+
+  if (shared.noise_db < kNoiseDbMin || shared.noise_db > kNoiseDbMax) {
+    result->is_valid = false;
+    result->errors.push_back(
+        "Noise validation error in section '" + section.name +
+        "': shared.noise_db must be in the range [20.0, 61.0]; got " +
+        std::to_string(shared.noise_db) + ".");
+    return;
+  }
+
+  if (!shared.noise_seed_specified) {
+    result->is_valid = false;
+    result->errors.push_back(
+        "Noise validation error in section '" + section.name +
+        "': shared.noise_seed is required; pressing noise must be identical "
+        "in every capture of the pressing.");
+    return;
+  }
+
+  ValidateNoiseSpectrum(shared.spectrum, "shared.spectrum", section.name,
+                        nyquist_mhz, result);
+  if (!result->is_valid) {
+    return;
+  }
+
+  if (disc_type == "CAV" && !SectionHasPictureNumberCode(section)) {
+    result->warnings.push_back(
+        "Noise warning in section '" + section.name +
+        "': noise.shared is set on a CAV section without a picture_number "
+        "code; pressing noise falls back to output position.");
+  }
+}
+
+// Project-wide channel (pressing) impairments.
+void ValidateChannelParameters(const videosynth::Project& project,
+                               videosynth::ValidationResult* result) {
+  const videosynth::ChannelParameters& channel = project.channel;
+  if (!channel.enabled) {
+    return;
+  }
+
+  // Eight samples is about half a microsecond at 4fsc: far beyond any
+  // sub-sample alignment error a stacking tool is expected to absorb.
+  constexpr double kTimingOffsetLimitSamples = 8.0;
+  if (!std::isfinite(channel.timing_offset_samples) ||
+      std::abs(channel.timing_offset_samples) > kTimingOffsetLimitSamples) {
+    result->is_valid = false;
+    result->errors.push_back(
+        "Channel validation error: timing_offset_samples must be in the range "
+        "[-8.0, 8.0]; got " +
+        std::to_string(channel.timing_offset_samples) + ".");
+  }
+
+  const videosynth::EdgeSmearParameters& edge_smear = channel.edge_smear;
+  if (edge_smear.enabled) {
+    // Beyond half the signal smeared, or a time constant past ~5.6 us, the
+    // picture no longer resembles any working player's readout.
+    if (!std::isfinite(edge_smear.fraction) || edge_smear.fraction < 0.0 ||
+        edge_smear.fraction > 0.5) {
+      result->is_valid = false;
+      result->errors.push_back(
+          "Channel validation error: edge_smear.fraction must be in the range "
+          "[0.0, 0.5]; got " +
+          std::to_string(edge_smear.fraction) + ".");
+    }
+    if (!std::isfinite(edge_smear.tau_samples) ||
+        edge_smear.tau_samples <= 0.0 || edge_smear.tau_samples > 100.0) {
+      result->is_valid = false;
+      result->errors.push_back(
+          "Channel validation error: edge_smear.tau_samples must be in the "
+          "range (0.0, 100.0]; got " +
+          std::to_string(edge_smear.tau_samples) + ".");
+    }
+  }
+
+  const videosynth::FmBeatParameters& fm_beat = channel.fm_beat;
+  if (fm_beat.enabled) {
+    if (project.cvbs_presets.video_standard_preset !=
+        videosynth::Standard::kPal) {
+      result->is_valid = false;
+      result->errors.push_back(
+          "Channel validation error: fm_beat is supported for 625-line PAL "
+          "only; the beat model is fitted to PAL LaserDisc pressings.");
+      return;
+    }
+    // The reference model's carrier fits lie within a few tens of kHz of
+    // 7.088 MHz; the range allows for other discs and players.
+    if (!std::isfinite(fm_beat.carrier_black_hz) ||
+        fm_beat.carrier_black_hz < 6.9e6 || fm_beat.carrier_black_hz > 7.3e6) {
+      result->is_valid = false;
+      result->errors.push_back(
+          "Channel validation error: fm_beat.carrier_black_hz must be in the "
+          "range [6900000, 7300000]; got " +
+          std::to_string(fm_beat.carrier_black_hz) + ".");
+    }
+    if (!std::isfinite(fm_beat.level_db) || fm_beat.level_db < -60.0 ||
+        fm_beat.level_db > 0.0) {
+      result->is_valid = false;
+      result->errors.push_back(
+          "Channel validation error: fm_beat.level_db must be in the range "
+          "[-60.0, 0.0]; got " +
+          std::to_string(fm_beat.level_db) + ".");
+    }
+  }
+}
+
+// Project-wide chroma gain and phase error (one capture's player).
+void ValidateChromaErrorParameters(const videosynth::Project& project,
+                                   videosynth::ValidationResult* result) {
+  const videosynth::ChromaErrorParameters& chroma_error = project.chroma_error;
+  if (!chroma_error.enabled) {
+    return;
+  }
+
+  if (project.cvbs_presets.video_standard_preset ==
+      videosynth::Standard::kSecam) {
+    result->is_valid = false;
+    result->errors.push_back(
+        "Chroma error validation error: chroma_error is not supported for "
+        "SECAM; it models a quadrature (PAL/NTSC) chroma path.");
+    return;
+  }
+
+  struct RangeCheck {
+    const char* key;
+    double value;
+    double min;
+    double max;
+    const char* range;
+  };
+  const videosynth::ChromaJitterParameters& jitter = chroma_error.line_jitter;
+  // Beyond these limits the picture is no longer a plausibly mis-adjusted
+  // player: half or one-and-a-half times saturation, any hue, and per-line
+  // jitter well past what a working chroma path shows.
+  const RangeCheck checks[] = {
+      {"gain", chroma_error.gain, 0.5, 1.5, "[0.5, 1.5]"},
+      {"phase_deg", chroma_error.phase_deg, -180.0, 180.0, "[-180.0, 180.0]"},
+      {"line_jitter.phase_deg", jitter.phase_deg, 0.0, 10.0, "[0.0, 10.0]"},
+      {"line_jitter.gain", jitter.gain, 0.0, 0.1, "[0.0, 0.1]"},
+  };
+  for (const RangeCheck& check : checks) {
+    if (!std::isfinite(check.value) || check.value < check.min ||
+        check.value > check.max) {
+      result->is_valid = false;
+      result->errors.push_back(std::string("Chroma error validation error: ") +
+                               check.key + " must be in the range " +
+                               check.range + "; got " +
+                               std::to_string(check.value) + ".");
+    }
+  }
+}
+
 void ValidateNoiseParameters(const videosynth::Section& section,
-                             videosynth::Standard standard,
+                             const videosynth::Project& project,
                              const std::set<int>& project_vits_lines,
                              videosynth::ValidationResult* result) {
-  if (result == nullptr || !section.noise.enabled) {
+  if (result == nullptr) {
+    return;
+  }
+
+  const videosynth::Standard standard =
+      project.cvbs_presets.video_standard_preset;
+  // Noise is shaped on the 4fsc signal, before the output stage resamples
+  // RAW encodings, so the 4fsc Nyquist bounds the spectrum for every preset.
+  const double nyquist_mhz =
+      videosynth::GetTimingConstants(standard).sample_rate_4fsc_hz / 2.0e6;
+
+  ValidateSharedNoiseParameters(section, project.line_injections.disc_type,
+                                nyquist_mhz, result);
+  if (!result->is_valid || !section.noise.enabled) {
     return;
   }
 
@@ -1101,6 +1335,12 @@ void ValidateNoiseParameters(const videosynth::Section& section,
     return;
   }
 
+  ValidateNoiseSpectrum(section.noise.spectrum, "spectrum", section.name,
+                        nyquist_mhz, result);
+  if (!result->is_valid) {
+    return;
+  }
+
   // Warn if the noise spread target is non-zero but no suitable VITS white-flag
   // injection is present on the line orc-gui inspects for White SNR. VITS are
   // project-wide, so the check consults the project VITS target-line set.
@@ -1119,6 +1359,44 @@ void ValidateNoiseParameters(const videosynth::Section& section,
           "suitable VITS white flag on that line (" +
           videosynth::StandardToString(standard) + ").");
     }
+  }
+}
+
+// Valid ranges for the per-section luma bandwidth limit, in MHz.
+constexpr double kLumaBandwidthCutoffMinMhz = 0.5;
+constexpr double kLumaBandwidthTransitionMinMhz = 0.1;
+constexpr double kLumaBandwidthTransitionMaxMhz = 2.0;
+
+void ValidateLumaBandwidth(const videosynth::Section& section,
+                           const videosynth::Project& project,
+                           videosynth::ValidationResult* result) {
+  const videosynth::LumaBandwidthParameters& bandwidth = section.luma_bandwidth;
+  if (result == nullptr || !bandwidth.enabled) {
+    return;
+  }
+  const std::string context =
+      "Luma bandwidth validation error in section '" + section.name + "': ";
+  if (bandwidth.transition_mhz < kLumaBandwidthTransitionMinMhz ||
+      bandwidth.transition_mhz > kLumaBandwidthTransitionMaxMhz) {
+    result->is_valid = false;
+    result->errors.push_back(context +
+                             "transition_mhz must be in [0.1, 2.0]; got " +
+                             std::to_string(bandwidth.transition_mhz) + ".");
+    return;
+  }
+  // The stopband edge must stay below the 4fsc Nyquist frequency (2 f_sc).
+  const double nyquist_mhz =
+      videosynth::GetTimingConstants(project.cvbs_presets.video_standard_preset)
+          .sample_rate_4fsc_hz /
+      2.0e6;
+  const double cutoff_max_mhz = nyquist_mhz - (bandwidth.transition_mhz / 2.0);
+  if (bandwidth.cutoff_mhz < kLumaBandwidthCutoffMinMhz ||
+      bandwidth.cutoff_mhz > cutoff_max_mhz) {
+    result->is_valid = false;
+    result->errors.push_back(context + "cutoff_mhz must be in [0.5, " +
+                             std::to_string(cutoff_max_mhz) +
+                             "] (2 f_sc less half the transition); got " +
+                             std::to_string(bandwidth.cutoff_mhz) + ".");
   }
 }
 
@@ -1175,6 +1453,27 @@ void ValidateDropoutParameters(const videosynth::Section& section,
         "scratch.scale are 0). Remove the dropouts block or set at least one "
         "scale to 1–20.");
     return;
+  }
+
+  // Disc-anchored dropouts are a pressing defect, so every capture of the
+  // pressing must draw the same events.
+  if (random_active && dp.random.anchor == videosynth::DropoutAnchor::kDisc &&
+      !dp.random.seed_specified) {
+    result->is_valid = false;
+    result->errors.push_back("Dropout validation error in section '" +
+                             section.name +
+                             "': random.anchor 'disc' requires random.seed, so "
+                             "every capture of the pressing draws the same "
+                             "dropouts.");
+  }
+  if (scratch_active && dp.scratch.anchor == videosynth::DropoutAnchor::kDisc &&
+      !dp.scratch.seed_specified) {
+    result->is_valid = false;
+    result->errors.push_back("Dropout validation error in section '" +
+                             section.name +
+                             "': scratch.anchor 'disc' requires scratch.seed, "
+                             "so every capture of the pressing draws the same "
+                             "scratches.");
   }
 
   // Warn when the derived scratch lifespan exceeds the section length.
@@ -1944,6 +2243,8 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
 
   ValidateDeferredLaserdiscPresetFlags(project, &result);
   ValidateSecamPreset(project, &result);
+  ValidateChannelParameters(project, &result);
+  ValidateChromaErrorParameters(project, &result);
 
   if (project.cvbs_presets.video_standard_preset != Standard::kNtsc &&
       project.cvbs_presets.video_standard_preset != Standard::kPalM &&
@@ -2054,9 +2355,12 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
         break;
       }
 
-      ValidateNoiseParameters(section,
-                              project.cvbs_presets.video_standard_preset,
-                              project_vits_lines, &result);
+      ValidateNoiseParameters(section, project, project_vits_lines, &result);
+      if (!result.is_valid) {
+        break;
+      }
+
+      ValidateLumaBandwidth(section, project, &result);
       if (!result.is_valid) {
         break;
       }

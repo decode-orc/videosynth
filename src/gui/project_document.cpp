@@ -260,6 +260,29 @@ bool ProjectDocument::SetOutputTargets(const OutputTargets& output) {
       QStringLiteral("Edit output targets")));
 }
 
+bool ProjectDocument::SetChannel(const ChannelParameters& channel) {
+  if (project_.channel == channel) {
+    return false;
+  }
+  return ApplyCommand(std::make_unique<SwapValueCommand<ChannelParameters>>(
+      +[](Project& project) -> ChannelParameters& { return project.channel; },
+      channel, DocumentChange::Kind::kProjectSettings,
+      QStringLiteral("Edit channel")));
+}
+
+bool ProjectDocument::SetChromaError(
+    const ChromaErrorParameters& chroma_error) {
+  if (project_.chroma_error == chroma_error) {
+    return false;
+  }
+  return ApplyCommand(std::make_unique<SwapValueCommand<ChromaErrorParameters>>(
+      +[](Project& project) -> ChromaErrorParameters& {
+        return project.chroma_error;
+      },
+      chroma_error, DocumentChange::Kind::kProjectSettings,
+      QStringLiteral("Edit chroma error")));
+}
+
 bool ProjectDocument::InsertSection(int index, Section section) {
   if (index == -1) {
     index = section_count();

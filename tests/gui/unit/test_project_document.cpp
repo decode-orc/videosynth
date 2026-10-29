@@ -338,6 +338,96 @@ TEST_F(ProjectDocumentTest, AudioPairContentEditUndoesAndRedoes) {
   EXPECT_EQ(document_.project().sections[0].audio_channel_pairs[0], narration);
 }
 
+// Applies `edit` to section 0, then checks that undo restores the original
+// section and redo the edited one.
+void ExpectSectionEditUndoesAndRedoes(ProjectDocument* document,
+                                      void (*edit)(Section*)) {
+  const Section original = document->project().sections[0];
+  Section edited = original;
+  edit(&edited);
+  ASSERT_FALSE(edited == original);
+  ASSERT_TRUE(document->SetSection(0, edited));
+  ASSERT_TRUE(document->Undo());
+  EXPECT_EQ(document->project().sections[0], original);
+  ASSERT_TRUE(document->Redo());
+  EXPECT_EQ(document->project().sections[0], edited);
+}
+
+TEST_F(ProjectDocumentTest, ImpairmentFieldEditsUndoAndRedo) {
+  using Edit = void (*)(Section*);
+  const Edit edits[] = {
+      [](Section* s) { s->noise.spectrum = {{0.0, 0.0}, {2.0, -6.0}}; },
+      [](Section* s) { s->noise.shared.enabled = true; },
+      [](Section* s) { s->noise.shared.noise_db = 40.0; },
+      [](Section* s) { s->noise.shared.noise_seed = 9; },
+      [](Section* s) { s->noise.shared.spectrum = {{1.0, 3.0}}; },
+      [](Section* s) { s->dropouts.random.flagged = false; },
+      [](Section* s) { s->dropouts.random.anchor = DropoutAnchor::kDisc; },
+      [](Section* s) { s->dropouts.scratch.flagged = false; },
+      [](Section* s) { s->dropouts.scratch.anchor = DropoutAnchor::kDisc; },
+      [](Section* s) { s->luma_bandwidth.enabled = true; },
+      [](Section* s) { s->luma_bandwidth.cutoff_mhz = 3.0; },
+      [](Section* s) { s->luma_bandwidth.transition_mhz = 0.8; },
+  };
+  for (const Edit edit : edits) {
+    ExpectSectionEditUndoesAndRedoes(&document_, edit);
+  }
+}
+
+TEST_F(ProjectDocumentTest, ChannelEditUndoesAndRedoesEveryField) {
+  using Edit = void (*)(ChannelParameters*);
+  const Edit edits[] = {
+      [](ChannelParameters* c) { c->enabled = true; },
+      [](ChannelParameters* c) { c->timing_offset_samples = 0.25; },
+      [](ChannelParameters* c) { c->edge_smear.enabled = true; },
+      [](ChannelParameters* c) { c->edge_smear.fraction = 0.2; },
+      [](ChannelParameters* c) { c->edge_smear.tau_samples = 4.0; },
+      [](ChannelParameters* c) { c->fm_beat.enabled = true; },
+      [](ChannelParameters* c) { c->fm_beat.carrier_black_hz = 7.1e6; },
+      [](ChannelParameters* c) { c->fm_beat.level_db = -30.0; },
+  };
+  for (const Edit edit : edits) {
+    const ChannelParameters original = document_.project().channel;
+    ChannelParameters edited = original;
+    edit(&edited);
+    const int settings_changed = counter_->project_settings_changed;
+    ASSERT_TRUE(document_.SetChannel(edited));
+    EXPECT_EQ(counter_->project_settings_changed, settings_changed + 1);
+    EXPECT_FALSE(document_.SetChannel(edited));
+    ASSERT_TRUE(document_.Undo());
+    EXPECT_EQ(document_.project().channel, original);
+    ASSERT_TRUE(document_.Redo());
+    EXPECT_EQ(document_.project().channel, edited);
+  }
+  EXPECT_EQ(document_.UndoDescription(), QStringLiteral("Edit channel"));
+}
+
+TEST_F(ProjectDocumentTest, ChromaErrorEditUndoesAndRedoesEveryField) {
+  using Edit = void (*)(ChromaErrorParameters*);
+  const Edit edits[] = {
+      [](ChromaErrorParameters* c) { c->enabled = true; },
+      [](ChromaErrorParameters* c) { c->gain = 1.1; },
+      [](ChromaErrorParameters* c) { c->phase_deg = -3.0; },
+      [](ChromaErrorParameters* c) { c->line_jitter.enabled = true; },
+      [](ChromaErrorParameters* c) { c->line_jitter.phase_deg = 0.5; },
+      [](ChromaErrorParameters* c) { c->line_jitter.gain = 0.02; },
+      [](ChromaErrorParameters* c) { c->line_jitter.seed_specified = true; },
+      [](ChromaErrorParameters* c) { c->line_jitter.seed = 31; },
+  };
+  for (const Edit edit : edits) {
+    const ChromaErrorParameters original = document_.project().chroma_error;
+    ChromaErrorParameters edited = original;
+    edit(&edited);
+    ASSERT_TRUE(document_.SetChromaError(edited));
+    EXPECT_FALSE(document_.SetChromaError(edited));
+    ASSERT_TRUE(document_.Undo());
+    EXPECT_EQ(document_.project().chroma_error, original);
+    ASSERT_TRUE(document_.Redo());
+    EXPECT_EQ(document_.project().chroma_error, edited);
+  }
+  EXPECT_EQ(document_.UndoDescription(), QStringLiteral("Edit chroma error"));
+}
+
 TEST_F(ProjectDocumentTest, EndFrameOnlyEditIsAChange) {
   Section edited = document_.project().sections[0];
   edited.end_frame_specified = true;

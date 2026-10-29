@@ -11,8 +11,11 @@
 
 #include <QDialog>
 
+class QScrollArea;
+
 #include "project_document.h"
 #include "project_settings_editor.h"
+#include "validation_issues_model.h"
 #include "videosynth/model.h"
 
 namespace videosynth::gui {
@@ -35,8 +38,14 @@ class EditProjectDialog : public QDialog {
   // The edited project settings; only meaningful after accept.
   Project project() const { return scratch_->project(); }
 
+  // Scrolls the group holding a project-level `field` (kChannel,
+  // kChromaError) into view and focuses it; other fields change nothing.
+  // Before the dialog is shown, the reveal waits until it is.
+  void RevealField(IssueField field);
+
  private:
   ProjectDocument* scratch_;
+  QScrollArea* scroll_ = nullptr;
   ProjectSettingsEditor* settings_editor_ = nullptr;
 };
 

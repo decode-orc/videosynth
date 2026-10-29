@@ -16,6 +16,8 @@
 #include <vector>
 
 #include "videosynth/audio_track_generator.h"
+#include "videosynth/channel_stage.h"
+#include "videosynth/chroma_error_stage.h"
 #include "videosynth/dropout_injection_stage.h"
 #include "videosynth/fixed_point.h"
 #include "videosynth/frame_synthesis_pool.h"
@@ -306,6 +308,10 @@ bool VideoSynthPipeline::RunProject(const Project& project,
         out_frame->errors = job_errors;
         return;
       }
+      channel_.ApplyChannel(project, schedule, disc_frame, 1U, &out_frame->y_mv,
+                            &out_frame->c_mv);
+      chroma_error_.ApplyChromaError(project, schedule, disc_frame, 1U,
+                                     &out_frame->c_mv);
       if (noise_injection_ != nullptr) {
         noise_injection_->InjectNoise(project, schedule, disc_frame, 1U,
                                       &out_frame->y_mv, &out_frame->c_mv);
@@ -402,6 +408,11 @@ bool VideoSynthPipeline::RunProject(const Project& project,
         }
         return FinishRun(PipelineRunStatus::kFailed);
       }
+
+      channel_.ApplyChannel(project, schedule, processed_frames,
+                            frames_this_batch, &y_mv, &c_mv);
+      chroma_error_.ApplyChromaError(project, schedule, processed_frames,
+                                     frames_this_batch, &c_mv);
 
       if (noise_injection_ != nullptr) {
         noise_injection_->InjectNoise(project, schedule, processed_frames,

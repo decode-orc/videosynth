@@ -31,8 +31,9 @@ int SectionIndexOf(const Project& project, const Section* section) {
 }
 
 // Default synthesizer: the exact per-frame recipe of the pipeline's frame
-// job (GenerateFrameBatch, then optional noise and dropouts), plus the
-// decoded source image for progressive sections. Runs on the worker thread.
+// job (GenerateFrameBatch, the channel and chroma error stages, then optional
+// noise and dropouts), plus the decoded source image for progressive sections.
+// Runs on the worker thread.
 bool SynthesizeWithPipelineStages(
     const PreviewFrameService::SynthesisContext& context,
     std::size_t disc_frame, const PreviewOptions& options,
@@ -44,6 +45,15 @@ bool SynthesizeWithPipelineStages(
     *error = errors.empty() ? "Preview frame synthesis failed." : errors[0];
     return false;
   }
+
+  // The channel describes the pressing, so it is part of the previewed
+  // signal itself rather than an optional impairment.
+  context.channel->ApplyChannel(*context.project, *context.schedule, disc_frame,
+                                1U, &out_frame->y_mv, &out_frame->c_mv);
+  // The chroma error is a fixed property of the capture's player, not a
+  // random impairment, so it is previewed with the channel.
+  context.chroma_error->ApplyChromaError(*context.project, *context.schedule,
+                                         disc_frame, 1U, &out_frame->c_mv);
 
   if (options.apply_noise) {
     context.noise->InjectNoise(*context.project, *context.schedule, disc_frame,
@@ -227,6 +237,8 @@ void PreviewFrameService::StartWorker() {
     synthesis_context.project = &context->project;
     synthesis_context.schedule = &context->schedule;
     synthesis_context.generation = &context->generation;
+    synthesis_context.channel = &context->channel;
+    synthesis_context.chroma_error = &context->chroma_error;
     synthesis_context.noise = &context->noise;
     synthesis_context.dropouts = &context->dropouts;
     synthesis_context.source_provider = &context->source_provider;

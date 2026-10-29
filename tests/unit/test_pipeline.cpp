@@ -12,12 +12,17 @@
 #include <atomic>
 #include <cstddef>
 #include <limits>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <utility>
 #include <vector>
 
+#include "videosynth/channel_stage.h"
+#include "videosynth/chroma_error_stage.h"
+#include "videosynth/noise_injection_stage.h"
 #include "videosynth/pipeline.h"
+#include "videosynth/timing_constants.h"
 
 namespace videosynth {
 namespace {
@@ -659,6 +664,199 @@ TEST(PipelineTest, SequentialRunsFromWorkerThreadProduceIdenticalResults) {
   EXPECT_TRUE(worker_second_ok);
   EXPECT_EQ(worker_first, worker_second);
   EXPECT_EQ(worker_first, main_thread_samples);
+}
+
+// Emits full-size PAL frames carrying a unique ramp in Y and a pattern in C,
+// so a sample shift by the channel stage or a chroma rotation is visible and
+// noise lands on a known signal.
+class FullFrameGeneration final : public IGenerationStage {
+ public:
+  bool BuildFrameSchedule(const Project& project,
+                          std::vector<FrameScheduleItem>* out_schedule,
+                          std::vector<std::string>* errors) override {
+    out_schedule->clear();
+    for (const Section& s : project.sections) {
+      for (int i = 0; i < s.duration_frames; ++i) {
+        out_schedule->push_back(
+            FrameScheduleItem{.section = &s, .source_frame_index = i});
+      }
+    }
+    errors->clear();
+    return true;
+  }
+
+  bool GenerateFrameBatch(const Project& project,
+                          const std::vector<FrameScheduleItem>&,
+                          std::size_t start_frame, std::size_t frame_count,
+                          std::vector<SampleFixed>* out_y_mv,
+                          std::vector<SampleFixed>* out_c_mv,
+                          std::vector<std::string>* errors) override {
+    const std::size_t spf = SamplesPerFrameForEncodingPreset(
+        project.cvbs_presets.video_standard_preset,
+        project.cvbs_presets.sample_encoding_preset);
+    out_y_mv->assign(frame_count * spf, 0);
+    out_c_mv->assign(frame_count * spf, 0);
+    for (std::size_t n = 0; n < out_y_mv->size(); ++n) {
+      (*out_y_mv)[n] = MillivoltsToSampleFixed(
+          static_cast<double>(((start_frame * spf) + n) % 500U));
+      (*out_c_mv)[n] = MillivoltsToSampleFixed(
+          static_cast<double>(((start_frame * spf) + n) * 7U % 301U) - 150.0);
+    }
+    errors->clear();
+    return true;
+  }
+
+  bool Generate(const Project&, std::vector<SampleFixed>*,
+                std::vector<SampleFixed>*, std::vector<std::string>*) override {
+    return false;
+  }
+};
+
+// Records every Y and C sample the pipeline hands to output, on both the
+// batched and the encoded (parallel) paths.
+class RecordingOutput final : public IOutputStage {
+ public:
+  std::vector<SampleFixed> y;
+  std::vector<SampleFixed> c;
+
+  bool BeginWrite(const Project&, std::size_t,
+                  std::vector<std::string>* errors) override {
+    errors->clear();
+    return true;
+  }
+  bool AppendSamples(const std::vector<SampleFixed>& y_mv,
+                     const std::vector<SampleFixed>& c_mv,
+                     std::vector<std::string>* errors) override {
+    y.insert(y.end(), y_mv.begin(), y_mv.end());
+    c.insert(c.end(), c_mv.begin(), c_mv.end());
+    errors->clear();
+    return true;
+  }
+  bool EncodeFrame(const std::vector<SampleFixed>& y_mv,
+                   const std::vector<SampleFixed>& c_mv,
+                   EncodedFrame* out_frame,
+                   std::vector<std::string>* errors) const override {
+    // The test project has one frame, so a single stash is unambiguous.
+    const std::lock_guard<std::mutex> lock(mutex_);
+    encoded_y_ = y_mv;
+    encoded_c_ = c_mv;
+    out_frame->luma_codes.clear();
+    out_frame->chroma_codes.clear();
+    out_frame->has_nonstandard = false;
+    errors->clear();
+    return true;
+  }
+  bool AppendEncodedFrame(const EncodedFrame&,
+                          std::vector<std::string>* errors) override {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    y.insert(y.end(), encoded_y_.begin(), encoded_y_.end());
+    c.insert(c.end(), encoded_c_.begin(), encoded_c_.end());
+    errors->clear();
+    return true;
+  }
+  bool FinalizeWrite(std::vector<std::string>* errors) override {
+    errors->clear();
+    return true;
+  }
+  void AbortWrite() override {}
+  bool Write(const Project&, const std::vector<SampleFixed>&,
+             const std::vector<SampleFixed>&,
+             std::vector<std::string>* errors) override {
+    errors->clear();
+    return true;
+  }
+
+ private:
+  mutable std::mutex mutex_;
+  mutable std::vector<SampleFixed> encoded_y_;
+  mutable std::vector<SampleFixed> encoded_c_;
+};
+
+TEST(PipelineTest, ChannelStageRunsAfterGenerationAndBeforeNoise) {
+  Project project = MakeProject(1);
+  project.channel.enabled = true;
+  project.channel.timing_offset_samples = 2.5;
+  project.sections[0].noise.enabled = true;
+  project.sections[0].noise.noise_db = 30.0;
+  project.sections[0].noise.noise_seed = 4242;
+  project.sections[0].noise.noise_seed_specified = true;
+
+  // Expected: generate -> channel -> noise, composed by hand.
+  FullFrameGeneration generation;
+  std::vector<IGenerationStage::FrameScheduleItem> schedule;
+  std::vector<std::string> errors;
+  ASSERT_TRUE(generation.BuildFrameSchedule(project, &schedule, &errors));
+  std::vector<SampleFixed> y;
+  std::vector<SampleFixed> c;
+  ASSERT_TRUE(generation.GenerateFrameBatch(project, schedule, 0U, 1U, &y, &c,
+                                            &errors));
+  const std::vector<SampleFixed> generated = y;
+  MockLogger logger;
+  NoiseInjectionStage noise(&logger);
+  ChannelStage().ApplyChannel(project, schedule, 0U, 1U, &y, &c);
+  ASSERT_NE(y, generated);
+  noise.InjectNoise(project, schedule, 0U, 1U, &y, &c);
+
+  for (int threads : {1, 2}) {
+    MockParser parser;
+    MockValidator validator;
+    validator.result.is_valid = true;
+    RecordingOutput output;
+    VideoSynthPipeline pipeline(&parser, &validator, &generation, &noise,
+                                nullptr, &output, &logger);
+    RunOptions options;
+    options.threads = threads;
+    ASSERT_TRUE(pipeline.RunProject(project, options));
+    EXPECT_EQ(output.y, y) << "threads " << threads;
+  }
+}
+
+TEST(PipelineTest, ChromaErrorRunsAfterChannelAndBeforeNoise) {
+  Project project = MakeProject(1);
+  project.channel.enabled = true;
+  project.channel.timing_offset_samples = 2.5;
+  project.chroma_error.enabled = true;
+  project.chroma_error.gain = 1.2;
+  project.chroma_error.phase_deg = 30.0;
+  project.chroma_error.line_jitter.enabled = true;
+  project.chroma_error.line_jitter.phase_deg = 1.0;
+  project.chroma_error.line_jitter.seed = 77;
+  project.chroma_error.line_jitter.seed_specified = true;
+  project.sections[0].noise.enabled = true;
+  project.sections[0].noise.noise_db = 30.0;
+  project.sections[0].noise.noise_seed = 4242;
+  project.sections[0].noise.noise_seed_specified = true;
+
+  // Expected: generate -> channel -> chroma error -> noise, composed by hand.
+  FullFrameGeneration generation;
+  std::vector<IGenerationStage::FrameScheduleItem> schedule;
+  std::vector<std::string> errors;
+  ASSERT_TRUE(generation.BuildFrameSchedule(project, &schedule, &errors));
+  std::vector<SampleFixed> y;
+  std::vector<SampleFixed> c;
+  ASSERT_TRUE(generation.GenerateFrameBatch(project, schedule, 0U, 1U, &y, &c,
+                                            &errors));
+  MockLogger logger;
+  NoiseInjectionStage noise(&logger);
+  ChannelStage().ApplyChannel(project, schedule, 0U, 1U, &y, &c);
+  const std::vector<SampleFixed> channelled_c = c;
+  ChromaErrorStage(1U).ApplyChromaError(project, schedule, 0U, 1U, &c);
+  ASSERT_NE(c, channelled_c);
+  noise.InjectNoise(project, schedule, 0U, 1U, &y, &c);
+
+  for (int threads : {1, 2}) {
+    MockParser parser;
+    MockValidator validator;
+    validator.result.is_valid = true;
+    RecordingOutput output;
+    VideoSynthPipeline pipeline(&parser, &validator, &generation, &noise,
+                                nullptr, &output, &logger);
+    RunOptions options;
+    options.threads = threads;
+    ASSERT_TRUE(pipeline.RunProject(project, options));
+    EXPECT_EQ(output.y, y) << "threads " << threads;
+    EXPECT_EQ(output.c, c) << "threads " << threads;
+  }
 }
 
 }  // namespace

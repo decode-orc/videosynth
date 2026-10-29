@@ -30,6 +30,7 @@ sections:
 | `start_frame` | int | No | ≥ 0, inside the video source | `0` |
 | `end_frame` | int | No | ≥ `start_frame`, inside the video source | last source frame |
 | `line_injections` | list | No | [section line injections](section-line-injections.md) | absent |
+| `luma_bandwidth` | map | No | [luma bandwidth limit](#luma_bandwidth) | absent |
 | `noise` | map | No | [noise](section-noise.md) | absent |
 | `dropouts` | map | No | [dropouts](section-dropouts.md) | absent |
 | `osd` | map | No | [osd](section-osd.md) | absent |
@@ -120,6 +121,36 @@ The last source frame of the selected range, 0-based and inclusive. Video source
 
 `end_frame` sets the section's length, so it cannot be combined with an integer `duration_frames`; leave `duration_frames` out (or set it to `"all"`), and use `duration_repeat` to play the range more than once. Emitted only when set.
 
+## `luma_bandwidth`
+
+A low-pass on the section's picture luma, as from a player or transfer with a limited luma frequency response. Optional — omit it for the full 4fsc bandwidth.
+
+```yaml
+- name: SoftPlayer
+  type: progressive
+  source: "{bundled}/exr/720x576/MULTIBURST.exr"
+  duration_frames: 4
+  luma_bandwidth:
+    cutoff_mhz: 3.0
+    transition_mhz: 0.4
+```
+
+| Key | Type | Required | Range | Description |
+|-----|------|----------|-------|-------------|
+| `cutoff_mhz` | float | Yes | 0.5 to 2 f_sc − `transition_mhz` / 2 | The −6 dB point, in MHz |
+| `transition_mhz` | float | No (default 0.4) | 0.1 to 2.0 | Width of the transition band, centred on the cutoff, in MHz |
+
+2 f_sc is half the 4fsc sampling rate: 8.867 MHz for PAL and SECAM, 7.159 MHz for NTSC and 7.151 MHz for PAL-M.
+
+- The filter is a Kaiser-windowed-sinc low-pass. The passband runs to `cutoff_mhz` − `transition_mhz` / 2 with a ripple below 0.003 dB; above `cutoff_mhz` + `transition_mhz` / 2 the stopband is at least 70 dB down (designed for 70 dB; the limit promises 60 dB).
+- It filters the luma of each active picture line across the active window, after the source pixels are mapped to 4fsc samples. It therefore also removes the images that the nearest-pixel column mapping leaves at high frequencies.
+- Each line is filtered on its own. Beyond the ends of the active window the line's first and last samples are repeated, so a flat line passes unchanged and the window edges do not ring.
+- Sync, blanking, the VBI, the [VITS](vits-types.md) lines and the chroma are not filtered and are bit-identical to an unlimited section.
+- [OSD](section-osd.md) text is drawn after the filter, so it stays sharp.
+- The channel impairments, noise and dropouts are applied afterwards and are not band-limited.
+
+Validation: `cutoff_mhz` outside its range, or `transition_mhz` outside 0.1–2.0, is an error. `luma_bandwidth` without `cutoff_mhz`, a non-numeric value or another key is a parse error.
+
 ## Section sub-blocks
 
 Each has its own reference page:
@@ -143,4 +174,5 @@ All are optional, and only blocks that are explicitly set are written back out b
 - An EXR still takes neither `start_frame` nor `end_frame`, and needs an integer `duration_frames`.
 - The disc-structure ordering rules above.
 - A section with a `laserdisc` injection must set `section_type`.
+- `luma_bandwidth` within its ranges (above).
 - CAV lead-in and lead-out minimum durations (warnings).

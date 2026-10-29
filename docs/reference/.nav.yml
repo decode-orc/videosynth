@@ -4,6 +4,8 @@ nav:
   - cvbs-presets.md
   - output.md
   - line-injections.md
+  - channel.md
+  - chroma-error.md
   - sections.md
   - section-line-injections.md
   - section-noise.md

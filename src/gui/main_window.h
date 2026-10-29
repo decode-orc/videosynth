@@ -83,6 +83,9 @@ class MainWindow : public QMainWindow {
   void OnGenerationFinished(GenerationController::RunStatus status);
 
  private:
+  // Opens the Edit Project dialog revealing `field` (validation issue
+  // navigation); IssueField::kNone opens it at the top.
+  void EditProject(IssueField field);
   void BuildMenus();
   void BuildCentralArea();
   void BuildSectionsDock();

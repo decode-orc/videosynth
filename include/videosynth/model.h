@@ -195,7 +195,34 @@ inline std::string GeneratedSignalStatePreset(Standard standard) {
                                       : "STANDARD_STABLE_LOCKED";
 }
 
+// One breakpoint of a noise power-spectrum shape. Breakpoints are joined by
+// straight lines in dB against MHz; the end values are held out to 0 Hz and
+// to the Nyquist frequency.
+struct NoiseSpectrumPoint {
+  double frequency_mhz = 0.0;
+  // Level relative to the other breakpoints. Valid range: [-60.0, +40.0].
+  // Only the shape matters: the filtered noise is normalised back to the
+  // layer's noise_db.
+  double relative_db = 0.0;
+};
+
+// The shared (pressing) noise layer. It is keyed by disc position rather
+// than by section or output position, so every capture of one pressing
+// carries identical pressing noise on the same picture. It has no level
+// dependence, so it takes no noise_spread_db.
+struct SharedNoiseParameters {
+  bool enabled = false;
+  // Noise level in dB. Valid range: [20.0, 61.0].
+  double noise_db = 61.0;
+  // Required by validation: pressing noise must be reproducible.
+  int64_t noise_seed = 0;
+  bool noise_seed_specified = false;
+  // Empty means white noise.
+  std::vector<NoiseSpectrumPoint> spectrum;
+};
+
 struct NoiseParameters {
+  // True when the capture layer is present (noise_db was given).
   bool enabled = false;
   // Noise floor level in dB. Sets Black PSNR target. Valid range: [20.0, 61.0].
   double noise_db = 61.0;
@@ -208,13 +235,26 @@ struct NoiseParameters {
   // so every run produces different noise.
   int64_t noise_seed = 0;
   bool noise_seed_specified = false;
+  // Capture-layer spectrum shape; empty means white noise.
+  std::vector<NoiseSpectrumPoint> spectrum;
+  // Pressing layer, independent of the capture layer above.
+  SharedNoiseParameters shared = {};
 };
+
+// What a dropout type's events are keyed to. kSection events belong to one
+// capture: they are seeded by section and output position. kDisc events are
+// a pressing defect: they are seeded by disc position, so captures of one
+// pressing (and a replay of the same pictures) carry the same events.
+enum class DropoutAnchor { kSection, kDisc };
 
 struct RandomDropoutParameters {
   bool enabled = false;
   int scale = 0;  // 1–20; maps to frequency and max_duration via scale mapping
   bool seed_specified = false;
   int64_t seed = 0;
+  // False applies the events but records no sidecar rows for them.
+  bool flagged = true;
+  DropoutAnchor anchor = DropoutAnchor::kSection;
 };
 
 struct ScratchDropoutParameters {
@@ -222,6 +262,9 @@ struct ScratchDropoutParameters {
   int scale = 0;  // 1–20; maps to count, max_duration_frames, max_width_samples
   bool seed_specified = false;
   int64_t seed = 0;
+  // False applies the events but records no sidecar rows for them.
+  bool flagged = true;
+  DropoutAnchor anchor = DropoutAnchor::kSection;
 };
 
 struct DropoutParameters {
@@ -231,6 +274,20 @@ struct DropoutParameters {
   // reject a block that enables nothing. Set by the parser only and not
   // compared by operator== (the emitter never writes an inert block).
   bool block_present = false;
+};
+
+// Default luma_bandwidth.transition_mhz.
+constexpr double kLumaBandwidthTransitionDefaultMhz = 0.4;
+
+// Per-section luma bandwidth limit: a low-pass applied to the active picture
+// luma as it is painted. Sync, VBI, VITS, chroma and OSD are not filtered.
+struct LumaBandwidthParameters {
+  bool enabled = false;
+  // -6 dB point. Valid range: [0.5, 2 f_sc - transition_mhz / 2].
+  double cutoff_mhz = 0.0;
+  // Full width of the transition band, centred on the cutoff. Valid range:
+  // [0.1, 2.0].
+  double transition_mhz = kLumaBandwidthTransitionDefaultMhz;
 };
 
 // On-screen display foreground level. Only four discrete levels are
@@ -542,6 +599,7 @@ struct Section {
   // source's last frame.
   int end_frame = 0;
   bool end_frame_specified = false;
+  LumaBandwidthParameters luma_bandwidth = {};
   NoiseParameters noise = {};
   DropoutParameters dropouts = {};
   OsdConfig osd = {};
@@ -589,6 +647,76 @@ struct ProjectLineInjections {
   std::vector<VitsInjection> vits;
 };
 
+// Readout edge smear of the channel: a fraction of the signal passes through
+// a one-pole low-pass, H(z) = (1 - fraction) + fraction * (1 - a) /
+// (1 - a z^-1) with a = exp(-1 / tau_samples).
+struct EdgeSmearParameters {
+  // Present when the channel block declares `edge_smear:`.
+  bool enabled = false;
+  // Smeared fraction of the signal. Range [0, 0.5].
+  double fraction = 0.0;
+  // Time constant of the smear in 4fsc samples. Range (0, 100].
+  double tau_samples = 1.0;
+};
+
+// Default FM video carrier at black, in Hz: the reference model's bars fit
+// on PAL LaserDisc pressings (deherring.py F0_HZ).
+constexpr double kFmBeatCarrierBlackDefaultHz = 7.088e6;
+
+// PAL FM-beat herringbone: the beat between the FM video carrier and the
+// colour signal, recorded on the master (625-line PAL only).
+struct FmBeatParameters {
+  // Present when the channel block declares `fm_beat:`.
+  bool enabled = false;
+  // FM video carrier at black, in Hz. Range [6.9e6, 7.3e6].
+  double carrier_black_hz = kFmBeatCarrierBlackDefaultHz;
+  // Beat level relative to the local chroma amplitude, in dB, at the carrier
+  // for 50 IRE. Range [-60, 0].
+  double level_db = 0.0;
+};
+
+// Project-wide channel impairments: properties of the pressing rather than of
+// one capture, so every project of one pressing uses the same settings. When
+// `enabled` is false the channel stage is skipped entirely.
+struct ChannelParameters {
+  // Present when the project declares a `channel:` block.
+  bool enabled = false;
+  // Sub-sample timing offset in 4fsc samples. Positive values make the signal
+  // arrive later. Range [-8.0, 8.0].
+  double timing_offset_samples = 0.0;
+  EdgeSmearParameters edge_smear;
+  FmBeatParameters fm_beat;
+};
+
+// Per-line Gaussian jitter of the chroma error. Values are standard
+// deviations.
+struct ChromaJitterParameters {
+  // Present when the chroma_error block declares `line_jitter:`.
+  bool enabled = false;
+  // Phase standard deviation in degrees. Range [0, 10].
+  double phase_deg = 0.0;
+  // Gain standard deviation (absolute, about the constant gain). Range
+  // [0, 0.1].
+  double gain = 0.0;
+  // When seed_specified is false, a random base seed captured when the stage
+  // is constructed is used instead, so each run draws different jitter.
+  bool seed_specified = false;
+  int64_t seed = 0;
+};
+
+// Project-wide chroma gain and phase error of one capture: the player's
+// chroma path, applied to picture chroma only (burst, VITS and VBI lines are
+// untouched).
+struct ChromaErrorParameters {
+  // Present when the project declares a `chroma_error:` block.
+  bool enabled = false;
+  // Chroma gain. Range [0.5, 1.5].
+  double gain = 1.0;
+  // Chroma phase advance in degrees. Range [-180, 180].
+  double phase_deg = 0.0;
+  ChromaJitterParameters line_jitter;
+};
+
 struct Project {
   std::string name;
   std::string version;
@@ -597,6 +725,8 @@ struct Project {
   CvbsPresets cvbs_presets;
   OutputTargets output;
   ProjectLineInjections line_injections;
+  ChannelParameters channel;
+  ChromaErrorParameters chroma_error;
   std::vector<Section> sections;
 };
 
@@ -620,27 +750,49 @@ inline bool operator==(const CvbsPresets& a, const CvbsPresets& b) {
          a.biphase_presets == b.biphase_presets;
 }
 
+inline bool operator==(const NoiseSpectrumPoint& a,
+                       const NoiseSpectrumPoint& b) {
+  return a.frequency_mhz == b.frequency_mhz && a.relative_db == b.relative_db;
+}
+
+inline bool operator==(const SharedNoiseParameters& a,
+                       const SharedNoiseParameters& b) {
+  return a.enabled == b.enabled && a.noise_db == b.noise_db &&
+         a.noise_seed == b.noise_seed &&
+         a.noise_seed_specified == b.noise_seed_specified &&
+         a.spectrum == b.spectrum;
+}
+
 inline bool operator==(const NoiseParameters& a, const NoiseParameters& b) {
   return a.enabled == b.enabled && a.noise_db == b.noise_db &&
          a.noise_spread_db == b.noise_spread_db &&
          a.noise_seed == b.noise_seed &&
-         a.noise_seed_specified == b.noise_seed_specified;
+         a.noise_seed_specified == b.noise_seed_specified &&
+         a.spectrum == b.spectrum && a.shared == b.shared;
 }
 
 inline bool operator==(const RandomDropoutParameters& a,
                        const RandomDropoutParameters& b) {
   return a.enabled == b.enabled && a.scale == b.scale &&
-         a.seed_specified == b.seed_specified && a.seed == b.seed;
+         a.seed_specified == b.seed_specified && a.seed == b.seed &&
+         a.flagged == b.flagged && a.anchor == b.anchor;
 }
 
 inline bool operator==(const ScratchDropoutParameters& a,
                        const ScratchDropoutParameters& b) {
   return a.enabled == b.enabled && a.scale == b.scale &&
-         a.seed_specified == b.seed_specified && a.seed == b.seed;
+         a.seed_specified == b.seed_specified && a.seed == b.seed &&
+         a.flagged == b.flagged && a.anchor == b.anchor;
 }
 
 inline bool operator==(const DropoutParameters& a, const DropoutParameters& b) {
   return a.random == b.random && a.scratch == b.scratch;
+}
+
+inline bool operator==(const LumaBandwidthParameters& a,
+                       const LumaBandwidthParameters& b) {
+  return a.enabled == b.enabled && a.cutoff_mhz == b.cutoff_mhz &&
+         a.transition_mhz == b.transition_mhz;
 }
 
 inline bool operator==(const OsdOverlay& a, const OsdOverlay& b) {
@@ -714,7 +866,8 @@ inline bool operator==(const Section& a, const Section& b) {
          a.duration_frames == b.duration_frames &&
          a.duration_frames_repeat == b.duration_frames_repeat &&
          a.start_frame == b.start_frame && a.end_frame == b.end_frame &&
-         a.end_frame_specified == b.end_frame_specified && a.noise == b.noise &&
+         a.end_frame_specified == b.end_frame_specified &&
+         a.luma_bandwidth == b.luma_bandwidth && a.noise == b.noise &&
          a.dropouts == b.dropouts && a.osd == b.osd &&
          a.audio_channel_pairs == b.audio_channel_pairs;
 }
@@ -728,10 +881,41 @@ inline bool operator==(const OutputTargets& a, const OutputTargets& b) {
          a.signal_type == b.signal_type && a.efm_audio == b.efm_audio;
 }
 
+inline bool operator==(const EdgeSmearParameters& a,
+                       const EdgeSmearParameters& b) {
+  return a.enabled == b.enabled && a.fraction == b.fraction &&
+         a.tau_samples == b.tau_samples;
+}
+
+inline bool operator==(const FmBeatParameters& a, const FmBeatParameters& b) {
+  return a.enabled == b.enabled && a.carrier_black_hz == b.carrier_black_hz &&
+         a.level_db == b.level_db;
+}
+
+inline bool operator==(const ChannelParameters& a, const ChannelParameters& b) {
+  return a.enabled == b.enabled &&
+         a.timing_offset_samples == b.timing_offset_samples &&
+         a.edge_smear == b.edge_smear && a.fm_beat == b.fm_beat;
+}
+
+inline bool operator==(const ChromaJitterParameters& a,
+                       const ChromaJitterParameters& b) {
+  return a.enabled == b.enabled && a.phase_deg == b.phase_deg &&
+         a.gain == b.gain && a.seed_specified == b.seed_specified &&
+         a.seed == b.seed;
+}
+
+inline bool operator==(const ChromaErrorParameters& a,
+                       const ChromaErrorParameters& b) {
+  return a.enabled == b.enabled && a.gain == b.gain &&
+         a.phase_deg == b.phase_deg && a.line_jitter == b.line_jitter;
+}
+
 inline bool operator==(const Project& a, const Project& b) {
   return a.name == b.name && a.version == b.version &&
          a.description == b.description && a.cvbs_presets == b.cvbs_presets &&
          a.output == b.output && a.line_injections == b.line_injections &&
+         a.channel == b.channel && a.chroma_error == b.chroma_error &&
          a.sections == b.sections;
 }
 

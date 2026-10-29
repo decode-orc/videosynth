@@ -16,6 +16,8 @@
 #include "project_settings_presenter.h"
 #include "videosynth/model.h"
 #include "videosynth/project_validator.h"
+#include "videosynth/yaml_project_emitter.h"
+#include "videosynth/yaml_project_parser.h"
 
 namespace videosynth::gui {
 namespace {
@@ -322,6 +324,198 @@ TEST(ProjectSettingsPresenterTest, NormalizedOutputPassesValidatorEfmRule) {
       EXPECT_EQ(error.find("output.efm_audio"), std::string::npos) << error;
     }
   }
+}
+
+bool IsValid(const Project& project) {
+  return ProjectValidator().Validate(project).is_valid;
+}
+
+Project RoundTrip(const Project& project) {
+  YamlProjectParser parser;
+  const ParseResult parsed =
+      parser.ParseString(YamlProjectEmitter().EmitString(project));
+  EXPECT_TRUE(parsed.ok) << (parsed.errors.empty() ? "" : parsed.errors[0]);
+  return parsed.project;
+}
+
+TEST(ProjectSettingsPresenterTest, FmBeatIsOfferedForPalOnly) {
+  EXPECT_TRUE(BuildProjectSettingsFormState(MakeProject(Standard::kPal))
+                  .fm_beat_editable);
+  for (const Standard standard :
+       {Standard::kNtsc, Standard::kPalM, Standard::kSecam}) {
+    EXPECT_FALSE(
+        BuildProjectSettingsFormState(MakeProject(standard)).fm_beat_editable)
+        << StandardToString(standard);
+  }
+}
+
+TEST(ProjectSettingsPresenterTest, ChromaErrorIsNotOfferedForSecam) {
+  for (const Standard standard :
+       {Standard::kPal, Standard::kNtsc, Standard::kPalM}) {
+    EXPECT_TRUE(BuildProjectSettingsFormState(MakeProject(standard))
+                    .chroma_error_editable)
+        << StandardToString(standard);
+  }
+  EXPECT_FALSE(BuildProjectSettingsFormState(MakeProject(Standard::kSecam))
+                   .chroma_error_editable);
+}
+
+TEST(ProjectSettingsPresenterTest, ChannelEnableHelpersSeedValidBlocks) {
+  Project project = MakeProject(Standard::kPal);
+  SetChannelEnabled(&project.channel, true);
+  EXPECT_TRUE(project.channel.enabled);
+  EXPECT_TRUE(IsValid(project));
+  EXPECT_EQ(RoundTrip(project), project);
+
+  SetEdgeSmearEnabled(&project.channel, true);
+  SetFmBeatEnabled(&project.channel, true);
+  project.channel.timing_offset_samples = -0.3;
+  EXPECT_TRUE(project.channel.edge_smear.enabled);
+  EXPECT_TRUE(project.channel.fm_beat.enabled);
+  EXPECT_TRUE(IsValid(project));
+  EXPECT_EQ(RoundTrip(project), project);
+
+  SetFmBeatEnabled(&project.channel, false);
+  EXPECT_EQ(project.channel.fm_beat, FmBeatParameters{});
+  EXPECT_TRUE(project.channel.edge_smear.enabled);
+  SetChannelEnabled(&project.channel, false);
+  EXPECT_EQ(project.channel, ChannelParameters{});
+  EXPECT_EQ(YamlProjectEmitter().EmitString(project).find("channel:"),
+            std::string::npos);
+}
+
+TEST(ProjectSettingsPresenterTest, ChannelSubBlockEnablesTheChannel) {
+  ChannelParameters channel;
+  SetEdgeSmearEnabled(&channel, true);
+  EXPECT_TRUE(channel.enabled);
+  channel = ChannelParameters{};
+  SetFmBeatEnabled(&channel, true);
+  EXPECT_TRUE(channel.enabled);
+  EXPECT_EQ(channel.fm_beat.carrier_black_hz, kFmBeatCarrierBlackDefaultHz);
+}
+
+TEST(ProjectSettingsPresenterTest, ReEnablingKeepsEditedValues) {
+  ChannelParameters channel;
+  SetEdgeSmearEnabled(&channel, true);
+  channel.edge_smear.fraction = 0.3;
+  SetEdgeSmearEnabled(&channel, true);
+  EXPECT_EQ(channel.edge_smear.fraction, 0.3);
+
+  ChromaErrorParameters chroma_error;
+  SetChromaJitterEnabled(&chroma_error, true);
+  chroma_error.line_jitter.gain = 0.05;
+  SetChromaJitterEnabled(&chroma_error, true);
+  EXPECT_EQ(chroma_error.line_jitter.gain, 0.05);
+}
+
+TEST(ProjectSettingsPresenterTest, ChromaErrorEnableHelpersSeedValidBlocks) {
+  for (const Standard standard :
+       {Standard::kPal, Standard::kNtsc, Standard::kPalM}) {
+    SCOPED_TRACE(StandardToString(standard));
+    Project project = MakeProject(standard);
+    SetChromaErrorEnabled(&project.chroma_error, true);
+    EXPECT_TRUE(IsValid(project));
+    EXPECT_EQ(RoundTrip(project), project);
+
+    SetChromaJitterEnabled(&project.chroma_error, true);
+    project.chroma_error.line_jitter.seed_specified = true;
+    project.chroma_error.line_jitter.seed = 12;
+    project.chroma_error.gain = 1.05;
+    project.chroma_error.phase_deg = 2.0;
+    EXPECT_TRUE(IsValid(project));
+    EXPECT_EQ(RoundTrip(project), project);
+
+    SetChromaErrorEnabled(&project.chroma_error, false);
+    EXPECT_EQ(project.chroma_error, ChromaErrorParameters{});
+  }
+}
+
+TEST(ProjectSettingsPresenterTest, NormalizeClearsFmBeatOutsidePal) {
+  ChannelParameters channel;
+  SetEdgeSmearEnabled(&channel, true);
+  SetFmBeatEnabled(&channel, true);
+  EXPECT_EQ(NormalizeChannelForStandard(channel, Standard::kPal), channel);
+  for (const Standard standard :
+       {Standard::kNtsc, Standard::kPalM, Standard::kSecam}) {
+    const ChannelParameters normalized =
+        NormalizeChannelForStandard(channel, standard);
+    EXPECT_FALSE(normalized.fm_beat.enabled);
+    EXPECT_TRUE(normalized.edge_smear.enabled);
+    EXPECT_TRUE(normalized.enabled);
+    Project project = MakeProject(standard);
+    project.cvbs_presets =
+        NormalizeCvbsPresetsForStandard(project.cvbs_presets);
+    project.channel = normalized;
+    EXPECT_TRUE(IsValid(project)) << StandardToString(standard);
+  }
+}
+
+TEST(ProjectSettingsPresenterTest, NormalizeClearsChromaErrorForSecam) {
+  ChromaErrorParameters chroma_error;
+  SetChromaErrorEnabled(&chroma_error, true);
+  EXPECT_EQ(NormalizeChromaErrorForStandard(chroma_error, Standard::kNtsc),
+            chroma_error);
+  EXPECT_EQ(NormalizeChromaErrorForStandard(chroma_error, Standard::kSecam),
+            ChromaErrorParameters{});
+}
+
+TEST(ProjectSettingsPresenterTest, ChannelLimitsMirrorValidator) {
+  namespace limits = project_editor_limits;
+  Project project = MakeProject(Standard::kPal);
+  SetEdgeSmearEnabled(&project.channel, true);
+  SetFmBeatEnabled(&project.channel, true);
+  ChannelParameters& channel = project.channel;
+  const auto check = [&](double* field, double low, double high,
+                         bool low_inclusive) {
+    const double saved = *field;
+    *field = high;
+    EXPECT_TRUE(IsValid(project)) << high;
+    *field = high + 0.001;
+    EXPECT_FALSE(IsValid(project)) << high;
+    *field = low;
+    EXPECT_EQ(IsValid(project), low_inclusive) << low;
+    *field = low - 0.001;
+    EXPECT_FALSE(IsValid(project)) << low;
+    *field = saved;
+  };
+  check(&channel.timing_offset_samples, -limits::kTimingOffsetMaxSamples,
+        limits::kTimingOffsetMaxSamples, true);
+  check(&channel.edge_smear.fraction, 0.0, limits::kEdgeSmearFractionMax, true);
+  // tau_samples has an open lower bound of 0; the editor's minimum is valid.
+  check(&channel.edge_smear.tau_samples, 0.0, limits::kEdgeSmearTauMaxSamples,
+        false);
+  channel.edge_smear.tau_samples = limits::kEdgeSmearTauMinSamples;
+  EXPECT_TRUE(IsValid(project));
+  channel.edge_smear.tau_samples = 3.0;
+  check(&channel.fm_beat.carrier_black_hz, limits::kFmBeatCarrierMinHz,
+        limits::kFmBeatCarrierMaxHz, true);
+  check(&channel.fm_beat.level_db, limits::kFmBeatLevelMinDb,
+        limits::kFmBeatLevelMaxDb, true);
+}
+
+TEST(ProjectSettingsPresenterTest, ChromaErrorLimitsMirrorValidator) {
+  namespace limits = project_editor_limits;
+  Project project = MakeProject(Standard::kPal);
+  SetChromaJitterEnabled(&project.chroma_error, true);
+  ChromaErrorParameters& chroma_error = project.chroma_error;
+  const auto check = [&](double* field, double low, double high) {
+    const double saved = *field;
+    for (const double value : {low, high}) {
+      *field = value;
+      EXPECT_TRUE(IsValid(project)) << value;
+    }
+    *field = high + 0.001;
+    EXPECT_FALSE(IsValid(project)) << high;
+    *field = low - 0.001;
+    EXPECT_FALSE(IsValid(project)) << low;
+    *field = saved;
+  };
+  check(&chroma_error.gain, limits::kChromaGainMin, limits::kChromaGainMax);
+  check(&chroma_error.phase_deg, -limits::kChromaPhaseMaxDeg,
+        limits::kChromaPhaseMaxDeg);
+  check(&chroma_error.line_jitter.phase_deg, 0.0,
+        limits::kChromaJitterPhaseMaxDeg);
+  check(&chroma_error.line_jitter.gain, 0.0, limits::kChromaJitterGainMax);
 }
 
 }  // namespace

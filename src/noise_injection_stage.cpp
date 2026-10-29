@@ -1,8 +1,9 @@
 /*
  * File:        noise_injection_stage.cpp
  * Module:      noise_injection
- * Purpose:     Applies per-section two-component Gaussian noise to fixed-point
- *              mV Y/C frame buffers before output quantisation.
+ * Purpose:     Applies per-section capture and shared (pressing) Gaussian
+ *              noise to fixed-point mV Y/C frame buffers before output
+ *              quantisation.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -17,26 +18,25 @@
 #include <string>
 
 #include "videosynth/fixed_point.h"
+#include "videosynth/frame_enrichment.h"
+#include "videosynth/impairment_seed.h"
+#include "videosynth/sample_clamp.h"
 #include "videosynth/timing_constants.h"
 
 namespace videosynth {
 
 namespace {
 
-// Per-standard legal mV bounds derived from the quantisation profiles used by
-// OutputStage: (code - blanking_code) * millivolts_per_code.
-//
-// PAL:  blanking=256, min_code=4,  max_code=1019, 1.1905 mV/code.
-// NTSC: blanking=240, min_code=16, max_code=1019, 1.2755 mV/code.
-constexpr double kPalClampMinMv = -300.006;
-constexpr double kPalClampMaxMv = 908.452;
-constexpr double kNtscClampMinMv = -285.712;
-constexpr double kNtscClampMaxMv = 993.984;
-
 struct NoiseCoefficients {
   double sigma_f_mv;  // floor noise std dev in mV
   double k;           // proportional coefficient (dimensionless, ire/ire)
 };
+
+// Converts a noise level in dB to a signal-independent sigma in mV:
+// sigma_ire = 100 / 10^(noise_db/20), then IRE to mV via white_mV / 100.
+double FloorSigmaMv(double noise_db, double white_mv) {
+  return (100.0 / std::pow(10.0, noise_db / 20.0)) * (white_mv / 100.0);
+}
 
 // Derives floor noise (sigma_f_mv) and proportional coefficient (k) from the
 // project noise parameters and the standard's mV-per-IRE ratio.
@@ -80,6 +80,20 @@ std::size_t FindSectionIndex(const Project& project,
   return static_cast<std::size_t>(target_section - first);
 }
 
+// Draws count + taps - 1 unit normals and shapes them into count samples, so
+// the shaped sequence has unit variance and no filter edge effects.
+std::vector<double> DrawShapedUnitNormals(
+    const NoiseSpectrumFilter& filter, std::size_t count, std::mt19937_64* rng,
+    std::normal_distribution<double>* unit_normal) {
+  std::vector<double> white(count + filter.kernel().size() - 1U);
+  for (double& value : white) {
+    value = (*unit_normal)(*rng);
+  }
+  std::vector<double> shaped;
+  filter.Apply(white, count, &shaped);
+  return shaped;
+}
+
 }  // namespace
 
 NoiseInjectionStage::NoiseInjectionStage(ILogger* logger)
@@ -95,20 +109,19 @@ void NoiseInjectionStage::InjectNoise(
   }
 
   const Standard standard = project.cvbs_presets.video_standard_preset;
-  const std::size_t samples_per_frame =
-      static_cast<std::size_t>(SamplesPerFrameForEncodingPreset(
-          standard, project.cvbs_presets.sample_encoding_preset));
-  if (samples_per_frame == 0U) {
-    return;
-  }
+  // Generation always fills 4fsc frames; the output stage resamples RAW
+  // encodings afterwards, so frames and the spectrum are both at 4fsc here.
+  const auto samples_per_frame =
+      static_cast<std::size_t>(SamplesPerFrame4fsc(standard));
 
   const SignalLevels levels = GetSignalLevels(project.cvbs_presets);
   const double white_mv = levels.white_mv;
+  const double sample_rate_hz =
+      GetTimingConstants(standard).sample_rate_4fsc_hz;
 
-  const SampleFixed clamp_min = MillivoltsToSampleFixed(
-      Is625LineStandard(standard) ? kPalClampMinMv : kNtscClampMinMv);
-  const SampleFixed clamp_max = MillivoltsToSampleFixed(
-      Is625LineStandard(standard) ? kPalClampMaxMv : kNtscClampMaxMv);
+  const SampleClampBounds bounds = SampleClampBoundsFor(standard);
+  const SampleFixed clamp_min = bounds.min;
+  const SampleFixed clamp_max = bounds.max;
 
   for (std::size_t i = 0; i < frame_count; ++i) {
     const std::size_t global_frame = frame_offset + i;
@@ -116,12 +129,65 @@ void NoiseInjectionStage::InjectNoise(
       break;
     }
     const Section* section = schedule[global_frame].section;
-    if (section == nullptr || !section->noise.enabled) {
+    if (section == nullptr ||
+        (!section->noise.enabled && !section->noise.shared.enabled)) {
+      continue;
+    }
+    const NoiseParameters& noise = section->noise;
+    const std::size_t frame_start = i * samples_per_frame;
+
+    // Shared (pressing) layer first, into its own buffer: it is keyed by disc
+    // position only, and its constant sigma does not depend on the signal.
+    std::vector<SampleFixed> shared_noise;
+    if (noise.shared.enabled) {
+      const IGenerationStage::FrameScheduleItem& item = schedule[global_frame];
+      const std::uint64_t disc_frame_key =
+          item.enrichment != nullptr
+              ? static_cast<std::uint64_t>(item.enrichment->disc_frame_index)
+              : static_cast<std::uint64_t>(global_frame);
+      std::mt19937_64 shared_rng(DeriveImpairmentSeed(
+          static_cast<std::uint64_t>(noise.shared.noise_seed),
+          kSharedNoiseSeedDomain, disc_frame_key));
+      std::normal_distribution<double> shared_normal(0.0, 1.0);
+      const double sigma_shared_mv =
+          FloorSigmaMv(noise.shared.noise_db, white_mv);
+
+      shared_noise.resize(samples_per_frame);
+      if (noise.shared.spectrum.empty()) {
+        for (SampleFixed& value : shared_noise) {
+          value = MillivoltsToSampleFixed(sigma_shared_mv *
+                                          shared_normal(shared_rng));
+        }
+      } else {
+        const std::vector<double> shaped = DrawShapedUnitNormals(
+            *FilterFor(noise.shared.spectrum, sample_rate_hz),
+            samples_per_frame, &shared_rng, &shared_normal);
+        for (std::size_t s = 0; s < samples_per_frame; ++s) {
+          shared_noise[s] =
+              MillivoltsToSampleFixed(sigma_shared_mv * shaped[s]);
+        }
+      }
+
+      if (logger_ != nullptr) {
+        logger_->Trace("NoiseInjectionStage: frame " +
+                       std::to_string(global_frame) + " section '" +
+                       section->name +
+                       "' shared sigma=" + std::to_string(sigma_shared_mv) +
+                       " mV disc_frame=" + std::to_string(disc_frame_key));
+      }
+    }
+
+    if (!noise.enabled) {
+      for (std::size_t s = 0; s < samples_per_frame; ++s) {
+        const std::size_t idx = frame_start + s;
+        (*y_mv)[idx] =
+            std::clamp((*y_mv)[idx] + shared_noise[s], clamp_min, clamp_max);
+        (*c_mv)[idx] += shared_noise[s];
+      }
       continue;
     }
 
-    const NoiseCoefficients coeffs =
-        DeriveNoiseCoefficients(section->noise, white_mv);
+    const NoiseCoefficients coeffs = DeriveNoiseCoefficients(noise, white_mv);
 
     // Per-frame seed independent of batch size.
     // base_seed is the user-supplied noise_seed (deterministic across runs) or
@@ -129,8 +195,8 @@ void NoiseInjectionStage::InjectNoise(
     // Two large primes decorrelate the section and frame axes.
     const std::size_t section_index = FindSectionIndex(project, section);
     const std::uint64_t base_seed =
-        section->noise.noise_seed_specified
-            ? static_cast<std::uint64_t>(section->noise.noise_seed)
+        noise.noise_seed_specified
+            ? static_cast<std::uint64_t>(noise.noise_seed)
             : run_base_seed_;
     const std::uint64_t seed =
         (base_seed ^
@@ -146,13 +212,21 @@ void NoiseInjectionStage::InjectNoise(
                      " mV k=" + std::to_string(coeffs.k));
     }
 
-    const std::size_t frame_start = i * samples_per_frame;
-
     // One distribution for the whole frame region, drawing unit normals that
     // are then scaled to the sample's sigma. Constructing a distribution per
     // sample threw away half of every Box-Muller pair; a persistent one keeps
     // the second deviate and halves the underlying engine draws.
     std::normal_distribution<double> unit_normal(0.0, 1.0);
+
+    // A configured spectrum shapes the unit normals before the per-sample
+    // sigma is applied, so the level-dependent term modulates shaped noise.
+    std::vector<double> shaped_unit;
+    if (!noise.spectrum.empty()) {
+      shaped_unit =
+          DrawShapedUnitNormals(*FilterFor(noise.spectrum, sample_rate_hz),
+                                samples_per_frame, &rng, &unit_normal);
+    }
+    const bool shaped = !shaped_unit.empty();
 
     // With no spread configured the proportional term vanishes and sigma is
     // constant across the whole frame, so neither the Y level nor the square
@@ -173,17 +247,48 @@ void NoiseInjectionStage::InjectNoise(
             std::sqrt(sigma_floor_squared + (prop_component * prop_component));
       }
 
-      // Single noise draw shared by both channels — produces correlated Y/C
+      // Single noise value shared by both channels — produces correlated Y/C
       // noise that matches the physical behaviour of a real analogue source.
-      const SampleFixed noise_sample =
-          MillivoltsToSampleFixed(sigma_total * unit_normal(rng));
+      const double unit = shaped ? shaped_unit[s] : unit_normal(rng);
+      SampleFixed noise_sample = MillivoltsToSampleFixed(sigma_total * unit);
+      if (!shared_noise.empty()) {
+        noise_sample += shared_noise[s];
+      }
 
+      // The bounds are composite limits. C is zero-centred and saturated
+      // chroma legitimately exceeds them, so only Y is clamped here; the
+      // output stage clamps Y + C and the chroma file.
       (*y_mv)[idx] =
           std::clamp((*y_mv)[idx] + noise_sample, clamp_min, clamp_max);
-      (*c_mv)[idx] =
-          std::clamp((*c_mv)[idx] + noise_sample, clamp_min, clamp_max);
+      (*c_mv)[idx] += noise_sample;
     }
   }
+}
+
+std::shared_ptr<const NoiseSpectrumFilter> NoiseInjectionStage::FilterFor(
+    const std::vector<NoiseSpectrumPoint>& spectrum,
+    double sample_rate_hz) const {
+  std::vector<double> key;
+  key.reserve(1U + (2U * spectrum.size()));
+  key.push_back(sample_rate_hz);
+  for (const NoiseSpectrumPoint& point : spectrum) {
+    key.push_back(point.frequency_mhz);
+    key.push_back(point.relative_db);
+  }
+
+  const std::lock_guard<std::mutex> lock(filter_cache_mutex_);
+  std::shared_ptr<const NoiseSpectrumFilter>& filter = filter_cache_[key];
+  if (filter == nullptr) {
+    filter =
+        std::make_shared<const NoiseSpectrumFilter>(spectrum, sample_rate_hz);
+    if (logger_ != nullptr) {
+      logger_->Debug("NoiseInjectionStage: designed " +
+                     std::to_string(kNoiseSpectrumTaps) +
+                     "-tap noise spectrum filter (" +
+                     std::to_string(spectrum.size()) + " breakpoints).");
+    }
+  }
+  return filter;
 }
 
 }  // namespace videosynth

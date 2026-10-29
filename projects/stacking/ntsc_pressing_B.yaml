@@ -1,0 +1,179 @@
+# NTSC Pressing B — base project for a multi-capture stacking set
+#
+# One pressing of a 16-frame CAV laserdisc (PNs 1–16). The captures of this
+# pressing are not committed: projects/variants.json (stacking-captures)
+# derives four of them, each with its own capture seed, one starting later
+# (at PN 5) and one replaying the multi-burst range (PNs 9–12). Their
+# impairment-free truths come from the stacking-clean variant.
+#
+# What belongs to the pressing, and is identical in every capture of it:
+#   - noise.shared: pressing noise keyed by picture number, seed
+#     7002 (pressing A uses 7001);
+#   - channel.timing_offset_samples: -0.3, so it arrives
+#     0.3 sample earlier than pressing A.
+# What belongs to one capture: the capture noise layer (noise_db,
+# noise_spread_db, noise_seed, spectrum), whose seed the variants replace.
+#
+# Content layout (both pressings, every standard):
+#   PNs  1–4:  100_BARS.exr
+#   PNs  5–8:  SMPTE_BARS_001.exr
+#   PNs  9–12: MULTIBURST.exr
+#   PNs 13–16: Y_CB_CR_RAMPS.exr
+# Sections are four frames long, a whole colour-field sequence, so a capture
+# that starts later or replays a section stays in subcarrier phase.
+
+project:
+  name: NtscPressingB
+  version: "1.0"
+  description: NTSC pressing B — shared noise seed 7002, timing offset -0.3
+
+cvbs_presets:
+  video_standard_preset: NTSC
+  sample_encoding_preset: CVBS_U10_4FSC
+  signal_state_preset: STANDARD_STABLE_LOCKED
+
+output:
+  video_path: "{output}/videosynth_ntsc_pressing_B.cvbs"
+
+line_injections:
+  disc_type: CAV
+  vits:
+    - vits_type: virs
+      target_lines: [19, 282]
+
+channel:
+  timing_offset_samples: -0.3
+
+sections:
+
+  # ---------------------------------------------------------------------------
+  # PNs 1–4: 100% colour bars
+  # ---------------------------------------------------------------------------
+  - name: Bars
+    type: progressive
+    source: "{bundled}/exr/720x486/100_BARS.exr"
+    duration_frames: 4
+    section_type: programme_area
+    noise:
+      # Capture layer: FM-demodulated noise rises towards high frequencies.
+      noise_db: 46.0
+      noise_spread_db: 3.0
+      noise_seed: 1001
+      spectrum:
+        - [0.0, 0.0]
+        - [3.0, 3.0]
+        - [6.0, 9.0]
+      # Pressing layer: the same on every capture of pressing B.
+      shared:
+        noise_db: 49.0
+        noise_seed: 7002
+        spectrum:
+          - [0.0, 0.0]
+          - [2.0, -2.0]
+          - [5.0, -6.0]
+    line_injections:
+      - type: laserdisc
+        codes:
+          - code_type: picture_number
+            start_value: 1
+          - code_type: programme_status
+            programme_status: "0x8DC001"
+
+  # ---------------------------------------------------------------------------
+  # PNs 5–8: smpte bars 001
+  # ---------------------------------------------------------------------------
+  - name: SmpteBars
+    type: progressive
+    source: "{bundled}/exr/720x486/SMPTE_BARS_001.exr"
+    duration_frames: 4
+    section_type: programme_area
+    noise:
+      # Capture layer: FM-demodulated noise rises towards high frequencies.
+      noise_db: 46.0
+      noise_spread_db: 3.0
+      noise_seed: 1001
+      spectrum:
+        - [0.0, 0.0]
+        - [3.0, 3.0]
+        - [6.0, 9.0]
+      # Pressing layer: the same on every capture of pressing B.
+      shared:
+        noise_db: 49.0
+        noise_seed: 7002
+        spectrum:
+          - [0.0, 0.0]
+          - [2.0, -2.0]
+          - [5.0, -6.0]
+    line_injections:
+      - type: laserdisc
+        codes:
+          - code_type: picture_number
+            start_value: 5
+          - code_type: programme_status
+            programme_status: "0x8DC001"
+
+  # ---------------------------------------------------------------------------
+  # PNs 9–12: multi-burst
+  # ---------------------------------------------------------------------------
+  - name: MultiBurst
+    type: progressive
+    source: "{bundled}/exr/720x486/MULTIBURST.exr"
+    duration_frames: 4
+    section_type: programme_area
+    noise:
+      # Capture layer: FM-demodulated noise rises towards high frequencies.
+      noise_db: 46.0
+      noise_spread_db: 3.0
+      noise_seed: 1001
+      spectrum:
+        - [0.0, 0.0]
+        - [3.0, 3.0]
+        - [6.0, 9.0]
+      # Pressing layer: the same on every capture of pressing B.
+      shared:
+        noise_db: 49.0
+        noise_seed: 7002
+        spectrum:
+          - [0.0, 0.0]
+          - [2.0, -2.0]
+          - [5.0, -6.0]
+    line_injections:
+      - type: laserdisc
+        codes:
+          - code_type: picture_number
+            start_value: 9
+          - code_type: programme_status
+            programme_status: "0x8DC001"
+
+  # ---------------------------------------------------------------------------
+  # PNs 13–16: Y/Cb/Cr ramps
+  # ---------------------------------------------------------------------------
+  - name: Ramps
+    type: progressive
+    source: "{bundled}/exr/720x486/Y_CB_CR_RAMPS.exr"
+    duration_frames: 4
+    section_type: programme_area
+    noise:
+      # Capture layer: FM-demodulated noise rises towards high frequencies.
+      noise_db: 46.0
+      noise_spread_db: 3.0
+      noise_seed: 1001
+      spectrum:
+        - [0.0, 0.0]
+        - [3.0, 3.0]
+        - [6.0, 9.0]
+      # Pressing layer: the same on every capture of pressing B.
+      shared:
+        noise_db: 49.0
+        noise_seed: 7002
+        spectrum:
+          - [0.0, 0.0]
+          - [2.0, -2.0]
+          - [5.0, -6.0]
+    line_injections:
+      - type: laserdisc
+        codes:
+          - code_type: picture_number
+            start_value: 13
+          - code_type: programme_status
+            programme_status: "0x8DC001"

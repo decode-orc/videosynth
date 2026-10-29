@@ -32,6 +32,7 @@
 #include "videosynth/fixed_point.h"
 #include "videosynth/frame_enrichment.h"
 #include "videosynth/frame_line_layout.h"
+#include "videosynth/luma_bandwidth_filter.h"
 #include "videosynth/osd_renderer.h"
 #include "videosynth/osd_token_resolver.h"
 #include "videosynth/progressive_frame_source.h"
@@ -47,15 +48,6 @@ namespace videosynth {
 // than the file's anonymous namespace so that GenerationStage::
 // SynthesisResources — a member of an externally-linked class — can hold them.
 namespace generation_detail {
-
-struct ActiveRasterGeometry {
-  int first_active_line_field1 = 0;
-  int first_active_line_field2 = 0;
-  int active_lines_per_field = 0;
-  int active_window_start_samples = 0;
-  int active_window_end_samples = 0;
-  int active_width_pixels = 720;
-};
 
 struct LinePulseSegment {
   int offset_samples = 0;
@@ -160,7 +152,6 @@ struct ActiveSampleColumnMap {
 
 namespace {
 
-using generation_detail::ActiveRasterGeometry;
 using generation_detail::ActiveSampleColumnMap;
 using generation_detail::LinePulsePlan;
 using generation_detail::LinePulseSegment;
@@ -258,43 +249,6 @@ bool SourceIgnoresFrameIndex(const std::string& source) {
   return lowered.size() >= kSuffixLength &&
          lowered.compare(lowered.size() - kSuffixLength, kSuffixLength,
                          ".exr") == 0;
-}
-
-ActiveRasterGeometry GetActiveRasterGeometry(Standard standard,
-                                             double sample_rate_hz) {
-  if (Is625LineStandard(standard)) {
-    // ITU-R BT.1700 Annex 1 Part B Table 3: PAL line timing, mapped through
-    // BT.601's 13.5 MHz sampling model. Keep the established PAL line start
-    // anchor at +177 4fsc samples, but limit active-picture synthesis to
-    // the 52.0 us visible-aperture duration.
-    const int active_window_start = 177;
-    const int active_window_end =
-        active_window_start +
-        std::max(1, static_cast<int>(std::lround(sample_rate_hz * 52.0e-6)));
-    return ActiveRasterGeometry{
-        .first_active_line_field1 = 23,
-        .first_active_line_field2 = 335,
-        .active_lines_per_field = 288,
-        .active_window_start_samples = active_window_start,
-        .active_window_end_samples = active_window_end,
-        .active_width_pixels = 720,
-    };
-  }
-
-  const int active_window_start =
-      std::max(0, static_cast<int>(std::lround(sample_rate_hz * 10.5e-6)));
-  const int active_window_end =
-      std::max(active_window_start + 1,
-               static_cast<int>(std::lround(sample_rate_hz * 62.5e-6)));
-
-  return ActiveRasterGeometry{
-      .first_active_line_field1 = 22,
-      .first_active_line_field2 = 284,
-      .active_lines_per_field = 240,
-      .active_window_start_samples = active_window_start,
-      .active_window_end_samples = active_window_end,
-      .active_width_pixels = 720,
-  };
 }
 
 SampledSynthesisContext BuildSampledSynthesisContext(Standard standard) {
@@ -413,23 +367,6 @@ bool BuildFramePatternSchedule(
   }
 
   return !out_frame_sections->empty();
-}
-
-int ActiveFrameLineIndex(const ActiveRasterGeometry& geometry,
-                         [[maybe_unused]] Standard standard, int line_1based) {
-  if (line_1based >= geometry.first_active_line_field1 &&
-      line_1based < (geometry.first_active_line_field1 +
-                     geometry.active_lines_per_field)) {
-    return line_1based - geometry.first_active_line_field1;
-  }
-  if (line_1based >= geometry.first_active_line_field2 &&
-      line_1based < (geometry.first_active_line_field2 +
-                     geometry.active_lines_per_field)) {
-    return geometry.active_lines_per_field +
-           (line_1based - geometry.first_active_line_field2);
-  }
-
-  return -1;
 }
 
 int InvertCenteredChromaCode(int code) { return 1024 - code; }
@@ -984,6 +921,13 @@ struct GenerationStage::SynthesisResources {
   std::vector<int> active_sample_indices;
   std::vector<SampleFixed> encoded_line_chroma;
   std::vector<SampleFixed> secam_line_chroma;
+
+  // Luma bandwidth limit of the section most recently synthesised by this
+  // worker, redesigned only when a section brings in different settings, and
+  // the line workspaces it filters through.
+  std::unique_ptr<LumaBandwidthFilter> luma_filter;
+  std::vector<SampleFixed> line_luma;
+  std::vector<SampleFixed> filtered_line_luma;
 };
 
 // Per-worker cache of the frame-invariant synthesis resources.
@@ -1217,6 +1161,10 @@ bool GenerationStage::SynthesisResourceCache::Build(
   out->encoded_line_chroma.assign(
       static_cast<std::size_t>(out->active_window_samples),
       MillivoltsToSampleFixed(0.0));
+  out->line_luma.assign(static_cast<std::size_t>(out->active_window_samples),
+                        0);
+  out->filtered_line_luma.assign(
+      static_cast<std::size_t>(out->active_window_samples), 0);
 
   out->presets = project.cvbs_presets;
   out->vits = project.line_injections.vits;
@@ -1235,12 +1183,12 @@ struct GenerationStage::FrameTemplate {
 // Bounded cache of clean frame templates, shared by all worker threads.
 //
 // Key: (source path, source frame identity, colour sequence phase, section
-// type). The clean frame depends on the section only through its decoded
-// source and its progressive/interlaced row pairing, so sections sharing a
-// source share templates. Everything else the clean frame depends on — the
-// CVBS presets (standard, levels, pilot burst) and the project VITS set — is
-// held as the cache configuration: a lookup against a different configuration
-// clears the cache first.
+// type, luma bandwidth limit). The clean frame depends on the section only
+// through its decoded source, its progressive/interlaced row pairing and its
+// luma bandwidth limit, so sections sharing those share templates. Everything
+// else the clean frame depends on — the CVBS presets (standard, levels, pilot
+// burst) and the project VITS set — is held as the cache configuration: a
+// lookup against a different configuration clears the cache first.
 //
 // Admission: a template is built and stored only on a key's second request
 // (misses record the key in a ghost set and synthesise directly), so sources
@@ -1304,8 +1252,8 @@ class GenerationStage::TemplateCache {
         configuration_valid_ = true;
       }
 
-      SlotKey key{section.source, section.type, source_frame_index,
-                  sequence_phase};
+      SlotKey key{section.source, section.type, section.luma_bandwidth,
+                  source_frame_index, sequence_phase};
       auto it = slots_.find(key);
       if (it == slots_.end()) {
         // Admission on second request: a template is only worth building and
@@ -1349,13 +1297,15 @@ class GenerationStage::TemplateCache {
   struct SlotKey {
     std::string source;
     std::string section_type;
+    LumaBandwidthParameters luma_bandwidth;
     int source_frame_index = 0;
     std::size_t sequence_phase = 0;
 
     bool operator==(const SlotKey& other) const {
       return source_frame_index == other.source_frame_index &&
              sequence_phase == other.sequence_phase && source == other.source &&
-             section_type == other.section_type;
+             section_type == other.section_type &&
+             luma_bandwidth == other.luma_bandwidth;
     }
   };
 
@@ -1630,6 +1580,22 @@ void GenerationStage::SynthesiseTemplate(SynthesisResources& resources,
     column_map.Rebuild(source_frame, active_window_samples);
   }
 
+  // The section's luma bandwidth limit, designed once per change of settings.
+  const LumaBandwidthFilter* luma_filter = nullptr;
+  if (section.luma_bandwidth.enabled) {
+    const double cutoff_hz = section.luma_bandwidth.cutoff_mhz * 1.0e6;
+    const double transition_hz = section.luma_bandwidth.transition_mhz * 1.0e6;
+    if (resources.luma_filter == nullptr ||
+        resources.luma_filter->cutoff_hz() != cutoff_hz ||
+        resources.luma_filter->transition_hz() != transition_hz) {
+      resources.luma_filter = std::make_unique<LumaBandwidthFilter>(
+          cutoff_hz, transition_hz, synth.sample_rate_hz);
+    }
+    luma_filter = resources.luma_filter.get();
+  }
+  std::vector<SampleFixed>& line_luma = resources.line_luma;
+  std::vector<SampleFixed>& filtered_line_luma = resources.filtered_line_luma;
+
   // Progressive imports use field-2-dominant row pairing; the section type
   // decides it once per frame rather than once per active sample.
   const bool progressive_section = section.type == "progressive";
@@ -1768,8 +1734,8 @@ void GenerationStage::SynthesiseTemplate(SynthesisResources& resources,
 
     if (line.sync_pulse_kind == SyncPulseKind::kHorizontal &&
         line.content_kind == LineContentKind::kActivePicture) {
-      const int active_y = ActiveFrameLineIndex(synth.active, video_standard,
-                                                line.line_number_1based);
+      const int active_y =
+          ActiveFrameLineIndex(synth.active, line.line_number_1based);
       if (active_y >= 0) {
         const bool invert_pal_v_axis =
             (is_pal || is_pal_m) && PalInvertVAxisForLine(sequence_phase, line);
@@ -1834,6 +1800,11 @@ void GenerationStage::SynthesiseTemplate(SynthesisResources& resources,
                 static_cast<std::int16_t>(InvertCenteredChromaCode(pixel.cr));
           }
 
+          if (luma_filter != nullptr) {
+            line_luma[sample_slot] = LumaFixedFromCode(pixel.y);
+            continue;
+          }
+
           // Preserve any sync-domain sample already placed for this line;
           // only paint active luma where the waveform is at/above blanking
           // level.
@@ -1841,6 +1812,22 @@ void GenerationStage::SynthesiseTemplate(SynthesisResources& resources,
               y_out[static_cast<std::size_t>(sample_index)];
           if (luma_sample >= blanking_fixed) {
             luma_sample = LumaFixedFromCode(pixel.y);
+          }
+        }
+
+        // A band-limited section paints the line's luma once it has been
+        // filtered as a whole, under the same blanking-level guard.
+        if (luma_filter != nullptr && painted_sample_count > 0) {
+          luma_filter->Apply(line_luma.data(),
+                             static_cast<std::size_t>(painted_sample_count),
+                             filtered_line_luma.data());
+          for (int x_sample = 0; x_sample < painted_sample_count; ++x_sample) {
+            SampleFixed& luma_sample = y_out[static_cast<std::size_t>(
+                active_line_sample_base + x_sample)];
+            if (luma_sample >= blanking_fixed) {
+              luma_sample =
+                  filtered_line_luma[static_cast<std::size_t>(x_sample)];
+            }
           }
         }
 
