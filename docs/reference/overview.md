@@ -137,6 +137,7 @@ sections:
       noise_spread_db:
       noise_seed:
       spectrum:
+      spread_spectrum:
       shared:
         noise_db:
         noise_seed:

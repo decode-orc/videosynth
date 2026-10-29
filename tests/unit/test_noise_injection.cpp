@@ -29,6 +29,7 @@
 #include "videosynth/project_validator.h"
 #include "videosynth/sample_clamp.h"
 #include "videosynth/timing_constants.h"
+#include "videosynth/timing_offset_filter.h"
 #include "videosynth/yaml_project_parser.h"
 
 namespace videosynth {
@@ -227,6 +228,28 @@ TEST(NoiseInjectionTest, ParserRejectsSpectrumWithoutNoiseDb) {
   EXPECT_FALSE(result.ok);
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors[0].find("spectrum requires noise_db"),
+            std::string::npos);
+}
+
+TEST(NoiseInjectionTest, ParserReadsSpreadSpectrum) {
+  const ParseResult result = YamlProjectParser().ParseString(
+      NoiseSectionYaml("      noise_db: 46.0\n"
+                       "      noise_spread_db: 5.0\n"
+                       "      spread_spectrum: [[5.0, -20.0], [6.0, 0.0]]\n"));
+  ASSERT_TRUE(result.ok) << result.errors.front();
+  const NoiseParameters& noise = result.project.sections[0].noise;
+  EXPECT_TRUE(noise.spectrum.empty());
+  ASSERT_EQ(noise.spread_spectrum.size(), 2U);
+  EXPECT_DOUBLE_EQ(noise.spread_spectrum[0].frequency_mhz, 5.0);
+  EXPECT_DOUBLE_EQ(noise.spread_spectrum[0].relative_db, -20.0);
+}
+
+TEST(NoiseInjectionTest, ParserRejectsSpreadSpectrumWithoutNoiseDb) {
+  const ParseResult result = YamlProjectParser().ParseString(
+      NoiseSectionYaml("      spread_spectrum: [[0.0, 0.0]]\n"));
+  EXPECT_FALSE(result.ok);
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors[0].find("spread_spectrum requires noise_db"),
             std::string::npos);
 }
 
@@ -436,6 +459,26 @@ TEST(NoiseInjectionTest, ValidatorRejectsSpectrumOutOfRangeValues) {
               std::string::npos)
         << FirstError(shared_result);
   }
+}
+
+TEST(NoiseInjectionTest, ValidatorChecksSpreadSpectrumTable) {
+  Project project = MakeValidNoiseProject(46.0, 5.0);
+  project.sections[0].noise.spread_spectrum = {{2.0, 0.0}, {1.0, 0.0}};
+  const ValidationResult result = ProjectValidator().Validate(project);
+  EXPECT_FALSE(result.is_valid);
+  EXPECT_NE(FirstError(result).find("': spread_spectrum frequencies must be"),
+            std::string::npos)
+      << FirstError(result);
+}
+
+TEST(NoiseInjectionTest, ValidatorWarnsSpreadSpectrumWithoutSpread) {
+  Project project = MakeValidNoiseProject(46.0, 0.0);
+  project.sections[0].noise.spread_spectrum = {{0.0, 0.0}, {6.0, 10.0}};
+  const ValidationResult result = ProjectValidator().Validate(project);
+  EXPECT_TRUE(result.is_valid) << FirstError(result);
+  ASSERT_EQ(result.warnings.size(), 1U);
+  EXPECT_NE(result.warnings[0].find("spread_spectrum is set"),
+            std::string::npos);
 }
 
 TEST(NoiseInjectionTest, ValidatorAcceptsSpectrumUpToNyquist) {
@@ -1292,6 +1335,125 @@ TEST(NoiseInjectionTest, LayerVariancesAdd) {
   const double expected = std::sqrt((capture_sigma * capture_sigma) +
                                     (shared_sigma * shared_sigma));
   EXPECT_NEAR(ComputeStdDevMv(layers.both, 0.0), expected, expected * 0.02);
+}
+
+// Noise added to one frame at a flat Y level, in mV, for a capture layer at
+// 40 dB with a 10 dB white spread whose level term sits above 6 MHz.
+std::vector<double> SpreadSpectrumNoiseAt(double level_mv) {
+  NullLogger logger;
+  NoiseInjectionStage stage(&logger);
+  auto ctx = MakeTestContext(Standard::kPal, true, 40.0, 10.0);
+  NoiseParameters& noise = ctx.project.sections[0].noise;
+  noise.noise_seed = 515;
+  noise.noise_seed_specified = true;
+  noise.spread_spectrum = {{5.0, -40.0}, {6.0, 0.0}};
+
+  const std::size_t n = PalSamplesPerFrame();
+  std::vector<SampleFixed> y(n, MillivoltsToSampleFixed(level_mv));
+  std::vector<SampleFixed> c(n, 0);
+  stage.InjectNoise(ctx.project, ctx.schedule, 0, 1, &y, &c);
+  std::vector<double> noise_mv(n);
+  for (std::size_t s = 0; s < n; ++s) {
+    noise_mv[s] = SampleFixedToMillivolts(y[s]) - level_mv;
+  }
+  return noise_mv;
+}
+
+double RmsMv(const std::vector<double>& values) {
+  double sum = 0.0;
+  for (double value : values) {
+    sum += value * value;
+  }
+  return std::sqrt(sum / static_cast<double>(values.size()));
+}
+
+TEST(NoiseInjectionTest, SpreadSpectrumShapesOnlyTheLevelDependentTerm) {
+  const std::vector<double> black = SpreadSpectrumNoiseAt(0.0);
+  const std::vector<double> white = SpreadSpectrumNoiseAt(700.0);
+
+  // The total level still follows noise_db and noise_spread_db: 1 IRE at
+  // black, 10 dB more at white.
+  const double sigma_f_mv = 7.0;
+  const double sigma_w_mv = 7.0 * std::pow(10.0, 10.0 / 20.0);
+  EXPECT_NEAR(RmsMv(black), sigma_f_mv, sigma_f_mv * 0.02);
+  EXPECT_NEAR(RmsMv(white), sigma_w_mv, sigma_w_mv * 0.03);
+
+  // Below 5 MHz the level term is 40 dB down, so white reads as black there;
+  // above 6 MHz the whole growth with level lands.
+  const double sample_rate_hz =
+      GetTimingConstants(Standard::kPal).sample_rate_4fsc_hz;
+  for (double centre_mhz : {1.0, 2.5, 4.0}) {
+    EXPECT_NEAR(BandPowerDb(white, centre_mhz, sample_rate_hz),
+                BandPowerDb(black, centre_mhz, sample_rate_hz), 1.0)
+        << "band at " << centre_mhz << " MHz";
+  }
+  for (double centre_mhz : {7.0, 8.0}) {
+    EXPECT_GT(BandPowerDb(white, centre_mhz, sample_rate_hz) -
+                  BandPowerDb(black, centre_mhz, sample_rate_hz),
+              10.0)
+        << "band at " << centre_mhz << " MHz";
+  }
+}
+
+TEST(NoiseInjectionTest, SpreadSpectrumLeavesFloorOnlyFramesFlat) {
+  // At black the level term vanishes, so the floor alone (white here) is
+  // the output.
+  const std::vector<double> black = SpreadSpectrumNoiseAt(0.0);
+  const double sample_rate_hz =
+      GetTimingConstants(Standard::kPal).sample_rate_4fsc_hz;
+  const double reference_db = BandPowerDb(black, 1.0, sample_rate_hz);
+  for (double centre_mhz : {4.0, 7.0}) {
+    EXPECT_NEAR(BandPowerDb(black, centre_mhz, sample_rate_hz), reference_db,
+                1.0)
+        << "band at " << centre_mhz << " MHz";
+  }
+}
+
+// Runs one shared-only (or capture-only) frame at the given channel timing
+// offset.
+std::vector<SampleFixed> LayerFrameWithTimingOffset(bool shared_layer,
+                                                    double offset_samples) {
+  NullLogger logger;
+  NoiseInjectionStage stage(&logger);
+  Project project = MakeSharedOnlyProject(1);
+  if (!shared_layer) {
+    project.sections[0].noise.shared.enabled = false;
+    project.sections[0].noise.enabled = true;
+    project.sections[0].noise.noise_db = 40.0;
+    project.sections[0].noise.noise_seed = 9;
+    project.sections[0].noise.noise_seed_specified = true;
+  }
+  project.channel.enabled = true;
+  project.channel.timing_offset_samples = offset_samples;
+  const std::vector<IGenerationStage::FrameScheduleItem> schedule = {
+      DiscFrame(&project.sections[0], 40)};
+  return SharedLayerFrame(stage, project, schedule, 0);
+}
+
+TEST(NoiseInjectionTest, SharedNoiseFollowsChannelTimingOffset) {
+  // The pressing noise is read off the disc with the picture, so a capture's
+  // timing offset delays it exactly as the channel stage delays the picture.
+  const std::vector<SampleFixed> aligned = LayerFrameWithTimingOffset(true, 0);
+  const std::vector<SampleFixed> late = LayerFrameWithTimingOffset(true, 2.0);
+  const std::size_t n = aligned.size();
+  std::vector<SampleFixed> expected(n);
+  for (std::size_t s = 0; s < n; ++s) {
+    expected[(s + 2U) % n] = aligned[s];
+  }
+  EXPECT_EQ(late, expected);
+
+  // A sub-sample offset uses the channel's band-limited delay.
+  std::vector<SampleFixed> fractional(n);
+  TimingOffsetFilter(-0.4).Apply(aligned.data(), n, fractional.data());
+  const std::vector<SampleFixed> early = LayerFrameWithTimingOffset(true, -0.4);
+  EXPECT_EQ(early, fractional);
+}
+
+TEST(NoiseInjectionTest, CaptureNoiseIgnoresChannelTimingOffset) {
+  // The capture layer belongs to the capture alone and stays on the output
+  // sample grid.
+  EXPECT_EQ(LayerFrameWithTimingOffset(false, 2.0),
+            LayerFrameWithTimingOffset(false, 0.0));
 }
 
 }  // namespace

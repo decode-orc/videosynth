@@ -54,6 +54,18 @@ Real channel noise is rarely white: FM demodulation tilts it towards high freque
 
 Levels are joined by straight lines in dB, and the end values are held out to 0 Hz and to Nyquist. The table sets the *shape* only — the shaped noise is normalised back to `noise_db`, so the overall Black PSNR is unchanged and the table just moves power between frequencies. With `noise_spread_db` set, the level-dependent term scales the shaped noise. See the [reference](../reference/section-noise.md#spectrum) for the limits.
 
+On real captures the noise does not grow with level the same way in every band. `spread_spectrum` gives the level-dependent term its own shape, and `spectrum` then shapes the floor alone:
+
+```yaml
+    noise:
+      noise_db: 46.0
+      noise_spread_db: 5.0
+      noise_seed: 1001
+      spread_spectrum: [[5.0, -20.0], [6.0, 0.0]]  # only above ~6 MHz grows with level
+```
+
+Black PSNR and White SNR are unchanged; only where the extra noise of bright content lands changes. See the [reference](../reference/section-noise.md#spread_spectrum).
+
 ### Pressing noise and capture noise
 
 Several captures of one disc share some of their noise and not the rest. Electronic noise in the player is fresh on every play; noise moulded into the pressing is the same each time the same picture is played. A stacking tool should average away the first and cannot remove the second.
@@ -72,6 +84,7 @@ The `shared:` sub-block is the pressing layer:
 
 - The pressing layer is keyed by **disc position** — the CAV picture number, or the output position plus the first-picture offset when there is none. It ignores sections and output position, so captures line up on the picture even when one starts later, skips or replays.
 - It has a constant level (no `noise_spread_db`), so it is identical in every capture whatever the rest of the signal is.
+- It moves with the picture: `channel.timing_offset_samples` delays it as it delays the picture, so a capture with its own offset still lines up with the other captures of its pressing once the picture is aligned.
 - `shared.noise_seed` is required. It is mixed with a layer-specific constant, so reusing a capture seed still gives independent noise.
 - The two layers add, so the total noise power is the sum of both. A block with only `shared:` gives pressing noise alone.
 
@@ -196,7 +209,7 @@ channel:
 - `timing_offset_samples` shifts the whole frame — sync, VBI and picture — by that many 4fsc samples; positive is later. The range is −8.0 to 8.0. Fractional offsets are a band-limited delay, accurate to well within 0.001 sample up to 6 MHz.
 - `edge_smear` makes every sharp transition trail: a `fraction` (up to 0.5) of the signal passes through a low-pass with a time constant of `tau_samples` 4fsc samples. It applies to the whole frame, VITS included, so the smear can be measured from a VITS bar edge.
 - `fm_beat` adds the FM-beat herringbone that some PAL LaserDisc glass masters recorded: a faint diagonal pattern in saturated flat colour, at 2.7–3.2 MHz depending on the colour's brightness. `level_db` sets it relative to the chroma of a 50 IRE colour. The beat is computed from the picture itself, so every capture of the pressing carries exactly the same beat, and stacking does not remove it. Greyscale areas carry none. It is a validation error on NTSC, PAL-M and SECAM.
-- All three happen before noise is added, in the order beat, smear, offset, so the noise spectrum you configure is exactly what the output carries.
+- All three happen before noise is added, in the order beat, smear, offset. The capture noise is added afterwards, so its configured spectrum is exactly what the output carries. The pressing (`shared`) noise is delayed by the same timing offset as the picture, so it stays on the picture's samples; the smear does not apply to it.
 
 Everything in `channel:` belongs to the pressing, so every project of one pressing uses the same block. A pressing is then:
 

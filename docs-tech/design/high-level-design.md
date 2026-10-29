@@ -988,7 +988,7 @@ Rules:
 - **Timing offset.** Applies to Y and C over the whole frame (sync, VBI and VITS included) with circular wrap within the frame; the frame boundary lies in vertical blanking, so only sync and equalising pulses wrap. The integer part is an exact index shift. The fractional part is a 32-tap Kaiser-windowed-sinc fractional-delay FIR (`kTimingOffsetHalfTaps = 16`, β = `kTimingOffsetKaiserBeta = 8`), normalised to unit DC gain: within 0.001 dB and 0.0002 sample of ideal, complex error below −76 dB, up to 6 MHz at both 4fsc rates.
 - **Edge smear.** `H(z) = (1 − c) + c(1 − a)/(1 − a z⁻¹)`, `a = exp(−1/τ)`, over Y and C of the whole frame, VITS included. The step response is `1 − c·aⁿ⁺¹` and the DC gain 1. The IIR state is primed circularly over the frame's last ⌈20τ⌉ samples (`kEdgeSmearWarmupTaus`), so each frame's result depends on that frame alone.
 - **FM beat.** A port of the reference model `_beat_basis` (domesday-aiv-restore `newdecode/deherring.py`, model-2026-10-27b), with videosynth's separate C buffer in place of the reference's FFT chroma mask: composite → IRE; 400/100 ns bilinear pre-emphasis started at the first sample's level; analytic chroma `C + jH{C}` from the picture line windows only (the chroma-error Hilbert FIR, `picture_chroma.h`); carrier `f_c = f0 + 8 kHz/IRE·(ip − (1 − γ)·Re(ca·H_pre(f_sc)))`, γ = 0.4; phase `Φ = Σ 2π f_c / f_s` from 0 at the frame start; amplitude `am = (lf − f_sc)/3e9 · exp(α(lf − 7.5 MHz)/1 MHz)`, α = −1, `lf` the box(4)·box(17)-filtered carrier; `Re(e^{jΦ}·am·conj(ca))`; de-emphasis; then a 255-tap Kaiser-windowed band-pass (2.2–3.9 MHz with the reference's 0.3 MHz ramps). The result is scaled by `10^(level_db/20)` over the basis gain of a flat colour at the 50 IRE carrier and added to Y inside the picture line windows (VITS target lines excluded). It is a function of the frame's error-free Y and C, so every capture of one pressing carries the same beat; the chroma error and both noise layers come after it. The constants are named after the reference in `fm_beat_model.h`; `scripts/generate_fm_beat_reference.py` writes the golden vectors the unit test compares against (within 1e-3 of the beat's peak).
-- The stage runs before noise, so both noise layers keep their configured spectrum exactly.
+- The stage runs before noise, so both noise layers keep their configured spectrum. The noise stage delays the shared (pressing) layer by the same `timing_offset_samples` with the same `TimingOffsetFilter`, since a real capture reads the pressing noise off the disc with the picture; the capture layer stays on the output grid. The smear and the beat are not applied to the shared layer.
 
 `timing_offset_samples` lives in `channel:` rather than `output:` because it is a property of the pressing, not of the output file.
 
@@ -1024,18 +1024,20 @@ The `noise:` block enables per-section additive Gaussian noise injection targeti
 | `noise_db` | float | Conditional | [20.0, 61.0] | Noise floor in dB; sets Black PSNR target. Required if `noise_spread_db` is present. |
 | `noise_spread_db` | float | No | [0.0, `noise_db`−20.0] | White is this many dB noisier than black; White SNR target = `noise_db` − `noise_spread_db`. Defaults to 0.0. |
 | `noise_seed` | int | No | any int64 | Fixed RNG base seed for reproducible output. If absent, a seed drawn once per run is used, so the noise differs between runs. |
-| `spectrum` | list of `[MHz, dB]` | No | see below | Capture-layer spectrum shape. Requires `noise_db`. |
+| `spectrum` | list of `[MHz, dB]` | No | see below | Capture-layer spectrum shape. Requires `noise_db`. With `spread_spectrum` set, it shapes the floor only. |
+| `spread_spectrum` | list of `[MHz, dB]` | No | see below | Shape of the level-dependent (k·Y) term alone, drawn independently of the floor. Requires `noise_db`. Absent → the level term follows `spectrum`. |
 | `shared` | map | No | — | Shared (pressing) layer: `noise_db` (required, [20.0, 61.0]), `noise_seed` (required), `spectrum` (optional). No `noise_spread_db`. |
 
 Rules:
 - Neither key present → no noise injection (pass-through).
 - Only `noise_db` present → floor-only noise; White SNR = Black PSNR = `noise_db`.
 - Both present → two-component model; `noise_db − noise_spread_db ≥ 20.0` is enforced.
-- `noise_spread_db` or `spectrum` without `noise_db` → parse error.
+- `noise_spread_db`, `spectrum` or `spread_spectrum` without `noise_db` → parse error.
+- `spread_spectrum` with `noise_spread_db` 0 → warning (no level term to shape).
 - Only `shared` present → pressing noise only, no capture layer.
-- `spectrum` (either layer): ≥ 1 point, frequencies strictly ascending in [0, 4fsc Nyquist] (2·f_sc; noise is shaped at 4fsc before RAW encodings are resampled, so the bound is the same for every preset), `relative_db` in [−60, +40]. Levels are interpolated linearly in dB against MHz with the end values held; the table sets the shape only, since the shaping filter is normalised to unit power gain.
+- `spectrum` (either layer) and `spread_spectrum`: ≥ 1 point, frequencies strictly ascending in [0, 4fsc Nyquist] (2·f_sc; noise is shaped at 4fsc before RAW encodings are resampled, so the bound is the same for every preset), `relative_db` in [−60, +40]. Levels are interpolated linearly in dB against MHz with the end values held; the table sets the shape only, since the shaping filter is normalised to unit power gain.
 
-**Capture vs shared layer.** The capture layer models one playback and keeps the (seed, section index, output frame) keying. The shared layer models the pressing: it is keyed by `FrameEnrichment::disc_frame_index` only (picture number − 1 on CAV with `picture_number`, otherwise output position + first-picture offset), so captures of one pressing carry identical pressing noise on the same picture whatever their section layout, start point, skips or replays. Having no level dependence keeps it identical across captures whatever the capture-side signal. A warning is raised for `shared` on a CAV section without a `picture_number` code.
+**Capture vs shared layer.** The capture layer models one playback and keeps the (seed, section index, output frame) keying. The shared layer models the pressing: it is keyed by `FrameEnrichment::disc_frame_index` only (picture number − 1 on CAV with `picture_number`, otherwise output position + first-picture offset), so captures of one pressing carry identical pressing noise on the same picture whatever their section layout, start point, skips or replays. Having no level dependence keeps it identical across captures whatever the capture-side signal. It is delayed by `channel.timing_offset_samples` with the picture, so a capture whose own offset differs from its pressing's still carries the pressing noise on the same picture samples. A warning is raised for `shared` on a CAV section without a `picture_number` code.
 
 **Lower bound (20.0 dB)**: at 20 dB, σ_noise ≈ 10 IRE ≈ 70 mV (PAL). Approaching the sync pulse amplitude; sync separator reliability degrades below this threshold.
 
@@ -2008,12 +2010,13 @@ Current implementation note:
 - **Steps**:
   1. For each frame in the batch, look up the owning section from the frame schedule.
   2. Skip frames whose section has neither layer configured.
-  3. Shared layer, when present: seed `std::mt19937_64` with `DeriveImpairmentSeed(shared.noise_seed, kSharedNoiseSeedDomain, disc_frame_index)` (splitmix64 mix, `impairment_seed.h`; hand-built schedules without enrichment use the schedule position), draw unit normals (shaped when `shared.spectrum` is set) and scale by the constant σ from `shared.noise_db`.
+  3. Shared layer, when present: seed `std::mt19937_64` with `DeriveImpairmentSeed(shared.noise_seed, kSharedNoiseSeedDomain, disc_frame_index)` (splitmix64 mix, `impairment_seed.h`; hand-built schedules without enrichment use the schedule position), draw unit normals (shaped when `shared.spectrum` is set) and scale by the constant σ from `shared.noise_db`. When the channel block carries a non-zero `timing_offset_samples`, delay the layer by it with `TimingOffsetFilter` (circular within the frame), as the channel stage delayed the picture.
   4. Capture layer, when present:
      - Derive floor sigma (`σ_f_mV`) and proportional coefficient (`k`) from `noise_db` and `noise_spread_db`.
      - Seed `std::mt19937_64` per frame from a base seed mixed with `section_index` and `global_frame_index`, so output is independent of batch size and thread count. The base seed is the section's `noise_seed` when set (reproducible across runs); otherwise it is drawn once per run from `std::random_device`, so unseeded noise differs between runs.
      - With `spectrum`, draw `samples_per_frame + taps − 1` unit normals and shape them by valid convolution (no edge effects); otherwise draw one unit normal per sample, as before, so unshaped projects keep their exact output.
-     - The noise standard deviation at each sample is `sqrt(σ_f² + (k × Y_mV)²)`, applied to the (shaped) unit normal.
+     - Without `spread_spectrum`, the noise standard deviation at each sample is `sqrt(σ_f² + (k × Y_mV)²)`, applied to the (shaped) unit normal.
+     - With `spread_spectrum` and `k ≠ 0`, the floor unit normals (shaped by `spectrum`, or white, drawn into a buffer first) and a second, independent sequence shaped by `spread_spectrum` are drawn from the same RNG; the sample is `σ_f·u_floor + k·Y_mV·u_spread`. The variance is the same `σ_f² + (k·Y)²`, but the level-dependent power follows its own spectrum.
   5. Sum the two layers' fixed-point noise values. On Y/C output (`output.signal_type: yc`) add the sum to both Y and C (correlated noise), so each file carries the configured level; on composite output add it to Y only, since the composite sample is Y + C and adding it to both would double the noise (+6 dB). Y samples are clamped to the legal fixed-point mV composite range for the standard; C samples are not, since zero-centred saturated chroma legitimately exceeds that range — the output stage clamps Y + C and the chroma file.
 - **Spectrum shaping** (`NoiseSpectrumFilter`): a 255-tap linear-phase FIR designed by frequency sampling of the interpolated table, a direct inverse real DFT, a Hann window and normalisation to Σh² = 1. Filters are designed once per distinct (sample rate, table) and cached behind a mutex; convolution is direct, so there is no FFT dependency. The cost is paid only by sections that configure a spectrum.
 
@@ -2139,8 +2142,9 @@ The rule set below remains the intended validation contract for VITC and custom 
   - `noise_db` must be in **[20.0, 61.0] dB** (error if outside this range).
   - `noise_spread_db` must be **≥ 0.0** (error if negative).
   - `noise_db − noise_spread_db` must be **≥ 20.0** (White SNR floor limit; error if violated).
-  - `noise_spread_db` or `spectrum` present without `noise_db` is a parse error.
-  - `spectrum` (capture and `shared`): frequencies strictly ascending in [0, 4fsc Nyquist], `relative_db` in [−60, +40].
+  - `noise_spread_db`, `spectrum` or `spread_spectrum` present without `noise_db` is a parse error.
+  - `spread_spectrum` with `noise_spread_db` 0 raises a **warning**.
+  - `spectrum` (capture and `shared`) and `spread_spectrum`: frequencies strictly ascending in [0, 4fsc Nyquist], `relative_db` in [−60, +40].
   - `shared.noise_db` must be in **[20.0, 61.0] dB**; `shared.noise_seed` is required; `shared.noise_spread_db` is a parse error.
   - `shared` on a CAV section without a `picture_number` code raises a **warning** (pressing noise falls back to output position).
   - If `noise_spread_db > 0` and no VITS injection targets the orc-gui White SNR measurement line (PAL: frame line 19; NTSC: frame line 20), a **warning** is emitted that the White SNR target will not be verifiable in orc-gui without a suitable VITS white-flag injection.

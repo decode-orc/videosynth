@@ -88,7 +88,7 @@ The beat is predicted from the frame's own signal, following the reference model
 
 - The smear and the delay are applied in that order after the beat: the beat is on the disc, so the readout smear and the sampling offset apply to it.
 - Each step rounds to the internal fixed-point step. Y is clamped to the same legal range as noise injection; C is centred on zero and is left for the output stage to quantise, so saturated chroma is not clipped.
-- All three run on the Y and C signals after generation and before noise, so both [noise layers](section-noise.md) are added afterwards and keep the configured spectrum exactly.
+- All three run on the Y and C signals after generation and before noise, so both [noise layers](section-noise.md) are added afterwards and keep the configured spectrum. The shared (pressing) layer is then delayed by `timing_offset_samples`, as the picture was, so it stays on the picture's samples; the band-limited delay leaves its spectrum unchanged to within 0.001 dB up to 6 MHz. The capture layer is not delayed.
 
 ## Stage order
 

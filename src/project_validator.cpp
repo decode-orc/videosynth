@@ -1340,6 +1340,18 @@ void ValidateNoiseParameters(const videosynth::Section& section,
   if (!result->is_valid) {
     return;
   }
+  ValidateNoiseSpectrum(section.noise.spread_spectrum, "spread_spectrum",
+                        section.name, nyquist_mhz, result);
+  if (!result->is_valid) {
+    return;
+  }
+  if (!section.noise.spread_spectrum.empty() &&
+      section.noise.noise_spread_db == 0.0) {
+    result->warnings.push_back(
+        "Noise warning in section '" + section.name +
+        "': spread_spectrum is set, but noise_spread_db is 0, so there is no "
+        "level-dependent term for it to shape.");
+  }
 
   // Warn if the noise spread target is non-zero but no suitable VITS white-flag
   // injection is present on the line orc-gui inspects for White SNR. VITS are

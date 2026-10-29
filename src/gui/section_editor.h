@@ -230,6 +230,7 @@ class SectionEditor : public QWidget {
   QCheckBox* noise_seed_check_ = nullptr;
   QLineEdit* noise_seed_edit_ = nullptr;
   NoiseSpectrumEditor* noise_spectrum_editor_ = nullptr;
+  NoiseSpectrumEditor* noise_spread_spectrum_editor_ = nullptr;
   QGroupBox* shared_noise_group_ = nullptr;
   QDoubleSpinBox* shared_noise_db_spin_ = nullptr;
   QLineEdit* shared_noise_seed_edit_ = nullptr;

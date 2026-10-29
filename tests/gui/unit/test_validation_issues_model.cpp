@@ -137,6 +137,13 @@ TEST(ValidationIssuesModelTest, ImpairmentIssuesNavigateToTheirField) {
          p->sections[1].noise.spectrum = {{2.0, 0.0}, {1.0, 0.0}};
        },
        1, IssueField::kCaptureNoise},
+      {"capture noise spread spectrum",
+       [](Project* p) {
+         p->sections[1].noise.enabled = true;
+         p->sections[1].noise.noise_db = 48.0;
+         p->sections[1].noise.spread_spectrum = {{0.0, 80.0}};
+       },
+       1, IssueField::kCaptureNoise},
       {"shared noise seed",
        [](Project* p) {
          p->sections[1].noise.shared.enabled = true;

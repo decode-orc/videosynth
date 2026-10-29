@@ -548,6 +548,13 @@ QWidget* SectionEditor::BuildNoiseGroup() {
 
   noise_spectrum_editor_ = new NoiseSpectrumEditor(body);
   form->addRow(tr("Spectrum:"), noise_spectrum_editor_);
+
+  noise_spread_spectrum_editor_ = new NoiseSpectrumEditor(body);
+  noise_spread_spectrum_editor_->setToolTip(
+      tr("Shape of the white-spread (level-dependent) noise alone, so it can "
+         "grow with level in some bands and not others. Empty: it follows "
+         "the spectrum above."));
+  form->addRow(tr("Spread spectrum:"), noise_spread_spectrum_editor_);
   outer->addWidget(body);
   layout->addWidget(noise_group_);
 
@@ -565,6 +572,8 @@ QWidget* SectionEditor::BuildNoiseGroup() {
   connect(noise_seed_edit_, &QLineEdit::editingFinished, this, commit);
   connect(noise_spectrum_editor_, &NoiseSpectrumEditor::SpectrumEdited, this,
           commit);
+  connect(noise_spread_spectrum_editor_, &NoiseSpectrumEditor::SpectrumEdited,
+          this, commit);
 
   // Shared (pressing) layer: keyed by disc position, so every capture of the
   // pressing carries the same noise on the same picture.
@@ -912,6 +921,8 @@ void SectionEditor::LoadFromDocument() {
           ? QString::number(static_cast<qlonglong>(section.noise.noise_seed))
           : QString());
   noise_spectrum_editor_->SetSpectrum(section.noise.spectrum, spectrum_max_mhz);
+  noise_spread_spectrum_editor_->SetSpectrum(section.noise.spread_spectrum,
+                                             spectrum_max_mhz);
   const SharedNoiseParameters& shared = section.noise.shared;
   shared_noise_group_->setChecked(shared.enabled);
   shared_noise_db_spin_->setValue(shared.noise_db);
@@ -1063,7 +1074,7 @@ Section SectionEditor::SectionFromWidgets() const {
   }
 
   // Noise layers. The capture layer's group owns noise_db/spread/seed and its
-  // spectrum; the shared layer is independent of it.
+  // spectra; the shared layer is independent of it.
   if (noise_group_->isChecked()) {
     section.noise.enabled = true;
     section.noise.noise_db = noise_db_spin_->value();
@@ -1073,6 +1084,7 @@ Section SectionEditor::SectionFromWidgets() const {
                                    ? ParseSeed(noise_seed_edit_->text())
                                    : 0;
     section.noise.spectrum = noise_spectrum_editor_->spectrum();
+    section.noise.spread_spectrum = noise_spread_spectrum_editor_->spectrum();
   } else {
     SetNoiseBlockEnabled(&section, false);
   }

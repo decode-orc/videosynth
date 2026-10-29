@@ -357,6 +357,7 @@ TEST_F(ProjectDocumentTest, ImpairmentFieldEditsUndoAndRedo) {
   using Edit = void (*)(Section*);
   const Edit edits[] = {
       [](Section* s) { s->noise.spectrum = {{0.0, 0.0}, {2.0, -6.0}}; },
+      [](Section* s) { s->noise.spread_spectrum = {{5.0, -9.0}}; },
       [](Section* s) { s->noise.shared.enabled = true; },
       [](Section* s) { s->noise.shared.noise_db = 40.0; },
       [](Section* s) { s->noise.shared.noise_seed = 9; },

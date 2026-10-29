@@ -117,7 +117,7 @@ The centre pane is a set of collapsible groups covering everything a section hol
 
 **Noise injection** — two independent layers. See [Impairments](impairments.md).
 
-- **Capture layer** — noise floor (Black PSNR), white spread, an optional fixed seed and a **Spectrum** table.
+- **Capture layer** — noise floor (Black PSNR), white spread, an optional fixed seed, a **Spectrum** table and a **Spread spectrum** table. The spread spectrum shapes the white-spread (level-dependent) noise on its own; left empty, that noise follows the spectrum.
 - **Shared (pressing) layer** — noise level, seed and its own **Spectrum** table. The layer is keyed by disc position, so captures that share these settings carry identical pressing noise. It always has a seed; ticking the group sets one.
 
 Each **Spectrum** table lists breakpoints as frequency (MHz) and level (dB). **Add point** appends a point above the last one, and **Remove point** deletes the selected one. An empty table gives white noise.

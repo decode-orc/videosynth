@@ -235,8 +235,13 @@ struct NoiseParameters {
   // so every run produces different noise.
   int64_t noise_seed = 0;
   bool noise_seed_specified = false;
-  // Capture-layer spectrum shape; empty means white noise.
+  // Capture-layer spectrum shape; empty means white noise. With
+  // spread_spectrum empty it shapes the whole capture layer, floor and
+  // level-dependent term alike; otherwise it shapes the floor only.
   std::vector<NoiseSpectrumPoint> spectrum;
+  // Spectrum shape of the level-dependent (noise_spread_db) term, drawn
+  // independently of the floor. Empty means the term follows `spectrum`.
+  std::vector<NoiseSpectrumPoint> spread_spectrum;
   // Pressing layer, independent of the capture layer above.
   SharedNoiseParameters shared = {};
 };
@@ -772,7 +777,8 @@ inline bool operator==(const NoiseParameters& a, const NoiseParameters& b) {
          a.noise_spread_db == b.noise_spread_db &&
          a.noise_seed == b.noise_seed &&
          a.noise_seed_specified == b.noise_seed_specified &&
-         a.spectrum == b.spectrum && a.shared == b.shared;
+         a.spectrum == b.spectrum && a.spread_spectrum == b.spread_spectrum &&
+         a.shared == b.shared;
 }
 
 inline bool operator==(const RandomDropoutParameters& a,

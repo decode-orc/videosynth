@@ -532,6 +532,9 @@ sections:
         - [0.0, 0.0]
         - [3.5, 4.0]
         - [6.0, 10.25]
+      spread_spectrum:
+        - [5.0, -20.0]
+        - [6.0, 0.0]
       shared:
         noise_db: 44.0
         noise_seed: 77

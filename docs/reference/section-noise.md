@@ -16,6 +16,9 @@ The block carries two independent layers:
         - [0.0, 0.0]
         - [3.5, 4.0]
         - [6.0, 10.0]
+      spread_spectrum:         # optional
+        - [5.0, -20.0]
+        - [6.0, 0.0]
       shared:                  # optional
         noise_db: 44.0
         noise_seed: 77
@@ -30,6 +33,7 @@ The block carries two independent layers:
 | `noise_spread_db` | float | No | 0.0 – (`noise_db` − 20.0) | How many dB noisier white is than black. White SNR = `noise_db` − `noise_spread_db` | 
 | `noise_seed` | int | No | any int64 | Fixed RNG seed for reproducible noise. Omit for a run-specific seed |
 | `spectrum` | list of `[MHz, dB]` | No | see [`spectrum`](#spectrum) | Shape of the capture noise spectrum. Requires `noise_db`. Omit for white noise |
+| `spread_spectrum` | list of `[MHz, dB]` | No | see [`spectrum`](#spectrum) | Shape of the level-dependent (`noise_spread_db`) term alone; `spectrum` then shapes the floor only. Requires `noise_db`. Omit for the level term to follow `spectrum`. See [`spread_spectrum`](#spread_spectrum) |
 | `shared` | map | No | see below | The shared (pressing) noise layer |
 
 ### `shared`
@@ -54,7 +58,8 @@ No other key is accepted in either layer.
 | `noise_spread_db` without `noise_db` | Parse error |
 | `noise_seed` only | No noise — the block has no effect |
 | `shared` only | Pressing noise only; no capture layer |
-| `spectrum` without `noise_db` | Parse error |
+| `spectrum` or `spread_spectrum` without `noise_db` | Parse error |
+| `spread_spectrum` with `noise_spread_db` 0 | Warning: there is no level-dependent term to shape |
 | `shared` without `noise_db` or with `noise_spread_db` | Parse error |
 | Both layers | Their noise values are summed per sample, so the variances add |
 
@@ -83,7 +88,22 @@ Only the shape matters. The noise is filtered and then normalised so its total p
 
 The shaping filter is a 255-tap linear-phase FIR designed once per table. Its frequency resolution is about 70 kHz at PAL 4fsc (56 kHz at NTSC 4fsc), and each breakpoint is smoothed over roughly four times that.
 
-On the capture layer, `noise_spread_db` still applies sample by sample: the level-dependent term scales the shaped noise, so bright content carries louder noise of the same shape.
+On the capture layer without `spread_spectrum`, `noise_spread_db` still applies sample by sample: the level-dependent term scales the shaped noise, so bright content carries louder noise of the same shape.
+
+## `spread_spectrum`
+
+A second table, with the same rules as [`spectrum`](#spectrum), that gives the capture layer's level-dependent term a shape of its own. Real captures often grow noisier with level in some bands and not in others; one `noise_spread_db` with a single shape cannot follow that.
+
+With `spread_spectrum` present, the capture layer is the sum of two independent terms:
+
+| Term | Level | Shape |
+|------|-------|-------|
+| Floor | σ<sub>f</sub>, from `noise_db` | `spectrum` (white when omitted) |
+| Level-dependent | k · Y, from `noise_spread_db` and the sample's luma level | `spread_spectrum` |
+
+The total power is unchanged — σ² = σ<sub>f</sub>² + (k · Y)², so Black PSNR and White SNR are still `noise_db` and `noise_db` − `noise_spread_db` — but the extra power that bright content carries lands only where `spread_spectrum` puts it. For example, `[[5.0, -20.0], [6.0, 0.0]]` keeps the noise below 5 MHz almost level-independent and puts the growth with level above 6 MHz.
+
+The shared layer takes no `spread_spectrum`: it has no level-dependent term.
 ## The bounds
 
 **20.0 dB lower bound** — at 20 dB the noise standard deviation is around 10 IRE, roughly 70 mV on PAL, approaching the amplitude of the sync pulse itself. Sync separator reliability degrades below this.
@@ -105,6 +125,8 @@ The capture layer is keyed by section and output position: two projects with the
 The shared layer is keyed by **disc position** only — the CAV picture number when the section carries a `picture_number` code, otherwise the output position plus the project's first-picture offset. Section boundaries and output position play no part. Two captures of one pressing therefore carry identical pressing noise on the same picture even when one starts later, skips, or replays a range of pictures. Consecutive pictures always get different pressing noise, including the repeated pictures of a held still.
 
 Its seed is mixed with a constant specific to the shared layer, so a `shared.noise_seed` equal to a capture `noise_seed` still gives independent noise.
+
+The pressing noise is read off the disc with the picture, so the project's [`channel.timing_offset_samples`](channel.md) delays it exactly as it delays the picture: a capture whose offset differs from the rest of its pressing still carries the pressing noise on the same picture samples, and it cancels in the difference of two aligned captures. The capture layer stays on the output sample grid, since nothing else shares it.
 
 On a CAV disc, a section with `shared` but without a `picture_number` code (a lead-in or lead-out, for example) gets a **warning**: its pressing noise falls back to output position and will not line up across captures that start at different points.
 

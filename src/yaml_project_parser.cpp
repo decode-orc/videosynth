@@ -987,7 +987,8 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
           return result;
         }
         const std::set<std::string> noise_keys = {
-            "noise_db", "noise_spread_db", "noise_seed", "spectrum", "shared"};
+            "noise_db", "noise_spread_db", "noise_seed",
+            "spectrum", "spread_spectrum", "shared"};
         ValidateAllowedKeys(noise_node, noise_keys, "section.noise",
                             &result.errors);
         if (!result.errors.empty()) {
@@ -1005,6 +1006,12 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
               "be specified (use noise.shared.spectrum for pressing noise).");
           return result;
         }
+        if (!noise_node["noise_db"] && noise_node["spread_spectrum"]) {
+          result.errors.push_back(
+              "section noise validation error: spread_spectrum requires "
+              "noise_db to be specified.");
+          return result;
+        }
         if (noise_node["noise_db"]) {
           section.noise.enabled = true;
           section.noise.noise_db = noise_node["noise_db"].as<double>();
@@ -1019,6 +1026,13 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
             !ParseNoiseSpectrum(noise_node["spectrum"],
                                 "section field 'noise.spectrum'",
                                 &section.noise.spectrum, &result.errors)) {
+          return result;
+        }
+        if (noise_node["spread_spectrum"] &&
+            !ParseNoiseSpectrum(noise_node["spread_spectrum"],
+                                "section field 'noise.spread_spectrum'",
+                                &section.noise.spread_spectrum,
+                                &result.errors)) {
           return result;
         }
         if (noise_node["shared"] &&

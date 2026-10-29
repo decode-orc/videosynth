@@ -37,12 +37,17 @@ namespace videosynth {
 //   - Optional spectrum: unit normals are shaped by a NoiseSpectrumFilter
 //     before the per-sample sigma is applied, so the level-dependent term
 //     modulates the shaped noise.
+//   - Optional spread_spectrum: the level-dependent term is drawn
+//     independently, shaped by its own filter, and added to the floor
+//     (shaped by spectrum alone); the total variance is unchanged.
 //
 // Shared (pressing) layer (NoiseParameters::shared), describing the disc:
 //   constant sigma from shared.noise_db, optional spectrum, seeded from
 //   (shared.noise_seed, kSharedNoiseSeedDomain, disc frame index). It never
 //   depends on section index or output position, so every capture of one
-//   pressing carries identical pressing noise on the same picture.
+//   pressing carries identical pressing noise on the same picture. The
+//   project's channel timing offset delays it as it delays the picture, so
+//   it stays aligned with the picture on every capture.
 //
 // Both layers are summed into a single noise value per sample position, so
 // noise_db is the level of each output signal. On Y/C output

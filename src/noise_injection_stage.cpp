@@ -17,11 +17,13 @@
 #include <random>
 #include <string>
 
+#include "videosynth/channel_stage.h"
 #include "videosynth/fixed_point.h"
 #include "videosynth/frame_enrichment.h"
 #include "videosynth/impairment_seed.h"
 #include "videosynth/sample_clamp.h"
 #include "videosynth/timing_constants.h"
+#include "videosynth/timing_offset_filter.h"
 
 namespace videosynth {
 
@@ -128,6 +130,16 @@ void NoiseInjectionStage::InjectNoise(
   // adding the sample to both would double it (+6 dB) and it goes on Y alone.
   const bool noise_on_chroma = (project.output.signal_type == "yc");
 
+  // The pressing noise is read off the disc with the picture, so a capture's
+  // timing offset, applied to the picture by the channel stage, delays the
+  // shared layer too. The capture layer belongs to the capture alone and stays
+  // on the output grid.
+  const bool delay_shared = ChannelStage::IsActive(project.channel) &&
+                            project.channel.timing_offset_samples != 0.0;
+  const TimingOffsetFilter shared_delay(
+      delay_shared ? project.channel.timing_offset_samples : 0.0);
+  std::vector<SampleFixed> shared_delayed;
+
   for (std::size_t i = 0; i < frame_count; ++i) {
     const std::size_t global_frame = frame_offset + i;
     if (global_frame >= schedule.size()) {
@@ -171,6 +183,12 @@ void NoiseInjectionStage::InjectNoise(
           shared_noise[s] =
               MillivoltsToSampleFixed(sigma_shared_mv * shaped[s]);
         }
+      }
+      if (delay_shared) {
+        shared_delayed.resize(samples_per_frame);
+        shared_delay.Apply(shared_noise.data(), samples_per_frame,
+                           shared_delayed.data());
+        shared_noise.swap(shared_delayed);
       }
 
       if (logger_ != nullptr) {
@@ -241,24 +259,52 @@ void NoiseInjectionStage::InjectNoise(
     const bool sigma_is_signal_dependent = coeffs.k != 0.0;
     const double sigma_floor_squared = coeffs.sigma_f_mv * coeffs.sigma_f_mv;
 
+    // A spread_spectrum gives the level-dependent term its own shape, so the
+    // noise can grow with level in some bands and not others. The two terms
+    // are then drawn independently and summed, keeping the total variance
+    // sigma_f^2 + (k * Y)^2: floor = sigma_f * u_floor, level term =
+    // k * Y * u_spread. The floor's unit normals come first from the RNG,
+    // drawn into a buffer when white so the draw order does not interleave.
+    std::vector<double> spread_unit;
+    if (sigma_is_signal_dependent && !noise.spread_spectrum.empty()) {
+      if (!shaped) {
+        shaped_unit.resize(samples_per_frame);
+        for (double& value : shaped_unit) {
+          value = unit_normal(rng);
+        }
+      }
+      spread_unit = DrawShapedUnitNormals(
+          *FilterFor(noise.spread_spectrum, sample_rate_hz), samples_per_frame,
+          &rng, &unit_normal);
+    }
+    const bool separate_spread = !spread_unit.empty();
+
     for (std::size_t s = 0; s < samples_per_frame; ++s) {
       const std::size_t idx = frame_start + s;
 
-      // sigma_total combines the signal-independent floor and the
-      // signal-proportional component driven by the current Y level.
-      double sigma_total = coeffs.sigma_f_mv;
-      if (sigma_is_signal_dependent) {
-        const double prop_component =
-            coeffs.k * SampleFixedToMillivolts((*y_mv)[idx]);
-        sigma_total =
-            std::sqrt(sigma_floor_squared + (prop_component * prop_component));
+      double noise_mv = 0.0;
+      if (separate_spread) {
+        noise_mv =
+            (coeffs.sigma_f_mv * shaped_unit[s]) +
+            (coeffs.k * SampleFixedToMillivolts((*y_mv)[idx]) * spread_unit[s]);
+      } else {
+        // sigma_total combines the signal-independent floor and the
+        // signal-proportional component driven by the current Y level.
+        double sigma_total = coeffs.sigma_f_mv;
+        if (sigma_is_signal_dependent) {
+          const double prop_component =
+              coeffs.k * SampleFixedToMillivolts((*y_mv)[idx]);
+          sigma_total = std::sqrt(sigma_floor_squared +
+                                  (prop_component * prop_component));
+        }
+        const double unit = shaped ? shaped_unit[s] : unit_normal(rng);
+        noise_mv = sigma_total * unit;
       }
 
       // Single noise value shared by both channels on Y/C output — correlated
       // Y/C noise that matches the physical behaviour of a real analogue
       // source.
-      const double unit = shaped ? shaped_unit[s] : unit_normal(rng);
-      SampleFixed noise_sample = MillivoltsToSampleFixed(sigma_total * unit);
+      SampleFixed noise_sample = MillivoltsToSampleFixed(noise_mv);
       if (!shared_noise.empty()) {
         noise_sample += shared_noise[s];
       }

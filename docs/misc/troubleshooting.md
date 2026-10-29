@@ -217,13 +217,21 @@ SECAM carries its colour as frequency-modulated subcarriers, with no quadrature 
 
 A top-level `spectrum` shapes the capture layer, which only exists when `noise_db` is set. Add `noise_db`, or move the table under `shared:` if it describes the pressing.
 
+### `spread_spectrum requires noise_db to be specified`
+
+`spread_spectrum` shapes the capture layer's level-dependent term, which needs a capture layer. Add `noise_db` (and a non-zero `noise_spread_db`).
+
+### `spread_spectrum is set, but noise_spread_db is 0`
+
+A warning: with no white spread there is no level-dependent term, so the table has no effect. Set `noise_spread_db`, or remove `spread_spectrum`.
+
 ### Noise values out of range
 
 `noise_db` must be 20.0–61.0, and `noise_db − noise_spread_db` must be at least 20.0. Below 20 dB the noise approaches the amplitude of sync; above 61 dB it is smaller than the quantisation floor. `shared.noise_db` has the same 20.0–61.0 range.
 
 ### `spectrum frequency must be in the range` / `strictly ascending` / `relative_db must be in the range`
 
-Spectrum breakpoints run from 0 MHz up to the 4fsc Nyquist frequency (8.867 MHz for PAL, 7.159 MHz for NTSC, 7.151 MHz for PAL-M, whatever the `sample_encoding_preset`), each frequency higher than the one before, with levels between −60 and +40 dB.
+The same messages name `spread_spectrum` or `shared.spectrum` when that table is at fault. Spectrum breakpoints run from 0 MHz up to the 4fsc Nyquist frequency (8.867 MHz for PAL, 7.159 MHz for NTSC, 7.151 MHz for PAL-M, whatever the `sample_encoding_preset`), each frequency higher than the one before, with levels between −60 and +40 dB.
 
 ### `noise.shared does not take noise_spread_db`
 

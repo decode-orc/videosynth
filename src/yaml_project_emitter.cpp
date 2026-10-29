@@ -222,12 +222,12 @@ void EmitLineInjections(YAML::Emitter& out, const Section& section) {
   out << YAML::EndSeq;
 }
 
-void EmitNoiseSpectrum(YAML::Emitter& out,
+void EmitNoiseSpectrum(YAML::Emitter& out, const char* key,
                        const std::vector<NoiseSpectrumPoint>& spectrum) {
   if (spectrum.empty()) {
     return;
   }
-  out << YAML::Key << "spectrum" << YAML::Value << YAML::BeginSeq;
+  out << YAML::Key << key << YAML::Value << YAML::BeginSeq;
   for (const NoiseSpectrumPoint& point : spectrum) {
     out << YAML::Flow << YAML::BeginSeq << point.frequency_mhz
         << point.relative_db << YAML::EndSeq;
@@ -254,7 +254,8 @@ void EmitNoise(YAML::Emitter& out, const NoiseParameters& noise) {
     out << YAML::Key << "noise_seed" << YAML::Value << noise.noise_seed;
   }
   if (noise.enabled) {
-    EmitNoiseSpectrum(out, noise.spectrum);
+    EmitNoiseSpectrum(out, "spectrum", noise.spectrum);
+    EmitNoiseSpectrum(out, "spread_spectrum", noise.spread_spectrum);
   }
   if (noise.shared.enabled) {
     out << YAML::Key << "shared" << YAML::Value << YAML::BeginMap;
@@ -263,7 +264,7 @@ void EmitNoise(YAML::Emitter& out, const NoiseParameters& noise) {
       out << YAML::Key << "noise_seed" << YAML::Value
           << noise.shared.noise_seed;
     }
-    EmitNoiseSpectrum(out, noise.shared.spectrum);
+    EmitNoiseSpectrum(out, "spectrum", noise.shared.spectrum);
     out << YAML::EndMap;
   }
   out << YAML::EndMap;
