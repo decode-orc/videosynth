@@ -96,19 +96,74 @@ std::vector<double> DrawShapedUnitNormals(
   return shaped;
 }
 
+// Amplitude gain of a level curve at level_mv: the curve is linear in dB
+// between breakpoints and holds its end values beyond them. An empty curve is
+// 0 dB everywhere. O(points) per call; curves hold a handful of points.
+double LevelCurveGain(const std::vector<NoiseLevelPoint>& curve,
+                      double level_mv) {
+  if (curve.empty()) {
+    return 1.0;
+  }
+  double gain_db = curve.back().relative_db;
+  if (level_mv <= curve.front().level_mv) {
+    gain_db = curve.front().relative_db;
+  } else {
+    for (std::size_t i = 1; i < curve.size(); ++i) {
+      if (level_mv <= curve[i].level_mv) {
+        const NoiseLevelPoint& lower = curve[i - 1];
+        const NoiseLevelPoint& upper = curve[i];
+        const double fraction =
+            (level_mv - lower.level_mv) / (upper.level_mv - lower.level_mv);
+        gain_db = lower.relative_db +
+                  (fraction * (upper.relative_db - lower.relative_db));
+        break;
+      }
+    }
+  }
+  return std::pow(10.0, gain_db / 20.0);
+}
+
 }  // namespace
 
 NoiseInjectionStage::NoiseInjectionStage(ILogger* logger)
     : logger_(logger), run_base_seed_(std::random_device{}()) {}
+
+bool NoiseInjectionStage::NeedsPressingLuma(const Project& project) {
+  if (!ChannelStage::IsActive(project.channel)) {
+    return false;
+  }
+  return std::any_of(project.sections.begin(), project.sections.end(),
+                     [](const Section& section) {
+                       return section.noise.shared.enabled &&
+                              section.noise.shared.level_term.enabled;
+                     });
+}
 
 void NoiseInjectionStage::InjectNoise(
     const Project& project,
     const std::vector<IGenerationStage::FrameScheduleItem>& schedule,
     std::size_t frame_offset, std::size_t frame_count,
     std::vector<SampleFixed>* y_mv, std::vector<SampleFixed>* c_mv) const {
+  InjectNoise(project, schedule, frame_offset, frame_count, nullptr, y_mv,
+              c_mv);
+}
+
+void NoiseInjectionStage::InjectNoise(
+    const Project& project,
+    const std::vector<IGenerationStage::FrameScheduleItem>& schedule,
+    std::size_t frame_offset, std::size_t frame_count,
+    const std::vector<SampleFixed>* pressing_y_mv,
+    std::vector<SampleFixed>* y_mv, std::vector<SampleFixed>* c_mv) const {
   if (y_mv == nullptr || c_mv == nullptr) {
     return;
   }
+  // The shared level term reads the pressing's picture. Without a separate
+  // copy, Y as it arrives (before any noise) stands in for it, which is exact
+  // when no channel stage has altered the picture.
+  const std::vector<SampleFixed>& pressing_luma =
+      (pressing_y_mv != nullptr && pressing_y_mv->size() == y_mv->size())
+          ? *pressing_y_mv
+          : *y_mv;
 
   const Standard standard = project.cvbs_presets.video_standard_preset;
   // Generation always fills 4fsc frames; the output stage resamples RAW
@@ -154,7 +209,9 @@ void NoiseInjectionStage::InjectNoise(
     const std::size_t frame_start = i * samples_per_frame;
 
     // Shared (pressing) layer first, into its own buffer: it is keyed by disc
-    // position only, and its constant sigma does not depend on the signal.
+    // position only. Its constant component does not depend on the signal;
+    // the optional level term follows the pressing's own picture, so it too
+    // is identical in every capture of the pressing.
     std::vector<SampleFixed> shared_noise;
     if (noise.shared.enabled) {
       const IGenerationStage::FrameScheduleItem& item = schedule[global_frame];
@@ -184,6 +241,38 @@ void NoiseInjectionStage::InjectNoise(
               MillivoltsToSampleFixed(sigma_shared_mv * shaped[s]);
         }
       }
+      // The level term is a second pressing component on the pressing's own
+      // grid, drawn from its own seed domain so adding it leaves the constant
+      // component unchanged. Both are delayed together below.
+      const SharedNoiseLevelTerm& term = noise.shared.level_term;
+      if (term.enabled) {
+        std::mt19937_64 term_rng(DeriveImpairmentSeed(
+            static_cast<std::uint64_t>(noise.shared.noise_seed),
+            kSharedLevelNoiseSeedDomain, disc_frame_key));
+        std::normal_distribution<double> term_normal(0.0, 1.0);
+        std::vector<double> term_unit;
+        if (term.spectrum.empty()) {
+          term_unit.resize(samples_per_frame);
+          for (double& value : term_unit) {
+            value = term_normal(term_rng);
+          }
+        } else {
+          term_unit =
+              DrawShapedUnitNormals(*FilterFor(term.spectrum, sample_rate_hz),
+                                    samples_per_frame, &term_rng, &term_normal);
+        }
+        const double sigma_term_mv = FloorSigmaMv(term.noise_db, white_mv);
+        for (std::size_t s = 0; s < samples_per_frame; ++s) {
+          // The curve is in mV above blanking, the same on every standard.
+          const double level_mv =
+              SampleFixedToMillivolts(pressing_luma[frame_start + s]) -
+              levels.blanking_mv;
+          shared_noise[s] += MillivoltsToSampleFixed(
+              sigma_term_mv * LevelCurveGain(term.level_db, level_mv) *
+              term_unit[s]);
+        }
+      }
+
       if (delay_shared) {
         shared_delayed.resize(samples_per_frame);
         shared_delay.Apply(shared_noise.data(), samples_per_frame,
@@ -196,7 +285,8 @@ void NoiseInjectionStage::InjectNoise(
                        std::to_string(global_frame) + " section '" +
                        section->name +
                        "' shared sigma=" + std::to_string(sigma_shared_mv) +
-                       " mV disc_frame=" + std::to_string(disc_frame_key));
+                       " mV level_term=" + (term.enabled ? "on" : "off") +
+                       " disc_frame=" + std::to_string(disc_frame_key));
       }
     }
 

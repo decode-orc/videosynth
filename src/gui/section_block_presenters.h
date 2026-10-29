@@ -33,6 +33,12 @@ inline constexpr double kNoiseDbMax = 61.0;
 // frequency of the project standard (NoiseSpectrumMaxFrequencyMhz).
 inline constexpr double kNoiseSpectrumRelativeDbMin = -60.0;
 inline constexpr double kNoiseSpectrumRelativeDbMax = 40.0;
+// Shared level-term curve: level and gain bounds enforced by
+// ValidateSharedNoiseLevelTerm.
+inline constexpr double kNoiseLevelMvMin = 0.0;
+inline constexpr double kNoiseLevelMvMax = 800.0;
+inline constexpr double kNoiseLevelRelativeDbMin = -60.0;
+inline constexpr double kNoiseLevelRelativeDbMax = 20.0;
 // Dropouts: active scale range enforced by ValidateDropoutParameters (0 only
 // as "block disabled", so editors offer 1–20).
 inline constexpr int kDropoutScaleMin = 1;
@@ -70,6 +76,11 @@ void SetNoiseSeedSpecified(Section* section, bool specified);
 // one); disabling resets it to its default so it is not emitted.
 void SetSharedNoiseEnabled(Section* section, bool enabled);
 
+// The shared layer's level term. Enabling seeds a validator-clean level and
+// a flat one-point curve (0 mV at 0 dB); disabling resets it so it is not
+// emitted. The rest of the shared layer is left untouched.
+void SetSharedNoiseLevelTermEnabled(Section* section, bool enabled);
+
 // Highest breakpoint frequency a noise spectrum accepts for `standard`: the
 // 4fsc Nyquist frequency, in MHz.
 double NoiseSpectrumMaxFrequencyMhz(Standard standard);
@@ -83,6 +94,14 @@ void AddNoiseSpectrumPoint(std::vector<NoiseSpectrumPoint>* spectrum,
 // Removes breakpoint `row`; out-of-range rows change nothing.
 void RemoveNoiseSpectrumPoint(std::vector<NoiseSpectrumPoint>* spectrum,
                               int row);
+
+// Appends a level-curve breakpoint above the last one: 50 mV higher at the
+// same gain, or halfway to the maximum level when that is closer. The first
+// breakpoint is 0 mV at 0 dB. Nothing is added when the last breakpoint
+// already sits at the maximum.
+void AddNoiseLevelPoint(std::vector<NoiseLevelPoint>* curve);
+// Removes breakpoint `row`; out-of-range rows change nothing.
+void RemoveNoiseLevelPoint(std::vector<NoiseLevelPoint>* curve, int row);
 
 void SetRandomDropoutsEnabled(Section* section, bool enabled);
 void SetScratchDropoutsEnabled(Section* section, bool enabled);

@@ -1109,6 +1109,71 @@ void ValidateNoiseSpectrum(
   }
 }
 
+// Level-curve bounds for the shared layer's level term: levels from blanking
+// to beyond white on every standard, gains that may fall far but rise only
+// modestly over the term's own noise_db.
+constexpr double kNoiseLevelMvMin = 0.0;
+constexpr double kNoiseLevelMvMax = 800.0;
+constexpr double kNoiseLevelRelativeDbMin = -60.0;
+constexpr double kNoiseLevelRelativeDbMax = 20.0;
+
+// Checks the shared layer's level_term: its level, curve and spectrum.
+void ValidateSharedNoiseLevelTerm(const videosynth::SharedNoiseLevelTerm& term,
+                                  const std::string& section_name,
+                                  double nyquist_mhz,
+                                  videosynth::ValidationResult* result) {
+  if (!term.enabled) {
+    return;
+  }
+  const std::string prefix = "Noise validation error in section '" +
+                             section_name + "': shared.level_term.";
+  if (term.noise_db < kNoiseDbMin || term.noise_db > kNoiseDbMax) {
+    result->is_valid = false;
+    result->errors.push_back(prefix +
+                             "noise_db must be in the range [20.0, 61.0]; "
+                             "got " +
+                             std::to_string(term.noise_db) + ".");
+    return;
+  }
+  if (term.level_db.empty()) {
+    result->is_valid = false;
+    result->errors.push_back(prefix + "level_db needs at least one point.");
+    return;
+  }
+  for (std::size_t i = 0; i < term.level_db.size(); ++i) {
+    const videosynth::NoiseLevelPoint& point = term.level_db[i];
+    if (point.level_mv < kNoiseLevelMvMin ||
+        point.level_mv > kNoiseLevelMvMax) {
+      result->is_valid = false;
+      result->errors.push_back(prefix +
+                               "level_db level must be in the range [0.0, "
+                               "800.0] mV; got " +
+                               std::to_string(point.level_mv) + ".");
+      return;
+    }
+    if (i > 0 && point.level_mv <= term.level_db[i - 1].level_mv) {
+      result->is_valid = false;
+      result->errors.push_back(
+          prefix + "level_db levels must be strictly ascending; got " +
+          std::to_string(point.level_mv) + " mV after " +
+          std::to_string(term.level_db[i - 1].level_mv) + " mV.");
+      return;
+    }
+    if (point.relative_db < kNoiseLevelRelativeDbMin ||
+        point.relative_db > kNoiseLevelRelativeDbMax) {
+      result->is_valid = false;
+      result->errors.push_back(
+          prefix +
+          "level_db relative_db must be in the range [-60.0, 20.0]; "
+          "got " +
+          std::to_string(point.relative_db) + ".");
+      return;
+    }
+  }
+  ValidateNoiseSpectrum(term.spectrum, "shared.level_term.spectrum",
+                        section_name, nyquist_mhz, result);
+}
+
 // True when the section carries a CAV picture_number code, so its frames are
 // anchored to disc positions.
 bool SectionHasPictureNumberCode(const videosynth::Section& section) {
@@ -1152,6 +1217,11 @@ void ValidateSharedNoiseParameters(const videosynth::Section& section,
 
   ValidateNoiseSpectrum(shared.spectrum, "shared.spectrum", section.name,
                         nyquist_mhz, result);
+  if (!result->is_valid) {
+    return;
+  }
+  ValidateSharedNoiseLevelTerm(shared.level_term, section.name, nyquist_mhz,
+                               result);
   if (!result->is_valid) {
     return;
   }

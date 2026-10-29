@@ -541,6 +541,14 @@ sections:
         spectrum:
           - [1.5, -3.0]
           - [5.0, 6.0]
+        level_term:
+          noise_db: 36.0
+          level_db:
+            - [0.0, 0.0]
+            - [420.0, -12.0]
+          spectrum:
+            - [5.375, -40.0]
+            - [5.625, 0.0]
   - name: SharedOnly
     type: progressive
     source: assets/bars.exr

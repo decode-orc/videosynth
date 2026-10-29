@@ -119,8 +119,9 @@ The centre pane is a set of collapsible groups covering everything a section hol
 
 - **Capture layer** — noise floor (Black PSNR), white spread, an optional fixed seed, a **Spectrum** table and a **Spread spectrum** table. The spread spectrum shapes the white-spread (level-dependent) noise on its own; left empty, that noise follows the spectrum.
 - **Shared (pressing) layer** — noise level, seed and its own **Spectrum** table. The layer is keyed by disc position, so captures that share these settings carry identical pressing noise. It always has a seed; ticking the group sets one.
+    - **Level term** — an optional second pressing component: its noise level, a **Level curve** table and its own **Spectrum** table. Ticking it starts with a flat one-point curve. See [`shared.level_term`](../reference/section-noise.md#shared-level_term).
 
-Each **Spectrum** table lists breakpoints as frequency (MHz) and level (dB). **Add point** appends a point above the last one, and **Remove point** deletes the selected one. An empty table gives white noise.
+Each **Spectrum** table lists breakpoints as frequency (MHz) and level (dB). **Add point** appends a point above the last one, and **Remove point** deletes the selected one. An empty table gives white noise. The **Level curve** table works the same way, with points as luma level (mV above blanking) and gain (dB); it needs at least one point.
 
 **Dropouts** — random (Poisson) and scratch dropouts, each with:
 

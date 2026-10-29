@@ -102,6 +102,7 @@ Unknown keys are rejected outright, at every level, naming the offending key and
 - `noise_spread_db`, `spectrum` or `spread_spectrum` without `noise_db` is an error.
 - `spectrum` and `spread_spectrum` tables (capture and `shared`): at least one point, frequencies strictly ascending in 0 to the 4fsc Nyquist frequency (for every encoding preset), `relative_db` in −60.0 to +40.0.
 - `shared`: `noise_db` is required and in 20.0–61.0; `noise_seed` is required; `noise_spread_db` is an error.
+- `shared.level_term`: `noise_db` and `level_db` are required; `noise_db` in 20.0–61.0; `level_db` has at least one point, levels strictly ascending in 0.0–800.0 mV, `relative_db` in −60.0 to +20.0; its `spectrum` follows the spectrum rules above.
 - Dropout `scale` values in 0–20, with at least one of them 1–20; a `dropouts:` block that disables everything is an error — omit the block instead.
 - A dropout type with `anchor: disc` needs a `seed`. An `anchor` other than `section` or `disc`, or a non-boolean `flagged`, is a parse error.
 - *Warning*: spread noise with no VITS on the White SNR measurement line.

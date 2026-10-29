@@ -602,6 +602,38 @@ QWidget* SectionEditor::BuildNoiseGroup() {
 
   shared_spectrum_editor_ = new NoiseSpectrumEditor(shared_body);
   shared_form->addRow(tr("Spectrum:"), shared_spectrum_editor_);
+
+  // Level term: a second pressing component whose level follows a curve
+  // against the pressing picture's luma, so it can fall with level.
+  shared_level_term_group_ = new QGroupBox(tr("Level term"), shared_body);
+  shared_level_term_group_->setCheckable(true);
+  shared_level_term_group_->setToolTip(
+      tr("A second pressing component whose level follows a curve against "
+         "the picture's luma, so the pressing noise can fall (or rise) with "
+         "level. It is drawn independently, with its own spectrum."));
+  auto* term_outer = new QVBoxLayout(shared_level_term_group_);
+  term_outer->setContentsMargins(0, 0, 0, 0);
+  auto* term_body = new QWidget(shared_level_term_group_);
+  auto* term_form = new QFormLayout(term_body);
+
+  shared_level_term_db_spin_ = new QDoubleSpinBox(term_body);
+  shared_level_term_db_spin_->setRange(editor_limits::kNoiseDbMin,
+                                       editor_limits::kNoiseDbMax);
+  shared_level_term_db_spin_->setDecimals(1);
+  shared_level_term_db_spin_->setSuffix(tr(" dB"));
+  shared_level_term_db_spin_->setToolTip(
+      tr("Level of the term where the level curve reads 0 dB."));
+  CapFieldWidthAtSizeHint(shared_level_term_db_spin_);
+  term_form->addRow(tr("Noise level (PSNR):"), shared_level_term_db_spin_);
+
+  shared_level_curve_editor_ = new NoiseLevelCurveEditor(term_body);
+  term_form->addRow(tr("Level curve:"), shared_level_curve_editor_);
+
+  shared_level_spectrum_editor_ = new NoiseSpectrumEditor(term_body);
+  term_form->addRow(tr("Spectrum:"), shared_level_spectrum_editor_);
+  term_outer->addWidget(term_body);
+  shared_form->addRow(shared_level_term_group_);
+
   shared_outer->addWidget(shared_body);
   layout->addWidget(shared_noise_group_);
 
@@ -613,6 +645,16 @@ QWidget* SectionEditor::BuildNoiseGroup() {
   connect(shared_noise_seed_edit_, &QLineEdit::editingFinished, this, commit);
   connect(shared_spectrum_editor_, &NoiseSpectrumEditor::SpectrumEdited, this,
           commit);
+  connect(shared_level_term_group_, &QGroupBox::toggled, term_body,
+          &QWidget::setVisible);
+  connect(shared_level_term_group_, &QGroupBox::toggled, this, commit);
+  term_body->setVisible(shared_level_term_group_->isChecked());
+  connect(shared_level_term_db_spin_, &QDoubleSpinBox::valueChanged, this,
+          commit);
+  connect(shared_level_curve_editor_, &NoiseLevelCurveEditor::CurveEdited, this,
+          commit);
+  connect(shared_level_spectrum_editor_, &NoiseSpectrumEditor::SpectrumEdited,
+          this, commit);
   return group;
 }
 
@@ -931,6 +973,11 @@ void SectionEditor::LoadFromDocument() {
           ? QString::number(static_cast<qlonglong>(shared.noise_seed))
           : QString());
   shared_spectrum_editor_->SetSpectrum(shared.spectrum, spectrum_max_mhz);
+  shared_level_term_group_->setChecked(shared.level_term.enabled);
+  shared_level_term_db_spin_->setValue(shared.level_term.noise_db);
+  shared_level_curve_editor_->SetCurve(shared.level_term.level_db);
+  shared_level_spectrum_editor_->SetSpectrum(shared.level_term.spectrum,
+                                             spectrum_max_mhz);
 
   // Dropouts.
   const auto load_dropouts = [](const auto& parameters,
@@ -1099,6 +1146,17 @@ Section SectionEditor::SectionFromWidgets() const {
       shared.noise_seed = ParseSeed(shared_noise_seed_edit_->text());
     }
     shared.spectrum = shared_spectrum_editor_->spectrum();
+    // A freshly ticked level term takes the presenter's defaults; the widgets
+    // still hold the disabled term's values.
+    if (shared_level_term_group_->isChecked() && !shared.level_term.enabled) {
+      SetSharedNoiseLevelTermEnabled(&section, true);
+    } else if (shared_level_term_group_->isChecked()) {
+      shared.level_term.noise_db = shared_level_term_db_spin_->value();
+      shared.level_term.level_db = shared_level_curve_editor_->curve();
+      shared.level_term.spectrum = shared_level_spectrum_editor_->spectrum();
+    } else {
+      SetSharedNoiseLevelTermEnabled(&section, false);
+    }
   } else {
     SetSharedNoiseEnabled(&section, false);
   }

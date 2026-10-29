@@ -83,10 +83,24 @@ The `shared:` sub-block is the pressing layer:
 ```
 
 - The pressing layer is keyed by **disc position** — the CAV picture number, or the output position plus the first-picture offset when there is none. It ignores sections and output position, so captures line up on the picture even when one starts later, skips or replays.
-- It has a constant level (no `noise_spread_db`), so it is identical in every capture whatever the rest of the signal is.
+- It takes no `noise_spread_db`. Its level is constant unless it has a `level_term` (below), which follows the pressing's own picture, so it is identical in every capture whatever the rest of each capture's signal is.
 - It moves with the picture: `channel.timing_offset_samples` delays it as it delays the picture, so a capture with its own offset still lines up with the other captures of its pressing once the picture is aligned.
 - `shared.noise_seed` is required. It is mixed with a layer-specific constant, so reusing a capture seed still gives independent noise.
 - The two layers add, so the total noise power is the sum of both. A block with only `shared:` gives pressing noise alone.
+
+On real discs the pressing noise often gets quieter as the picture gets brighter, in some bands only. `level_term` adds a second pressing component whose level follows a curve against the picture's luma, with its own spectrum:
+
+```yaml
+      shared:
+        noise_db: 46.0
+        noise_seed: 77
+        level_term:
+          noise_db: 36.0                            # at black
+          level_db: [[0, 0.0], [420, -12.0]]        # [mV, dB]: 12 dB quieter from 420 mV
+          spectrum: [[5.375, -40.0], [5.625, 0.0]]  # only above 5.5 MHz
+```
+
+The curve is read from the picture as generated, before the channel stage and any capture's noise, so every capture of the pressing carries the same term. See the [reference](../reference/section-noise.md#shared-level_term).
 
 To set up a pressing, give every project of that pressing the same `shared:` block and a different capture `noise_seed`. On CAV, put the `shared:` block on sections carrying `picture_number` codes; elsewhere it falls back to output position and videosynth warns.
 

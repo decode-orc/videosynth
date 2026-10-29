@@ -206,10 +206,35 @@ struct NoiseSpectrumPoint {
   double relative_db = 0.0;
 };
 
+// One breakpoint of a level curve: a gain in dB at a luma level. Breakpoints
+// are joined by straight lines in dB against mV; the end values are held
+// beyond the first and last points.
+struct NoiseLevelPoint {
+  // Luma level in mV above blanking. Valid range: [0.0, 800.0].
+  double level_mv = 0.0;
+  // Gain relative to the term's noise_db. Valid range: [-60.0, +20.0].
+  double relative_db = 0.0;
+};
+
+// Level-dependent term of the shared (pressing) layer: a second pressing
+// component, drawn independently of the constant one, whose amplitude follows
+// a piecewise-linear dB curve against the pressing picture's luma level. The
+// curve may fall with level, which noise_spread_db cannot express.
+struct SharedNoiseLevelTerm {
+  bool enabled = false;
+  // Level of the term where the curve reads 0 dB. Valid range: [20.0, 61.0].
+  double noise_db = 61.0;
+  // Required when enabled: at least one point, levels strictly ascending.
+  std::vector<NoiseLevelPoint> level_db;
+  // Empty means white noise.
+  std::vector<NoiseSpectrumPoint> spectrum;
+};
+
 // The shared (pressing) noise layer. It is keyed by disc position rather
 // than by section or output position, so every capture of one pressing
-// carries identical pressing noise on the same picture. It has no level
-// dependence, so it takes no noise_spread_db.
+// carries identical pressing noise on the same picture. Its level dependence,
+// if any, comes from level_term (driven by the pressing's own picture), so it
+// takes no noise_spread_db.
 struct SharedNoiseParameters {
   bool enabled = false;
   // Noise level in dB. Valid range: [20.0, 61.0].
@@ -219,6 +244,8 @@ struct SharedNoiseParameters {
   bool noise_seed_specified = false;
   // Empty means white noise.
   std::vector<NoiseSpectrumPoint> spectrum;
+  // Optional level-dependent pressing component.
+  SharedNoiseLevelTerm level_term = {};
 };
 
 struct NoiseParameters {
@@ -764,12 +791,22 @@ inline bool operator==(const NoiseSpectrumPoint& a,
   return a.frequency_mhz == b.frequency_mhz && a.relative_db == b.relative_db;
 }
 
+inline bool operator==(const NoiseLevelPoint& a, const NoiseLevelPoint& b) {
+  return a.level_mv == b.level_mv && a.relative_db == b.relative_db;
+}
+
+inline bool operator==(const SharedNoiseLevelTerm& a,
+                       const SharedNoiseLevelTerm& b) {
+  return a.enabled == b.enabled && a.noise_db == b.noise_db &&
+         a.level_db == b.level_db && a.spectrum == b.spectrum;
+}
+
 inline bool operator==(const SharedNoiseParameters& a,
                        const SharedNoiseParameters& b) {
   return a.enabled == b.enabled && a.noise_db == b.noise_db &&
          a.noise_seed == b.noise_seed &&
          a.noise_seed_specified == b.noise_seed_specified &&
-         a.spectrum == b.spectrum;
+         a.spectrum == b.spectrum && a.level_term == b.level_term;
 }
 
 inline bool operator==(const NoiseParameters& a, const NoiseParameters& b) {

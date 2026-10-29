@@ -263,6 +263,45 @@ TEST(NoiseInjectionTest, ParserRejectsMalformedSpectrumEntry) {
             std::string::npos);
 }
 
+TEST(NoiseInjectionTest, ParserReadsSharedLevelTerm) {
+  const ParseResult result = YamlProjectParser().ParseString(
+      NoiseSectionYaml("      shared:\n"
+                       "        noise_db: 44.0\n"
+                       "        noise_seed: 77\n"
+                       "        level_term:\n"
+                       "          noise_db: 36.0\n"
+                       "          level_db: [[0, 0.0], [420, -12.0]]\n"
+                       "          spectrum: [[5.375, -40.0], [5.625, 0.0]]\n"));
+  ASSERT_TRUE(result.ok) << result.errors.front();
+  const SharedNoiseLevelTerm& term =
+      result.project.sections[0].noise.shared.level_term;
+  EXPECT_TRUE(term.enabled);
+  EXPECT_DOUBLE_EQ(term.noise_db, 36.0);
+  ASSERT_EQ(term.level_db.size(), 2U);
+  EXPECT_DOUBLE_EQ(term.level_db[1].level_mv, 420.0);
+  EXPECT_DOUBLE_EQ(term.level_db[1].relative_db, -12.0);
+  ASSERT_EQ(term.spectrum.size(), 2U);
+}
+
+TEST(NoiseInjectionTest, ParserRejectsIncompleteOrUnknownLevelTerm) {
+  for (const std::string& term_block :
+       {std::string("          noise_db: 36.0\n"),
+        std::string("          level_db: [[0, 0.0]]\n"),
+        std::string("          noise_db: 36.0\n"
+                    "          level_db: [[0, 0.0]]\n"
+                    "          noise_seed: 3\n"),
+        std::string("          noise_db: 36.0\n"
+                    "          level_db: [[0, 0.0, 1.0]]\n")}) {
+    const ParseResult result = YamlProjectParser().ParseString(
+        NoiseSectionYaml("      shared:\n"
+                         "        noise_db: 44.0\n"
+                         "        noise_seed: 77\n"
+                         "        level_term:\n" +
+                         term_block));
+    EXPECT_FALSE(result.ok) << term_block;
+  }
+}
+
 TEST(NoiseInjectionTest, ParserRejectsSharedNoiseSpread) {
   const ParseResult result = YamlProjectParser().ParseString(
       NoiseSectionYaml("      shared:\n"
@@ -510,6 +549,43 @@ TEST(NoiseInjectionTest, ValidatorBoundsSpectrumBy4fscNyquistForRawPresets) {
                        std::string::npos;
     }
     EXPECT_TRUE(found) << preset << ": " << FirstError(result);
+  }
+}
+
+TEST(NoiseInjectionTest, ValidatorChecksSharedLevelTerm) {
+  Project project = MakeSharedNoiseProject(44.0);
+  SharedNoiseLevelTerm& term = project.sections[0].noise.shared.level_term;
+  term.enabled = true;
+  term.noise_db = 36.0;
+  term.level_db = {{0.0, 0.0}, {420.0, -12.0}, {700.0, -12.0}};
+  term.spectrum = {{5.375, -40.0}, {5.625, 0.0}};
+  const ValidationResult valid = ProjectValidator().Validate(project);
+  EXPECT_TRUE(valid.is_valid) << FirstError(valid);
+
+  struct BadCase {
+    SharedNoiseLevelTerm term;
+    std::string message;
+  };
+  const SharedNoiseLevelTerm good = term;
+  std::vector<BadCase> cases;
+  cases.push_back({good, "level_term.noise_db must be in the range"});
+  cases.back().term.noise_db = 62.0;
+  cases.push_back({good, "level_db needs at least one point"});
+  cases.back().term.level_db.clear();
+  cases.push_back({good, "level_db levels must be strictly ascending"});
+  cases.back().term.level_db = {{420.0, 0.0}, {420.0, -12.0}};
+  cases.push_back({good, "level_db level must be in the range"});
+  cases.back().term.level_db = {{801.0, 0.0}};
+  cases.push_back({good, "level_db relative_db must be in the range"});
+  cases.back().term.level_db = {{0.0, 21.0}};
+  cases.push_back({good, "shared.level_term.spectrum frequencies"});
+  cases.back().term.spectrum = {{5.0, 0.0}, {4.0, 0.0}};
+  for (const BadCase& bad : cases) {
+    term = bad.term;
+    const ValidationResult result = ProjectValidator().Validate(project);
+    EXPECT_FALSE(result.is_valid) << bad.message;
+    EXPECT_NE(FirstError(result).find(bad.message), std::string::npos)
+        << FirstError(result);
   }
 }
 
@@ -1454,6 +1530,149 @@ TEST(NoiseInjectionTest, CaptureNoiseIgnoresChannelTimingOffset) {
   // sample grid.
   EXPECT_EQ(LayerFrameWithTimingOffset(false, 2.0),
             LayerFrameWithTimingOffset(false, 0.0));
+}
+
+// ---------------------------------------------------------------------------
+// Shared level term
+// ---------------------------------------------------------------------------
+
+// A shared layer at 50 dB whose level term (40 dB at blanking) falls 12 dB by
+// 420 mV, white unless a term spectrum is given.
+Project MakeSharedLevelTermProject(
+    const std::vector<NoiseSpectrumPoint>& term_spectrum = {}) {
+  Project project = MakeSharedOnlyProject(1);
+  SharedNoiseParameters& shared = project.sections[0].noise.shared;
+  shared.noise_db = 50.0;
+  shared.spectrum.clear();
+  shared.level_term.enabled = true;
+  shared.level_term.noise_db = 40.0;
+  shared.level_term.level_db = {{0.0, 0.0}, {420.0, -12.0}, {700.0, -12.0}};
+  shared.level_term.spectrum = term_spectrum;
+  return project;
+}
+
+// Shared noise added to one frame whose output Y sits at y_level_mv and whose
+// pressing picture sits at pressing_level_mv (no pressing copy when < 0).
+std::vector<double> SharedNoiseOnFlatFrame(const Project& project,
+                                           double y_level_mv,
+                                           double pressing_level_mv) {
+  NullLogger logger;
+  NoiseInjectionStage stage(&logger);
+  const std::vector<IGenerationStage::FrameScheduleItem> schedule = {
+      DiscFrame(&project.sections[0], 30)};
+  const std::size_t n = PalSamplesPerFrame();
+  std::vector<SampleFixed> y(n, MillivoltsToSampleFixed(y_level_mv));
+  std::vector<SampleFixed> c(n, 0);
+  const std::vector<SampleFixed> pressing(
+      n, MillivoltsToSampleFixed(pressing_level_mv));
+  stage.InjectNoise(project, schedule, 0, 1,
+                    pressing_level_mv < 0.0 ? nullptr : &pressing, &y, &c);
+  std::vector<double> noise_mv(n);
+  for (std::size_t s = 0; s < n; ++s) {
+    noise_mv[s] = SampleFixedToMillivolts(y[s]) - y_level_mv;
+  }
+  return noise_mv;
+}
+
+TEST(NoiseInjectionTest, SharedLevelTermFallsWithPictureLevel) {
+  const Project project = MakeSharedLevelTermProject();
+  // PAL white is 700 mV. Constant part 50 dB (2.2 mV), term 40 dB (7 mV) at
+  // blanking and 12 dB down from 420 mV.
+  const double constant_mv = 700.0 * std::pow(10.0, -50.0 / 20.0);
+  const double term_black_mv = 7.0;
+  const double term_grey_mv = 7.0 * std::pow(10.0, -12.0 / 20.0);
+  const auto expected = [&](double term_mv) {
+    return std::sqrt((constant_mv * constant_mv) + (term_mv * term_mv));
+  };
+
+  EXPECT_NEAR(RmsMv(SharedNoiseOnFlatFrame(project, 0.0, -1.0)),
+              expected(term_black_mv), expected(term_black_mv) * 0.02);
+  EXPECT_NEAR(RmsMv(SharedNoiseOnFlatFrame(project, 420.0, -1.0)),
+              expected(term_grey_mv), expected(term_grey_mv) * 0.02);
+  // Midway along the first segment the gain is -6 dB; beyond the last point
+  // it holds at -12 dB; below blanking it holds at 0 dB.
+  const double term_mid_mv = 7.0 * std::pow(10.0, -6.0 / 20.0);
+  EXPECT_NEAR(RmsMv(SharedNoiseOnFlatFrame(project, 210.0, -1.0)),
+              expected(term_mid_mv), expected(term_mid_mv) * 0.02);
+  EXPECT_NEAR(RmsMv(SharedNoiseOnFlatFrame(project, 750.0, -1.0)),
+              expected(term_grey_mv), expected(term_grey_mv) * 0.02);
+  EXPECT_NEAR(RmsMv(SharedNoiseOnFlatFrame(project, -100.0, -1.0)),
+              expected(term_black_mv), expected(term_black_mv) * 0.02);
+}
+
+TEST(NoiseInjectionTest, SharedLevelTermReadsThePressingPicture) {
+  // The level comes from the pressing picture, not from the capture's own
+  // (channel-altered) Y, so the noise matches the frame whose Y is the
+  // pressing level.
+  const Project project = MakeSharedLevelTermProject();
+  const std::vector<double> from_pressing =
+      SharedNoiseOnFlatFrame(project, 420.0, 0.0);
+  const std::vector<double> at_black =
+      SharedNoiseOnFlatFrame(project, 0.0, -1.0);
+  ASSERT_EQ(from_pressing.size(), at_black.size());
+  for (std::size_t s = 0; s < at_black.size(); ++s) {
+    ASSERT_NEAR(from_pressing[s], at_black[s], 1e-6) << "sample " << s;
+  }
+}
+
+TEST(NoiseInjectionTest, SharedLevelTermLeavesConstantComponentUnchanged) {
+  // The term draws from its own seed domain: at a level where its gain is
+  // -60 dB it adds almost nothing, and the constant component's samples are
+  // those of the layer without a term.
+  Project with_term = MakeSharedLevelTermProject();
+  with_term.sections[0].noise.shared.level_term.noise_db = 61.0;
+  with_term.sections[0].noise.shared.level_term.level_db = {{0.0, -60.0}};
+  Project without_term = with_term;
+  without_term.sections[0].noise.shared.level_term = SharedNoiseLevelTerm{};
+
+  const std::vector<double> a = SharedNoiseOnFlatFrame(with_term, 0.0, -1.0);
+  const std::vector<double> b = SharedNoiseOnFlatFrame(without_term, 0.0, -1.0);
+  // Term sigma: 700 mV * 10^(-121/20), about 0.6 uV, against 2.2 mV for the
+  // constant component; any shift of the constant draws would show at mV.
+  const double term_sigma_mv = 700.0 * std::pow(10.0, -121.0 / 20.0);
+  for (std::size_t s = 0; s < a.size(); ++s) {
+    ASSERT_LE(std::abs(a[s] - b[s]), 8.0 * term_sigma_mv) << "sample " << s;
+  }
+}
+
+TEST(NoiseInjectionTest, SharedLevelTermFollowsItsOwnSpectrum) {
+  // With the term above 5.5 MHz only, black and mid-grey differ there and
+  // agree below.
+  const Project project =
+      MakeSharedLevelTermProject({{5.375, -40.0}, {5.625, 0.0}});
+  const std::vector<double> black = SharedNoiseOnFlatFrame(project, 0.0, -1.0);
+  const std::vector<double> grey = SharedNoiseOnFlatFrame(project, 420.0, -1.0);
+  const double sample_rate_hz =
+      GetTimingConstants(Standard::kPal).sample_rate_4fsc_hz;
+  for (double centre_mhz : {1.0, 3.0}) {
+    EXPECT_NEAR(BandPowerDb(black, centre_mhz, sample_rate_hz),
+                BandPowerDb(grey, centre_mhz, sample_rate_hz), 1.0)
+        << "band at " << centre_mhz << " MHz";
+  }
+  for (double centre_mhz : {7.0, 8.0}) {
+    EXPECT_GT(BandPowerDb(black, centre_mhz, sample_rate_hz) -
+                  BandPowerDb(grey, centre_mhz, sample_rate_hz),
+              8.0)
+        << "band at " << centre_mhz << " MHz";
+  }
+}
+
+TEST(NoiseInjectionTest, SharedLevelTermDependsOnlyOnDiscPosition) {
+  // Two captures (separate stages) of the same pressing picture carry the
+  // same layer, term included.
+  const Project project = MakeSharedLevelTermProject();
+  EXPECT_EQ(SharedNoiseOnFlatFrame(project, 300.0, -1.0),
+            SharedNoiseOnFlatFrame(project, 300.0, -1.0));
+}
+
+TEST(NoiseInjectionTest, PressingLumaIsNeededOnlyWithChannelAndLevelTerm) {
+  Project project = MakeSharedLevelTermProject();
+  EXPECT_FALSE(NoiseInjectionStage::NeedsPressingLuma(project));
+  project.channel.enabled = true;
+  project.channel.timing_offset_samples = 0.5;
+  EXPECT_TRUE(NoiseInjectionStage::NeedsPressingLuma(project));
+  project.sections[0].noise.shared.level_term = SharedNoiseLevelTerm{};
+  EXPECT_FALSE(NoiseInjectionStage::NeedsPressingLuma(project));
 }
 
 }  // namespace

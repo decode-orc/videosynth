@@ -142,6 +142,10 @@ sections:
         noise_db:
         noise_seed:
         spectrum:
+        level_term:
+          noise_db:
+          level_db:
+          spectrum:
     dropouts:
       random:
         scale:

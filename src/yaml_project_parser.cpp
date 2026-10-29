@@ -126,6 +126,71 @@ bool ParseNoiseSpectrum(const YAML::Node& spectrum_node,
   return true;
 }
 
+// Parses a `level_db:` curve: a sequence of [mV, dB] pairs. Value ranges
+// and ordering are checked by the validator.
+bool ParseNoiseLevelCurve(const YAML::Node& curve_node,
+                          const std::string& context,
+                          std::vector<NoiseLevelPoint>* curve,
+                          std::vector<std::string>* errors) {
+  if (!curve_node.IsSequence()) {
+    errors->push_back(context +
+                      " must be a sequence of [level_mv, relative_db] pairs.");
+    return false;
+  }
+  curve->clear();
+  for (const YAML::Node& point_node : curve_node) {
+    if (!point_node.IsSequence() || point_node.size() != 2U) {
+      errors->push_back(context +
+                        " entries must be [level_mv, relative_db] pairs.");
+      return false;
+    }
+    try {
+      curve->push_back(NoiseLevelPoint{point_node[0].as<double>(),
+                                       point_node[1].as<double>()});
+    } catch (const YAML::Exception&) {
+      errors->push_back(context + " entries must be numeric pairs.");
+      return false;
+    }
+  }
+  return true;
+}
+
+// Parses the `noise.shared.level_term:` level-dependent pressing component.
+bool ParseSharedNoiseLevelTerm(const YAML::Node& term_node,
+                               SharedNoiseLevelTerm* term,
+                               std::vector<std::string>* errors) {
+  if (!term_node.IsMap()) {
+    errors->push_back(
+        "section field 'noise.shared.level_term' must be a map/object.");
+    return false;
+  }
+  const std::set<std::string> term_keys = {"noise_db", "level_db", "spectrum"};
+  if (!ValidateAllowedKeys(term_node, term_keys,
+                           "section.noise.shared.level_term", errors)) {
+    return false;
+  }
+  if (!term_node["noise_db"] || !term_node["level_db"]) {
+    errors->push_back(
+        "section noise validation error: noise.shared.level_term requires "
+        "noise_db and level_db.");
+    return false;
+  }
+  term->enabled = true;
+  term->noise_db = term_node["noise_db"].as<double>();
+  if (!ParseNoiseLevelCurve(term_node["level_db"],
+                            "section field 'noise.shared.level_term.level_db'",
+                            &term->level_db, errors)) {
+    return false;
+  }
+  if (term_node["spectrum"]) {
+    return ParseNoiseSpectrum(
+        term_node["spectrum"],
+        "section field 'noise.shared.level_term.spectrum'", &term->spectrum,
+        errors);
+  }
+  return true;
+}
+
 // Parses the `noise.shared:` pressing-noise layer.
 bool ParseSharedNoise(const YAML::Node& shared_node,
                       SharedNoiseParameters* shared,
@@ -137,11 +202,12 @@ bool ParseSharedNoise(const YAML::Node& shared_node,
   if (shared_node["noise_spread_db"]) {
     errors->push_back(
         "section noise validation error: noise.shared does not take "
-        "noise_spread_db; pressing noise has no level dependence.");
+        "noise_spread_db; use noise.shared.level_term for level-dependent "
+        "pressing noise.");
     return false;
   }
   const std::set<std::string> shared_keys = {"noise_db", "noise_seed",
-                                             "spectrum"};
+                                             "spectrum", "level_term"};
   if (!ValidateAllowedKeys(shared_node, shared_keys, "section.noise.shared",
                            errors)) {
     return false;
@@ -157,10 +223,15 @@ bool ParseSharedNoise(const YAML::Node& shared_node,
     shared->noise_seed = shared_node["noise_seed"].as<int64_t>();
     shared->noise_seed_specified = true;
   }
-  if (shared_node["spectrum"]) {
-    return ParseNoiseSpectrum(shared_node["spectrum"],
-                              "section field 'noise.shared.spectrum'",
-                              &shared->spectrum, errors);
+  if (shared_node["spectrum"] &&
+      !ParseNoiseSpectrum(shared_node["spectrum"],
+                          "section field 'noise.shared.spectrum'",
+                          &shared->spectrum, errors)) {
+    return false;
+  }
+  if (shared_node["level_term"]) {
+    return ParseSharedNoiseLevelTerm(shared_node["level_term"],
+                                     &shared->level_term, errors);
   }
   return true;
 }

@@ -16,6 +16,7 @@
 
 #include "audio_channel_pairs_editor.h"
 #include "line_injections_editor.h"
+#include "noise_level_curve_editor.h"
 #include "noise_spectrum_editor.h"
 #include "project_document.h"
 #include "source_probe_controller.h"
@@ -235,6 +236,10 @@ class SectionEditor : public QWidget {
   QDoubleSpinBox* shared_noise_db_spin_ = nullptr;
   QLineEdit* shared_noise_seed_edit_ = nullptr;
   NoiseSpectrumEditor* shared_spectrum_editor_ = nullptr;
+  QGroupBox* shared_level_term_group_ = nullptr;
+  QDoubleSpinBox* shared_level_term_db_spin_ = nullptr;
+  NoiseLevelCurveEditor* shared_level_curve_editor_ = nullptr;
+  NoiseSpectrumEditor* shared_level_spectrum_editor_ = nullptr;
 
   // Dropouts: one set of widgets per type.
   struct DropoutWidgets {

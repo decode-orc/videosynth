@@ -43,6 +43,9 @@ constexpr int64_t kDefaultFixedSeed = 1;
 // Spacing of a breakpoint appended to a noise spectrum.
 constexpr double kSpectrumPointStepMhz = 1.0;
 
+// Level step between appended level-curve breakpoints.
+constexpr double kLevelPointStepMv = 50.0;
+
 // Freshly-enabled luma bandwidth limit: a soft VHS-like picture on every
 // standard, well inside the validator's cutoff range.
 constexpr double kDefaultLumaCutoffMhz = 3.0;
@@ -108,6 +111,21 @@ void SetSharedNoiseEnabled(Section* section, bool enabled) {
   shared.noise_seed = kDefaultFixedSeed;
 }
 
+void SetSharedNoiseLevelTermEnabled(Section* section, bool enabled) {
+  SharedNoiseLevelTerm& term = section->noise.shared.level_term;
+  if (!enabled) {
+    term = SharedNoiseLevelTerm{};
+    return;
+  }
+  if (term.enabled) {
+    return;
+  }
+  term = SharedNoiseLevelTerm{};
+  term.enabled = true;
+  term.noise_db = kDefaultNoiseDb;
+  term.level_db.push_back(NoiseLevelPoint{});
+}
+
 double NoiseSpectrumMaxFrequencyMhz(Standard standard) {
   return NyquistMhz(standard);
 }
@@ -134,6 +152,29 @@ void RemoveNoiseSpectrumPoint(std::vector<NoiseSpectrumPoint>* spectrum,
     return;
   }
   spectrum->erase(spectrum->begin() + row);
+}
+
+void AddNoiseLevelPoint(std::vector<NoiseLevelPoint>* curve) {
+  if (curve->empty()) {
+    curve->push_back(NoiseLevelPoint{});
+    return;
+  }
+  const NoiseLevelPoint& last = curve->back();
+  if (last.level_mv >= editor_limits::kNoiseLevelMvMax) {
+    return;
+  }
+  NoiseLevelPoint next = last;
+  next.level_mv =
+      std::min(last.level_mv + kLevelPointStepMv,
+               (last.level_mv + editor_limits::kNoiseLevelMvMax) / 2.0);
+  curve->push_back(next);
+}
+
+void RemoveNoiseLevelPoint(std::vector<NoiseLevelPoint>* curve, int row) {
+  if (row < 0 || row >= static_cast<int>(curve->size())) {
+    return;
+  }
+  curve->erase(curve->begin() + row);
 }
 
 void SetRandomDropoutsEnabled(Section* section, bool enabled) {

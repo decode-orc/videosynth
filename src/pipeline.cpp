@@ -281,6 +281,9 @@ bool VideoSynthPipeline::RunProject(const Project& project,
   const unsigned synthesis_threads =
       FrameSynthesisPool::ResolveThreadCount(options.threads);
   const bool parallel_synthesis = synthesis_threads > 1U;
+  const bool needs_pressing_luma =
+      noise_injection_ != nullptr &&
+      NoiseInjectionStage::NeedsPressingLuma(project);
 
   if (parallel_synthesis) {
     // -------------------------------------------------------------------
@@ -308,13 +311,21 @@ bool VideoSynthPipeline::RunProject(const Project& project,
         out_frame->errors = job_errors;
         return;
       }
+      // The shared noise level term reads the pressing's picture, before
+      // this capture's channel stage alters it.
+      std::vector<SampleFixed> pressing_y_mv;
+      if (needs_pressing_luma) {
+        pressing_y_mv = out_frame->y_mv;
+      }
       channel_.ApplyChannel(project, schedule, disc_frame, 1U, &out_frame->y_mv,
                             &out_frame->c_mv);
       chroma_error_.ApplyChromaError(project, schedule, disc_frame, 1U,
                                      &out_frame->c_mv);
       if (noise_injection_ != nullptr) {
-        noise_injection_->InjectNoise(project, schedule, disc_frame, 1U,
-                                      &out_frame->y_mv, &out_frame->c_mv);
+        noise_injection_->InjectNoise(
+            project, schedule, disc_frame, 1U,
+            needs_pressing_luma ? &pressing_y_mv : nullptr, &out_frame->y_mv,
+            &out_frame->c_mv);
       }
       if (dropout_injection_ != nullptr) {
         dropout_injection_->ComputeFrameDropouts(
@@ -389,6 +400,8 @@ bool VideoSynthPipeline::RunProject(const Project& project,
     // length instead of zero-filling fresh allocations.
     std::vector<SampleFixed> y_mv;
     std::vector<SampleFixed> c_mv;
+    // Y before the channel stage, kept only for the shared noise level term.
+    std::vector<SampleFixed> pressing_y_mv;
 
     while (processed_frames < total_disc_frames) {
       if (IsCancelled()) {
@@ -409,14 +422,18 @@ bool VideoSynthPipeline::RunProject(const Project& project,
         return FinishRun(PipelineRunStatus::kFailed);
       }
 
+      if (needs_pressing_luma) {
+        pressing_y_mv = y_mv;
+      }
       channel_.ApplyChannel(project, schedule, processed_frames,
                             frames_this_batch, &y_mv, &c_mv);
       chroma_error_.ApplyChromaError(project, schedule, processed_frames,
                                      frames_this_batch, &c_mv);
 
       if (noise_injection_ != nullptr) {
-        noise_injection_->InjectNoise(project, schedule, processed_frames,
-                                      frames_this_batch, &y_mv, &c_mv);
+        noise_injection_->InjectNoise(
+            project, schedule, processed_frames, frames_this_batch,
+            needs_pressing_luma ? &pressing_y_mv : nullptr, &y_mv, &c_mv);
       }
 
       if (dropout_injection_ != nullptr) {

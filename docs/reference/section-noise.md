@@ -23,6 +23,10 @@ The block carries two independent layers:
         noise_db: 44.0
         noise_seed: 77
         spectrum: [[0.0, 0.0], [5.0, -3.0]]
+        level_term:            # optional
+          noise_db: 36.0
+          level_db: [[0, 0.0], [420, -12.0], [700, -12.0]]
+          spectrum: [[5.375, -40.0], [5.625, 0.0]]
 ```
 
 ## Keys
@@ -43,10 +47,19 @@ The block carries two independent layers:
 | `noise_db` | float | Yes | 20.0–61.0 | Pressing noise level in dB |
 | `noise_seed` | int | Yes | any int64 | Seed of the pressing. Captures of one pressing use the same value |
 | `spectrum` | list of `[MHz, dB]` | No | see [`spectrum`](#spectrum) | Shape of the pressing noise spectrum. Omit for white noise |
+| `level_term` | map | No | see below | A second pressing component whose level follows the picture's luma. See [`level_term`](#shared-level_term) |
 
-`shared` takes no `noise_spread_db`: pressing noise has a constant level, so it is identical in every capture whatever each capture's signal is.
+`shared` takes no `noise_spread_db`. Its constant component is the same whatever the picture; its level dependence, when there is one, comes from `level_term`, which follows the pressing's own picture and not any capture's signal, so the layer stays identical in every capture.
 
-No other key is accepted in either layer.
+### `shared.level_term`
+
+| Key | Type | Required | Range | Description |
+|-----|------|----------|-------|-------------|
+| `noise_db` | float | Yes | 20.0–61.0 | Level of the term where `level_db` reads 0 dB |
+| `level_db` | list of `[mV, dB]` | Yes | see [`level_term`](#shared-level_term) | Gain of the term against the picture's luma level |
+| `spectrum` | list of `[MHz, dB]` | No | see [`spectrum`](#spectrum) | Shape of the term alone. Omit for white noise |
+
+No other key is accepted in any of these blocks.
 
 ## Behaviour
 
@@ -61,6 +74,7 @@ No other key is accepted in either layer.
 | `spectrum` or `spread_spectrum` without `noise_db` | Parse error |
 | `spread_spectrum` with `noise_spread_db` 0 | Warning: there is no level-dependent term to shape |
 | `shared` without `noise_db` or with `noise_spread_db` | Parse error |
+| `level_term` without `noise_db` or `level_db` | Parse error |
 | Both layers | Their noise values are summed per sample, so the variances add |
 
 Noise is injected on the internal millivolt representation **before quantisation**, so it lands on every synthesised region — VBI lines, blanking and active picture — and survives into the final sample codes. `noise_db` is the level of each output signal:
@@ -103,7 +117,45 @@ With `spread_spectrum` present, the capture layer is the sum of two independent 
 
 The total power is unchanged — σ² = σ<sub>f</sub>² + (k · Y)², so Black PSNR and White SNR are still `noise_db` and `noise_db` − `noise_spread_db` — but the extra power that bright content carries lands only where `spread_spectrum` puts it. For example, `[[5.0, -20.0], [6.0, 0.0]]` keeps the noise below 5 MHz almost level-independent and puts the growth with level above 6 MHz.
 
-The shared layer takes no `spread_spectrum`: it has no level-dependent term.
+The shared layer takes no `spread_spectrum`; its level-dependent part is [`level_term`](#shared-level_term), which carries its own `spectrum`.
+
+## `shared.level_term` {#shared-level_term}
+
+On real captures the pressing noise does not keep a constant level: in some bands it **falls** as the picture gets brighter. A capture-style σ² = σ<sub>f</sub>² + (k · Y)² can only grow with level, so the shared layer takes a separate term instead.
+
+With `level_term` present, the shared layer is the sum of two independent components:
+
+| Component | Level | Shape |
+|-----------|-------|-------|
+| Constant | `shared.noise_db` | `shared.spectrum` (white when omitted) |
+| Level term | `level_term.noise_db` + the `level_db` gain at the sample's luma level | `level_term.spectrum` (white when omitted) |
+
+`level_db` is a table of `[level_mv, relative_db]` breakpoints:
+
+| Rule | Value |
+|------|-------|
+| Points | At least one |
+| `level_mv` | 0.0 to 800.0, strictly ascending. The luma level in mV above blanking, on the same scale for every standard: white is 700 mV on PAL and SECAM, 714.3 mV on NTSC and PAL-M |
+| `relative_db` | −60.0 to +20.0: the term's amplitude relative to `level_term.noise_db` |
+
+Between breakpoints the gain is a straight line in dB against mV; below the first point and above the last, the end values are held, so sync and blanking take the first point's gain. A one-point table is a constant second component.
+
+The level is read **per sample** from the pressing's own picture: the luma as generated, before the [channel](channel.md) stage's FM beat, edge smear and timing offset, and before any capture's noise. Every capture of the pressing therefore draws the same term on the same picture, whatever its channel or capture settings. The whole shared layer, term included, is then delayed by `channel.timing_offset_samples`, so it stays on the picture's samples.
+
+The term has its own seed stream, derived from `shared.noise_seed` and the disc position, so adding, removing or editing it leaves the constant component's samples unchanged.
+
+For example, this is pressing noise that is level-independent below 5.5 MHz and, above it, 12 dB quieter on mid-grey than on black:
+
+```yaml
+        shared:
+          noise_db: 46.0
+          noise_seed: 7101
+          spectrum: [[5.375, 0.0], [5.625, -40.0]]   # constant part below 5.5 MHz
+          level_term:
+            noise_db: 36.0                           # above 5.5 MHz, at black
+            level_db: [[0, 0.0], [420, -12.0]]
+            spectrum: [[5.375, -40.0], [5.625, 0.0]]
+```
 ## The bounds
 
 **20.0 dB lower bound** — at 20 dB the noise standard deviation is around 10 IRE, roughly 70 mV on PAL, approaching the amplitude of the sync pulse itself. Sync separator reliability degrades below this.

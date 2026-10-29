@@ -268,6 +268,8 @@ if(VIDEOSYNTH_BUILD_GUI)
         src/gui/logging_options.h
         src/gui/main_window.cpp
         src/gui/main_window.h
+        src/gui/noise_level_curve_editor.cpp
+        src/gui/noise_level_curve_editor.h
         src/gui/noise_spectrum_editor.cpp
         src/gui/noise_spectrum_editor.h
         src/gui/new_project_dialog.cpp

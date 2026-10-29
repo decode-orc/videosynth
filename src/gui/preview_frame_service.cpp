@@ -46,6 +46,16 @@ bool SynthesizeWithPipelineStages(
     return false;
   }
 
+  // The shared noise level term reads the pressing's picture, before the
+  // channel stage alters it.
+  std::vector<SampleFixed> pressing_y_mv;
+  const bool needs_pressing_luma =
+      options.apply_noise &&
+      NoiseInjectionStage::NeedsPressingLuma(*context.project);
+  if (needs_pressing_luma) {
+    pressing_y_mv = out_frame->y_mv;
+  }
+
   // The channel describes the pressing, so it is part of the previewed
   // signal itself rather than an optional impairment.
   context.channel->ApplyChannel(*context.project, *context.schedule, disc_frame,
@@ -57,7 +67,9 @@ bool SynthesizeWithPipelineStages(
 
   if (options.apply_noise) {
     context.noise->InjectNoise(*context.project, *context.schedule, disc_frame,
-                               1U, &out_frame->y_mv, &out_frame->c_mv);
+                               1U,
+                               needs_pressing_luma ? &pressing_y_mv : nullptr,
+                               &out_frame->y_mv, &out_frame->c_mv);
   }
   if (options.apply_dropouts) {
     std::vector<DropoutSidecarRow> sidecar_rows;

@@ -137,6 +137,58 @@ TEST(SectionBlockPresenterTest, SharedNoiseEnableKeepsAnExistingLayer) {
   EXPECT_EQ(section.noise.shared.noise_seed, 77);
 }
 
+TEST(SectionBlockPresenterTest, SharedLevelTermEnableIsValidAndRoundTrips) {
+  Project project = MakeValidProject();
+  Section& section = project.sections[0];
+  SetSharedNoiseEnabled(&section, true);
+  SetSharedNoiseLevelTermEnabled(&section, true);
+  EXPECT_TRUE(section.noise.shared.level_term.enabled);
+  ASSERT_EQ(section.noise.shared.level_term.level_db.size(), 1U);
+  std::string error;
+  EXPECT_TRUE(ProjectIsValid(project, &error)) << error;
+  EXPECT_EQ(RoundTrip(project), project);
+
+  // Enabling again keeps an edited term; disabling leaves the layer.
+  section.noise.shared.level_term.noise_db = 36.0;
+  SetSharedNoiseLevelTermEnabled(&section, true);
+  EXPECT_EQ(section.noise.shared.level_term.noise_db, 36.0);
+  SetSharedNoiseLevelTermEnabled(&section, false);
+  EXPECT_EQ(section.noise.shared.level_term, SharedNoiseLevelTerm{});
+  EXPECT_TRUE(section.noise.shared.enabled);
+  EXPECT_EQ(EmitYaml(project).find("level_term:"), std::string::npos);
+}
+
+TEST(SectionBlockPresenterTest, LevelPointsStepUpAndStopAtTheMaximum) {
+  std::vector<NoiseLevelPoint> curve;
+  AddNoiseLevelPoint(&curve);
+  ASSERT_EQ(curve.size(), 1U);
+  EXPECT_EQ(curve[0].level_mv, 0.0);
+  EXPECT_EQ(curve[0].relative_db, 0.0);
+
+  curve[0].relative_db = -6.0;
+  AddNoiseLevelPoint(&curve);
+  ASSERT_EQ(curve.size(), 2U);
+  EXPECT_EQ(curve[1].level_mv, 50.0);
+  EXPECT_EQ(curve[1].relative_db, -6.0);
+
+  // Closer to the maximum than a full step: halfway instead.
+  curve[1].level_mv = 780.0;
+  AddNoiseLevelPoint(&curve);
+  ASSERT_EQ(curve.size(), 3U);
+  EXPECT_EQ(curve[2].level_mv, 790.0);
+
+  curve[2].level_mv = editor_limits::kNoiseLevelMvMax;
+  AddNoiseLevelPoint(&curve);
+  EXPECT_EQ(curve.size(), 3U);
+
+  RemoveNoiseLevelPoint(&curve, 3);
+  RemoveNoiseLevelPoint(&curve, -1);
+  EXPECT_EQ(curve.size(), 3U);
+  RemoveNoiseLevelPoint(&curve, 1);
+  ASSERT_EQ(curve.size(), 2U);
+  EXPECT_EQ(curve[1].level_mv, editor_limits::kNoiseLevelMvMax);
+}
+
 TEST(SectionBlockPresenterTest, SpectrumPointsStepUpAndStopAtTheMaximum) {
   std::vector<NoiseSpectrumPoint> spectrum;
   AddNoiseSpectrumPoint(&spectrum, 3.0);

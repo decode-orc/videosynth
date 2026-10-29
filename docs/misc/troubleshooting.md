@@ -227,15 +227,23 @@ A warning: with no white spread there is no level-dependent term, so the table h
 
 ### Noise values out of range
 
-`noise_db` must be 20.0–61.0, and `noise_db − noise_spread_db` must be at least 20.0. Below 20 dB the noise approaches the amplitude of sync; above 61 dB it is smaller than the quantisation floor. `shared.noise_db` has the same 20.0–61.0 range.
+`noise_db` must be 20.0–61.0, and `noise_db − noise_spread_db` must be at least 20.0. Below 20 dB the noise approaches the amplitude of sync; above 61 dB it is smaller than the quantisation floor. `shared.noise_db` and `shared.level_term.noise_db` have the same 20.0–61.0 range.
 
 ### `spectrum frequency must be in the range` / `strictly ascending` / `relative_db must be in the range`
 
-The same messages name `spread_spectrum` or `shared.spectrum` when that table is at fault. Spectrum breakpoints run from 0 MHz up to the 4fsc Nyquist frequency (8.867 MHz for PAL, 7.159 MHz for NTSC, 7.151 MHz for PAL-M, whatever the `sample_encoding_preset`), each frequency higher than the one before, with levels between −60 and +40 dB.
+The same messages name `spread_spectrum`, `shared.spectrum` or `shared.level_term.spectrum` when that table is at fault. Spectrum breakpoints run from 0 MHz up to the 4fsc Nyquist frequency (8.867 MHz for PAL, 7.159 MHz for NTSC, 7.151 MHz for PAL-M, whatever the `sample_encoding_preset`), each frequency higher than the one before, with levels between −60 and +40 dB.
 
 ### `noise.shared does not take noise_spread_db`
 
-Pressing noise has a constant level so that it is identical in every capture. Remove `noise_spread_db` from `shared:`; level-dependent noise belongs on the capture layer.
+The capture layer's white spread follows each capture's own signal, which would make the pressing noise differ between captures. Remove `noise_spread_db` from `shared:`. For pressing noise that changes with the picture level, use [`shared.level_term`](../reference/section-noise.md#shared-level_term), which follows the pressing's own picture.
+
+### `noise.shared.level_term requires noise_db and level_db`
+
+The level term needs a level and a curve. Add both; a one-point `level_db` such as `[[0, 0.0]]` gives a constant second component.
+
+### `shared.level_term.level_db …`
+
+`level_db` needs at least one `[level_mv, relative_db]` point. Levels run from 0.0 to 800.0 mV above blanking, each higher than the one before; gains run from −60.0 to +20.0 dB.
 
 ### `noise.shared requires noise_db` / `shared.noise_seed is required`
 

@@ -48,6 +48,14 @@ namespace videosynth {
 //   pressing carries identical pressing noise on the same picture. The
 //   project's channel timing offset delays it as it delays the picture, so
 //   it stays aligned with the picture on every capture.
+//   - Optional level_term: a second, independent pressing component seeded
+//     from (shared.noise_seed, kSharedLevelNoiseSeedDomain, disc frame
+//     index), with its own spectrum, whose sigma is level_term.noise_db
+//     scaled by a piecewise-linear dB curve against the pressing picture's
+//     luma in mV above blanking. The level is read from the picture before the
+//     channel stage (pressing_y_mv), so captures with different channel
+//     settings still share the layer; it is delayed with the constant
+//     component.
 //
 // Both layers are summed into a single noise value per sample position, so
 // noise_db is the level of each output signal. On Y/C output
@@ -95,6 +103,25 @@ class NoiseInjectionStage {
       const std::vector<IGenerationStage::FrameScheduleItem>& schedule,
       std::size_t frame_offset, std::size_t frame_count,
       std::vector<SampleFixed>* y_mv, std::vector<SampleFixed>* c_mv) const;
+
+  // As above, with the pressing's picture for the shared level term.
+  //
+  // Args:
+  //   pressing_y_mv: Y as generated, before the channel stage, in the same
+  //                  layout as y_mv. nullptr (or a size mismatch) reads the
+  //                  level from y_mv as it arrives, which is exact when no
+  //                  channel stage ran. Not modified.
+  void InjectNoise(
+      const Project& project,
+      const std::vector<IGenerationStage::FrameScheduleItem>& schedule,
+      std::size_t frame_offset, std::size_t frame_count,
+      const std::vector<SampleFixed>* pressing_y_mv,
+      std::vector<SampleFixed>* y_mv, std::vector<SampleFixed>* c_mv) const;
+
+  // True when the channel stage is active and some section's shared layer
+  // carries a level term, so the caller must keep a copy of Y before the
+  // channel stage and pass it as pressing_y_mv.
+  static bool NeedsPressingLuma(const Project& project);
 
  private:
   // Returns the shaping filter for a spectrum table, designing it on first

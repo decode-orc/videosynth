@@ -265,6 +265,19 @@ void EmitNoise(YAML::Emitter& out, const NoiseParameters& noise) {
           << noise.shared.noise_seed;
     }
     EmitNoiseSpectrum(out, "spectrum", noise.shared.spectrum);
+    const SharedNoiseLevelTerm& term = noise.shared.level_term;
+    if (term.enabled) {
+      out << YAML::Key << "level_term" << YAML::Value << YAML::BeginMap;
+      out << YAML::Key << "noise_db" << YAML::Value << term.noise_db;
+      out << YAML::Key << "level_db" << YAML::Value << YAML::BeginSeq;
+      for (const NoiseLevelPoint& point : term.level_db) {
+        out << YAML::Flow << YAML::BeginSeq << point.level_mv
+            << point.relative_db << YAML::EndSeq;
+      }
+      out << YAML::EndSeq;
+      EmitNoiseSpectrum(out, "spectrum", term.spectrum);
+      out << YAML::EndMap;
+    }
     out << YAML::EndMap;
   }
   out << YAML::EndMap;

@@ -18,6 +18,7 @@ namespace videosynth {
 // so two layers configured with the same user seed still draw independent
 // streams.
 constexpr std::uint64_t kSharedNoiseSeedDomain = 0x5052455353494E47ULL;
+constexpr std::uint64_t kSharedLevelNoiseSeedDomain = 0x50524553534C564CULL;
 constexpr std::uint64_t kChromaJitterSeedDomain = 0x4348524F4D414A54ULL;
 constexpr std::uint64_t kRandomDropoutSeedDomain = 0x52414E444F4D444FULL;
 constexpr std::uint64_t kScratchDropoutSeedDomain = 0x5343524154434844ULL;
