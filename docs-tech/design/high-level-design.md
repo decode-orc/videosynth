@@ -211,7 +211,7 @@ For avoidance of doubt, the generator shall apply the following rules:
 
 - **NTSC active-picture line starts (1-indexed frame lines):** field 1 starts at line **22**; field 2 starts at line **284**. Line 21 (field-1 transition) and line 283 (field-2 transition) are not treated as full active-picture lines.
 - **PAL active-picture lines (1-indexed frame lines):** field 1 occupies lines **23–310**; field 2 occupies lines **336–623** (BT.1700 Annex 1 Part B Table 2 item j: a 25H + a field-blanking interval from line 311 and from mid-line 623). Line 623 carries picture on its first half only: it opens with a normal line-sync pulse, its picture ends 29 µs after 0H (item K: 3 µs ahead of the mid-line equalising pulse), and its second half holds the first pre-equalising pulse. Line 23 is modelled as a full picture line.
-- **Progressive-to-interlaced row mapping:** for a field-local active line index $n$ (starting at 0), field 1 samples source row $2n+1$ and field 2 samples source row $2n$.
+- **Progressive-to-interlaced row mapping:** for a field-local active line index $n$ (starting at 0), the upper field samples source row $2n$ and the lower field samples source row $2n+1$. The upper field is field 1 on 625-line standards (PAL, SECAM) and field 2 on 525-line standards (NTSC, PAL-M).
 
 Frame-source raster preservation contract (normative):
 
@@ -1737,15 +1737,16 @@ VideoSynth generates frames as **two sequential fields** written one after the o
 When ingesting a progressive source, the generator splits each progressive frame into **two fields** and writes them sequentially into the output frame. This is a spatial line-splitting operation — not interlacing. The output is two fields in sequence, each containing half the source lines.
 
 1. **Split Fields**:
-  - For a progressive source frame of height `H`:
-    - **Field 1**: Odd source lines (1, 3, 5, ..., H-1), written sequentially as lines 1, 2, 3, ... of Field 1.
-    - **Field 2**: Even source lines (2, 4, 6, ..., H), written sequentially as lines 1, 2, 3, ... of Field 2.
+  - For a progressive source frame of height `H` (source lines numbered from 1):
+    - **Upper field**: odd source lines (1, 3, 5, ..., H-1), written sequentially as lines 1, 2, 3, ... of that field.
+    - **Lower field**: even source lines (2, 4, 6, ..., H), written sequentially as lines 1, 2, 3, ... of that field.
+    - The upper field is field 1 on 625-line standards and field 2 on 525-line standards.
   - **PAL Example (720×576 progressive source)**:
     - Field 1: source lines 1, 3, 5, ..., 575 → 288 lines.
     - Field 2: source lines 2, 4, 6, ..., 576 → 288 lines.
-  - **NTSC Example (720×486 progressive source)**:
-    - Field 1: source lines 1, 3, 5, ..., 485 → 243 lines.
-    - Field 2: source lines 2, 4, 6, ..., 486 → 243 lines.
+  - **NTSC Example (720×486 progressive source, 240 active lines per field)**:
+    - Field 2: source lines 1, 3, 5, ..., 479.
+    - Field 1: source lines 2, 4, 6, ..., 480.
 2. **Field Order**:
   - **PAL**: Field 1 is always written first, then Field 2.
   - **NTSC**: Field 1 is written first, then Field 2 (native 29.97 fps sources).

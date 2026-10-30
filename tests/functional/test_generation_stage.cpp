@@ -22,6 +22,7 @@
 #include "videosynth/active_sample_mapping.h"
 #include "videosynth/chroma_encoder.h"
 #include "videosynth/fixed_point.h"
+#include "videosynth/frame_line_layout.h"
 #include "videosynth/generation_stage.h"
 #include "videosynth/progressive_frame_source.h"
 #include "videosynth/signal_shaping.h"
@@ -1211,29 +1212,31 @@ TEST(GenerationStageChromaTest,
               0.15);
 }
 
-TEST(GenerationStageProgressiveTest, NtscMkvUsesField2DominantRowPairing) {
-  const std::string source_path =
-      (std::filesystem::path(VIDEOSYNTH_SOURCE_DIR) /
-       "videosynth-assets/assets/mkv/720x486/MOVING_ZONE_2H.mkv")
-          .string();
-
+// Checks that the upper field of each frame samples the progressive source's
+// even rows and the lower field its odd rows. upper_field_index_1based is 1 on
+// 625-line standards and 2 on 525-line standards.
+void ExpectUpperFieldSamplesEvenSourceRows(Standard standard,
+                                           const std::string& source_path,
+                                           int upper_field_index_1based) {
   ProgressiveFrameSource progressive_source;
   std::shared_ptr<const FrameSourceImage> source_frame;
   std::string source_error;
   Section section;
   section.type = "progressive";
   section.source = source_path;
-  ASSERT_TRUE(progressive_source.GenerateFrame(section, 0, Standard::kNtsc,
+  ASSERT_TRUE(progressive_source.GenerateFrame(section, 0, standard,
                                                &source_frame, &source_error));
 
-  const TimingConstants ntsc = GetTimingConstants(Standard::kNtsc);
+  const TimingConstants timing = GetTimingConstants(standard);
   const int active_start =
-      ActiveWindowStartSamples(Standard::kNtsc, ntsc.sample_rate_4fsc_hz);
+      ActiveWindowStartSamples(standard, timing.sample_rate_4fsc_hz);
   const int active_window_samples =
-      ActiveWindowEndSamples(Standard::kNtsc, ntsc.sample_rate_4fsc_hz) -
+      ActiveWindowEndSamples(standard, timing.sample_rate_4fsc_hz) -
       active_start;
 
-  const int active_lines_per_field = 240;
+  const ActiveRasterGeometry geometry =
+      GetActiveRasterGeometry(standard, timing.sample_rate_4fsc_hz);
+  const int active_lines_per_field = geometry.active_lines_per_field;
   int selected_field_line = -1;
   int selected_x_sample = -1;
   for (int field_line = 0;
@@ -1267,27 +1270,35 @@ TEST(GenerationStageProgressiveTest, NtscMkvUsesField2DominantRowPairing) {
   std::vector<SampleFixed> y;
   std::vector<SampleFixed> c;
   ASSERT_TRUE(generation.Generate(
-      MakeProgressiveSourceProject(Standard::kNtsc, source_path), &y, &c,
-      &errors));
+      MakeProgressiveSourceProject(standard, source_path), &y, &c, &errors));
 
-  const SignalLevels levels = GetSignalLevels(Standard::kNtsc);
-  const int field1_line_start =
-      ((22 + selected_field_line) - 1) * ntsc.samples_per_line_4fsc;
-  const int field2_line_start =
-      ((284 + selected_field_line) - 1) * ntsc.samples_per_line_4fsc;
+  const SignalLevels levels = GetSignalLevels(standard);
+  // 625-line frames carry two long lines (313 and 625), so line starts come
+  // from the frame layout rather than a nominal line length.
+  const std::vector<int> line_offsets =
+      BuildLineSampleOffsets(BuildLineSampleCounts(
+          standard, timing.lines_per_frame, timing.samples_per_line_4fsc));
+  const int field1_line_start = line_offsets[static_cast<std::size_t>(
+      geometry.first_active_line_field1 + selected_field_line - 1)];
+  const int field2_line_start = line_offsets[static_cast<std::size_t>(
+      geometry.first_active_line_field2 + selected_field_line - 1)];
   const int sample_offset = active_start + selected_x_sample;
 
-  const double expected_field1 = LumaMillivoltsFromCodeForTest(
+  const double even_row_mv = LumaMillivoltsFromCodeForTest(
+      source_frame
+          ->PixelAt(pixel_x, source_frame->active_y + (2 * selected_field_line))
+          .y,
+      levels);
+  const double odd_row_mv = LumaMillivoltsFromCodeForTest(
       source_frame
           ->PixelAt(pixel_x,
                     source_frame->active_y + (2 * selected_field_line + 1))
           .y,
       levels);
-  const double expected_field2 = LumaMillivoltsFromCodeForTest(
-      source_frame
-          ->PixelAt(pixel_x, source_frame->active_y + (2 * selected_field_line))
-          .y,
-      levels);
+  const double expected_field1 =
+      (upper_field_index_1based == 1) ? even_row_mv : odd_row_mv;
+  const double expected_field2 =
+      (upper_field_index_1based == 1) ? odd_row_mv : even_row_mv;
 
   EXPECT_NEAR(
       SampleFixedToMillivolts(
@@ -1297,6 +1308,24 @@ TEST(GenerationStageProgressiveTest, NtscMkvUsesField2DominantRowPairing) {
       SampleFixedToMillivolts(
           y[static_cast<std::size_t>(field2_line_start + sample_offset)]),
       expected_field2, 1.0);
+}
+
+TEST(GenerationStageProgressiveTest, NtscMkvField2SamplesEvenSourceRows) {
+  ExpectUpperFieldSamplesEvenSourceRows(
+      Standard::kNtsc,
+      (std::filesystem::path(VIDEOSYNTH_SOURCE_DIR) /
+       "videosynth-assets/assets/mkv/720x486/MOVING_ZONE_2H.mkv")
+          .string(),
+      2);
+}
+
+TEST(GenerationStageProgressiveTest, PalMkvField1SamplesEvenSourceRows) {
+  ExpectUpperFieldSamplesEvenSourceRows(
+      Standard::kPal,
+      (std::filesystem::path(VIDEOSYNTH_SOURCE_DIR) /
+       "videosynth-assets/assets/mkv/720x576/MOVING_ZONE_2H.mkv")
+          .string(),
+      1);
 }
 
 Project MakePalPilotBurstProject() {

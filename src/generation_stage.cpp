@@ -1700,9 +1700,13 @@ void GenerationStage::SynthesiseTemplate(
   std::vector<SampleFixed>& line_luma = resources.line_luma;
   std::vector<SampleFixed>& filtered_line_luma = resources.filtered_line_luma;
 
-  // Progressive imports use field-2-dominant row pairing; the section type
-  // decides it once per frame rather than once per active sample.
-  const bool progressive_section = section.type == "progressive";
+  // A progressive picture's even rows (0, 2, ...) belong to the upper field:
+  // field 1 on 625-line systems (its picture opens on line 23, above field
+  // 2's line 336), field 2 on 525-line systems (its picture opens on line
+  // 283, above field 1's line 22). Decided once per frame rather than once
+  // per active sample.
+  const int upper_field_index_1based =
+      Is625LineStandard(video_standard) ? 1 : 2;
 
   // The clean frame repeats exactly every colour sequence period, so the
   // absolute sample base derives from the reduced phase: the subcarrier
@@ -1873,18 +1877,16 @@ void GenerationStage::SynthesiseTemplate(
                          phase_offset);
 
         // Map field lines onto progressive source rows by interleaving
-        // fields. Progressive imports use field-2-dominant row pairing, so
-        // field 1 consumes odd rows and field 2 consumes even rows. The row
-        // is the same for every sample of the line. Each field reads its own
-        // source frame (they differ only across a 2:3 pulldown picture).
+        // fields: the upper field consumes even rows and the lower field odd
+        // rows. The row is the same for every sample of the line. Each field
+        // reads its own source frame (they differ only across a 2:3 pulldown
+        // picture).
         const FrameSourceImage& source_frame =
             *field_sources[line.field_index_1based == 1 ? 0U : 1U];
         const int field_line = active_y % synth.active.active_lines_per_field;
         const int source_row =
-            source_frame.active_y +
-            ((line.field_index_1based == 1)
-                 ? (2 * field_line + (progressive_section ? 1 : 0))
-                 : (2 * field_line + (progressive_section ? 0 : 1)));
+            source_frame.active_y + (2 * field_line) +
+            ((line.field_index_1based == upper_field_index_1based) ? 0 : 1);
 
         // Samples that used to be skipped one at a time form a suffix of the
         // active window: the sample index leaves the line, or the mapped
