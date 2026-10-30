@@ -6,7 +6,7 @@ The repository ships a set of hand-authored projects under `projects/`, covering
 
 | Directory | Contents |
 |-----------|----------|
-| `projects/general/` | Feature examples — audio, EFM audio, VITS, progressive EXR and MKV sources, the PAL pilot burst, NTSC film with 2:3 pulldown |
+| `projects/general/` | Feature examples — audio, EFM audio, VITS, progressive EXR and MKV sources, the PAL pilot burst, the NTSC VBI burst, NTSC film with 2:3 pulldown |
 | `projects/general-yc/` | PAL and NTSC audio examples with Y/C output |
 | `projects/stacking/` | Laserdisc disc simulation and multi-source stacking sets for PAL, PAL-M and NTSC |
 | `projects/long-form/` | Three-hour capture-sized PAL and NTSC examples, for testing against realistic file sizes |

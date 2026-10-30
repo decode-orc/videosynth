@@ -1,0 +1,44 @@
+project:
+  name: NtscLaserdiscVbiBurstFixture
+  version: "1.0"
+  description: NTSC Laserdisc VBI burst fixture — exercises the colour burst on the equalizing and broad sync pulses (IEC 60857 §9.1.2) across a representative set of test patterns
+
+cvbs_presets:
+  video_standard_preset: NTSC
+  sample_encoding_preset: CVBS_S16_4FSC
+  signal_state_preset: STANDARD_STABLE_LOCKED
+  ntsc_laserdisc_vbi_burst: true
+
+output:
+  video_path: "{output}/videosynth_ntsc_vbi_burst.cvbs"
+
+sections:
+  - name: NtscVbiBurst100Bars
+    type: progressive
+    source: "{bundled}/exr/720x486/100_BARS.exr"
+    duration_frames: 4
+
+  - name: NtscVbiBurst75Bars
+    type: progressive
+    source: "{bundled}/exr/720x486/75_BARS.exr"
+    duration_frames: 4
+
+  - name: NtscVbiBurstLumaRamp
+    type: progressive
+    source: "{bundled}/exr/720x486/LUMA_RAMP.exr"
+    duration_frames: 4
+
+  - name: NtscVbiBurstChromaRamp
+    type: progressive
+    source: "{bundled}/exr/720x486/CHROMA_RAMP.exr"
+    duration_frames: 4
+
+  - name: NtscVbiBurstSmpteBars
+    type: progressive
+    source: "{bundled}/exr/720x486/SMPTE_BARS_001.exr"
+    duration_frames: 4
+
+  - name: NtscVbiBurstTartan
+    type: progressive
+    source: "{bundled}/exr/720x486/TARTAN.exr"
+    duration_frames: 4

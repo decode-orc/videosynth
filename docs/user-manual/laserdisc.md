@@ -279,6 +279,7 @@ The colour field sequence follows the disc's video frames throughout, so it stay
 
 - **VITS on the laserdisc lines.** The broadcast VITS lines collide with the reserved code ranges, so use `placement: laserdisc`. NTSC discs *must* carry `virs` — see [VITS](vits.md).
 - **The pilot burst.** PAL discs carry a 3.75 MHz burst on every sync pulse (`pal_laserdisc_pilot_burst: true`), which needs a signed or raw [sample encoding](video-signal.md#sample-encodings) to avoid clipping.
+- **The VBI burst.** NTSC discs keep the colour burst on the equalising and broad sync lines of the vertical interval (`ntsc_laserdisc_vbi_burst: true`); the burst on the broad pulses dips below sync tip, so it too needs a signed or raw [sample encoding](video-signal.md#sample-encodings) to avoid clipping.
 - **No VITC.** Laserdisc uses the IEC biphase system as its sole timecode mechanism, and a `vitc` injection alongside a `laserdisc` one is a validation error. (VITC is not implemented at all in the current runtime, so the question does not arise in practice.)
 - **EFM digital audio**, optionally — see [Audio](audio.md). Note that `section_type` alone drives the EFM disc-area mapping, so a project can have an EFM lead-in without carrying biphase codes at all.
 

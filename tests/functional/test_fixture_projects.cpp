@@ -11,6 +11,8 @@
 #include <gtest/gtest.h>
 #include <sqlite3.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -27,6 +29,7 @@
 #include "videosynth/progressive_frame_source_probe.h"
 #include "videosynth/project_validator.h"
 #include "videosynth/signal_shaping.h"
+#include "videosynth/signal_timing_model.h"
 #include "videosynth/timing_constants.h"
 #include "videosynth/yaml_project_parser.h"
 
@@ -617,6 +620,59 @@ TEST(ProjectFixturesTest, PalPilotBurstFixtureParsesValidatesAndGenerated) {
   }
   EXPECT_TRUE(oscillates)
       << "pal_pilot_burst.yaml: sync pulse must carry the 3.75 MHz pilot burst";
+}
+
+TEST(ProjectFixturesTest, NtscVbiBurstFixtureParsesValidatesAndGenerates) {
+  YamlProjectParser parser;
+  ProjectValidator validator;
+  GenerationStage generation;
+
+  const ParseResult parsed =
+      parser.ParseFile(FixturePath("general/ntsc_vbi_burst.yaml"));
+  ASSERT_TRUE(parsed.ok);
+
+  Project project = parsed.project;
+  ResolveFixtureProjectPaths(&project,
+                             FixtureProjectDir("general/ntsc_vbi_burst.yaml"));
+
+  EXPECT_EQ(project.cvbs_presets.video_standard_preset, Standard::kNtsc);
+  EXPECT_TRUE(project.cvbs_presets.ntsc_laserdisc_vbi_burst);
+  ASSERT_EQ(project.sections.size(), 6U);
+
+  const ValidationResult validation = validator.Validate(project);
+  ASSERT_TRUE(validation.is_valid)
+      << (!validation.errors.empty() ? validation.errors[0]
+                                     : "unknown validation error");
+  EXPECT_TRUE(validation.warnings.empty());
+
+  std::vector<SampleFixed> y_mv;
+  std::vector<SampleFixed> c_mv;
+  std::vector<std::string> errors;
+  ASSERT_TRUE(generation.Generate(project, &y_mv, &c_mv, &errors));
+  ASSERT_TRUE(errors.empty());
+
+  const TimingConstants timing = GetTimingConstants(Standard::kNtsc);
+  EXPECT_EQ(
+      y_mv.size(),
+      static_cast<std::size_t>(SamplesPerFrame4fsc(Standard::kNtsc)) * 24U);
+
+  // Line 4 of frame 1 is a broad field-sync line: its burst gate must carry
+  // the colour burst.
+  const int line_offset = 3 * timing.samples_per_line_4fsc;
+  const int gate_start =
+      line_offset +
+      BurstStartSamples(Standard::kNtsc, timing.sample_rate_4fsc_hz);
+  const int gate_end =
+      line_offset +
+      BurstEndSamples(Standard::kNtsc, timing.sample_rate_4fsc_hz);
+  double peak_mv = 0.0;
+  for (int i = gate_start; i < gate_end; ++i) {
+    peak_mv = std::max(
+        peak_mv,
+        std::abs(SampleFixedToMillivolts(c_mv[static_cast<std::size_t>(i)])));
+  }
+  EXPECT_GT(peak_mv, 100.0)
+      << "ntsc_vbi_burst.yaml: broad sync line must carry the colour burst";
 }
 
 TEST(ProjectFixturesTest,

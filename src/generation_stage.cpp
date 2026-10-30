@@ -968,6 +968,8 @@ struct GenerationStage::SynthesisResources {
   std::vector<double> burst_envelope_mv;
 
   bool pal_pilot_burst = false;
+  // NTSC LaserDisc: colour burst on the equalizing and broad sync lines too.
+  bool ntsc_vbi_burst = false;
   double pilot_omega = 0.0;
   int pilot_q_samples = 0;
   int pilot_r_samples = 0;
@@ -1142,6 +1144,8 @@ bool GenerationStage::SynthesisResourceCache::Build(
                            out->synth.burst_rise_samples);
   }
 
+  out->ntsc_vbi_burst = project.cvbs_presets.ntsc_laserdisc_vbi_burst &&
+                        standard == Standard::kNtsc;
   out->pal_pilot_burst = project.cvbs_presets.pal_laserdisc_pilot_burst &&
                          standard == Standard::kPal;
   out->pilot_omega =
@@ -1789,6 +1793,12 @@ void GenerationStage::SynthesiseTemplate(
       // follows the same ±135° alternating pattern as 625-line PAL.
       burst_enabled = PalMBurstEnabledForLine(sequence_phase, line);
       burst_phase_rad = PalBurstPhaseRadForLine(sequence_phase, line);
+    } else if (resources.ntsc_vbi_burst) {
+      // IEC 60857 §9.1.2 fig 6a: the colour burst continues through the
+      // vertical interval, one per line at the normal gate position. On the
+      // broad field-sync pulses it rides on sync tip, as the chroma channel
+      // adds to whatever luma lies beneath the gate.
+      burst_enabled = true;
     }
 
     if (burst_enabled) {

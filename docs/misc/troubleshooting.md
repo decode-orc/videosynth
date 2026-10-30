@@ -22,7 +22,11 @@ Once any section is a `lead_in` or `lead_out`, the sequence must be `[lead_in] p
 
 ### `pal_laserdisc_pilot_burst can only be enabled for PAL projects`
 
-The pilot burst is defined by IEC 60856 for PAL Laservision. For NTSC there is no equivalent option that is currently implemented.
+The pilot burst is defined by IEC 60856 for PAL Laservision. The NTSC laserdisc equivalent is `ntsc_laserdisc_vbi_burst`.
+
+### `ntsc_laserdisc_vbi_burst can only be enabled for NTSC projects`
+
+The VBI burst is defined by IEC 60857 for NTSC Laservision. Remove it from PAL, PAL-M and SECAM projects; PAL laserdisc projects use `pal_laserdisc_pilot_burst`.
 
 ### `signal_state_preset must be 'STANDARD_STABLE_UNLOCKED' for SECAM projects`
 
@@ -40,10 +44,6 @@ A warning, not an error. SECAM uses the 625-line PAL VITS catalogue, so VITS lin
 
 A warning, not an error. Field identification is a SECAM signal; remove the key from PAL, NTSC and PAL-M projects.
 
-### `ntsc_laserdisc_vbi_burst is parsed but not implemented in the current runtime`
-
-The option exists in the schema but has no signal behaviour, so enabling it is an error rather than a silent no-op. Remove it or set it to `false`.
-
 ### `ntsc_black_setup_ire can only be specified for NTSC or PAL-M projects`
 
 The setup pedestal is a System M concept. Remove the key from PAL projects.
@@ -51,6 +51,10 @@ The setup pedestal is a System M concept. Remove the key from PAL projects.
 ### `pal_laserdisc_pilot_burst warning: preset 'CVBS_U10_4FSC' clips sub-sync excursions below -300 mV`
 
 A warning, not an error. The pilot burst trough reaches −600 mV, which an unsigned preset cannot represent. Switch to `CVBS_S16_4FSC`, `RAW_S16_28M` or `RAW_S16_40M` to keep the full waveform, or accept the clipping if the burst is not what you are testing.
+
+### `ntsc_laserdisc_vbi_burst warning: preset 'CVBS_U10_4FSC' clips sub-sync excursions below sync tip`
+
+A warning, not an error. The colour burst on the broad field-sync pulses is centred on sync tip and reaches −60 IRE, below the lowest legal code of an unsigned preset. Switch to `CVBS_S16_4FSC`, `RAW_S16_28M` or `RAW_S16_40M` to keep the full waveform, or accept the clipping if the burst is not what you are testing.
 
 ## Sources
 

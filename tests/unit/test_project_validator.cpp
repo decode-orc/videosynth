@@ -547,20 +547,36 @@ TEST(ProjectValidatorTest, NoPilotBurstClippingWarningWhenBurstDisabled) {
   EXPECT_TRUE(result.warnings.empty());
 }
 
-TEST(ProjectValidatorTest, RejectsNtscLaserdiscVbiBurstAsDeferredFeature) {
+TEST(ProjectValidatorTest, AcceptsNtscLaserdiscVbiBurstOnNtscProject) {
   Project project = MakeValidProject();
   project.cvbs_presets.video_standard_preset = Standard::kNtsc;
+  project.cvbs_presets.sample_encoding_preset = "CVBS_S16_4FSC";
   project.cvbs_presets.ntsc_laserdisc_vbi_burst = true;
 
   ProjectValidator validator;
   const ValidationResult result = validator.Validate(project);
 
-  EXPECT_FALSE(result.is_valid);
-  ASSERT_EQ(result.errors.size(), 1U);
-  EXPECT_EQ(
-      result.errors[0],
-      "Project configuration error: ntsc_laserdisc_vbi_burst is parsed but "
-      "not implemented in the current runtime.");
+  EXPECT_TRUE(result.is_valid);
+  EXPECT_TRUE(result.errors.empty());
+  EXPECT_TRUE(result.warnings.empty());
+}
+
+TEST(ProjectValidatorTest, WarnsNtscVbiBurstClippingWithU10Preset) {
+  Project project = MakeValidProject();
+  project.cvbs_presets.video_standard_preset = Standard::kNtsc;
+  project.cvbs_presets.sample_encoding_preset = "CVBS_U10_4FSC";
+  project.cvbs_presets.ntsc_laserdisc_vbi_burst = true;
+
+  ProjectValidator validator;
+  const ValidationResult result = validator.Validate(project);
+
+  EXPECT_TRUE(result.is_valid);
+  ASSERT_EQ(result.warnings.size(), 1U);
+  EXPECT_EQ(result.warnings[0],
+            "ntsc_laserdisc_vbi_burst warning: preset 'CVBS_U10_4FSC' clips "
+            "sub-sync excursions below sync tip; the colour burst on the "
+            "broad field-sync pulses reaches -60 IRE. Use CVBS_S16_4FSC or "
+            "RAW_S16_28M/RAW_S16_40M to preserve the full burst waveform.");
 }
 
 TEST(ProjectValidatorTest, AcceptsProjectVitsSet) {

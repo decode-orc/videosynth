@@ -41,7 +41,7 @@ Generation always happens on the 4fsc lattice. The raw presets are produced by r
 
 Start with `CVBS_U10_4FSC`. It is what the decoding tool chain expects and it is the smallest of the 4fsc formats in practice.
 
-Choose a **signed** preset — `CVBS_S16_4FSC` — or a raw preset when the signal contains **excursions below the 10-bit legal-code floor**. The clearest case is the PAL laserdisc pilot burst, whose trough reaches −600 mV, well under the −300 mV that the unsigned presets can represent. Generating a pilot-burst project with an unsigned preset is legal, and videosynth warns you that the burst trough is being clipped:
+Choose a **signed** preset — `CVBS_S16_4FSC` — or a raw preset when the signal contains **excursions below the 10-bit legal-code floor**. The clearest case is the PAL laserdisc pilot burst, whose trough reaches −600 mV, well under the −300 mV that the unsigned presets can represent. The NTSC laserdisc VBI burst is the other: on the broad field-sync pulses it reaches −60 IRE, below sync tip. Generating either with an unsigned preset is legal, and videosynth warns you that the burst trough is being clipped:
 
 ```text
 [warning] pal_laserdisc_pilot_burst warning: preset 'CVBS_U10_4FSC' clips
@@ -121,10 +121,14 @@ SECAM projects cannot use the laserdisc features: there is no SECAM LaserVision 
 
 ### NTSC laserdisc VBI burst
 
-The NTSC counterpart to the pilot burst, inserting colour burst on the equalising and broad sync pulses (IEC 60857 §9.1.2).
+```yaml
+cvbs_presets:
+  ntsc_laserdisc_vbi_burst: true
+```
 
-!!! warning "Not implemented"
-    `ntsc_laserdisc_vbi_burst` is parsed and its NTSC-only scope is checked, but the signal behaviour does not exist yet. Setting it to `true` is a validation error rather than a silent no-op. Leave it out.
+Standard NTSC suppresses the colour burst on the equalising and broad sync lines of the vertical interval. An NTSC LaserDisc keeps it there: IEC 60857 §9.1.2 requires the burst on every line, once per line at its normal position after 0H (Figure 6a). With this option the burst continues through lines 1–9 and 264–272 with the same amplitude and the same continuous subcarrier phase as every other line. The burst is added in the chroma channel, so on the equalising lines it sits at blanking and on the broad field-sync lines, where the gate falls inside the broad pulse, it is centred on sync tip.
+
+NTSC only — enabling it on a PAL, PAL-M or SECAM project is a validation error. The burst on the broad pulses dips to −60 IRE, below the NTSC 10-bit legal-code floor at sync tip, so pair it with a signed or raw sample encoding to keep the whole waveform; an unsigned preset clips it and produces a warning.
 
 ### NTSC black setup
 

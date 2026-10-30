@@ -1660,6 +1660,143 @@ TEST(GenerationStageTest, PalSyncSamplesAreConstantWithoutPilotBurst) {
       << "Without pilot burst, flat sync region must be constant at sync tip";
 }
 
+Project MakeNtscVbiBurstProject() {
+  Project project = MakeProject(Standard::kNtsc);
+  project.cvbs_presets.ntsc_laserdisc_vbi_burst = true;
+  return project;
+}
+
+// Largest chroma magnitude inside the colour burst gate of an NTSC line.
+double NtscBurstGatePeakMv(const std::vector<SampleFixed>& c, int line_1based) {
+  const TimingConstants ntsc = GetTimingConstants(Standard::kNtsc);
+  const int line_start = (line_1based - 1) * ntsc.samples_per_line_4fsc;
+  const int gate_start =
+      line_start + BurstStartSamples(Standard::kNtsc, ntsc.sample_rate_4fsc_hz);
+  const int gate_end =
+      line_start + BurstEndSamples(Standard::kNtsc, ntsc.sample_rate_4fsc_hz);
+  double peak = 0.0;
+  for (int i = gate_start; i < gate_end; ++i) {
+    peak = std::max(
+        peak,
+        std::abs(SampleFixedToMillivolts(c[static_cast<std::size_t>(i)])));
+  }
+  return peak;
+}
+
+// IEC 60857 §9.1.2 fig 6a: an NTSC LaserDisc carries colour burst on every
+// line of the vertical interval, including the equalizing and broad
+// field-sync lines of both fields, at the amplitude of the normal burst.
+TEST(GenerationStageTest,
+     NtscLaserdiscVbiBurstPresentOnEqualizingAndBroadSyncLines) {
+  GenerationStage stage;
+  std::vector<SampleFixed> y, c;
+  std::vector<std::string> errors;
+  ASSERT_TRUE(stage.Generate(MakeNtscVbiBurstProject(), &y, &c, &errors));
+  ASSERT_TRUE(errors.empty());
+
+  const double reference_peak_mv = NtscBurstGatePeakMv(c, 20);
+  ASSERT_GT(reference_peak_mv, 100.0);
+  int vbi_sync_lines = 0;
+  for (int line = 1; line <= 525; ++line) {
+    if (BuildLineTimingPrimitive(Standard::kNtsc, line).sync_pulse_kind ==
+        SyncPulseKind::kHorizontal) {
+      continue;
+    }
+    ++vbi_sync_lines;
+    EXPECT_NEAR(NtscBurstGatePeakMv(c, line), reference_peak_mv, 1.0)
+        << "line " << line;
+  }
+  EXPECT_EQ(vbi_sync_lines, 18);
+}
+
+// Without the LaserDisc option the equalizing and broad sync lines keep the
+// standard NTSC burst suppression.
+TEST(GenerationStageTest, NtscVbiSyncLinesCarryNoBurstWithoutLaserdiscOption) {
+  GenerationStage stage;
+  std::vector<SampleFixed> y, c;
+  std::vector<std::string> errors;
+  ASSERT_TRUE(stage.Generate(MakeProject(Standard::kNtsc), &y, &c, &errors));
+  ASSERT_TRUE(errors.empty());
+
+  for (int line = 1; line <= 525; ++line) {
+    if (BuildLineTimingPrimitive(Standard::kNtsc, line).sync_pulse_kind !=
+        SyncPulseKind::kHorizontal) {
+      EXPECT_EQ(NtscBurstGatePeakMv(c, line), 0.0) << "line " << line;
+    }
+  }
+}
+
+// The VBI burst is the same continuous subcarrier as the normal burst: 910
+// samples per line advance it by π, so lines an even distance apart carry
+// identical burst samples.
+TEST(GenerationStageTest, NtscLaserdiscVbiBurstFollowsContinuousSubcarrier) {
+  GenerationStage stage;
+  std::vector<SampleFixed> y, c;
+  std::vector<std::string> errors;
+  ASSERT_TRUE(stage.Generate(MakeNtscVbiBurstProject(), &y, &c, &errors));
+  ASSERT_TRUE(errors.empty());
+
+  const TimingConstants ntsc = GetTimingConstants(Standard::kNtsc);
+  const int gate_start =
+      BurstStartSamples(Standard::kNtsc, ntsc.sample_rate_4fsc_hz);
+  const int gate_end =
+      BurstEndSamples(Standard::kNtsc, ntsc.sample_rate_4fsc_hz);
+  // Line 1 (equalizing), line 4 (broad) and line 268 (broad, field 2) against
+  // horizontal lines an even number of lines later.
+  for (const auto& [vbi_line, picture_line] :
+       std::vector<std::pair<int, int>>{{1, 21}, {4, 20}, {268, 290}}) {
+    for (int k = gate_start; k < gate_end; ++k) {
+      EXPECT_EQ(c[static_cast<std::size_t>((vbi_line - 1) * 910 + k)],
+                c[static_cast<std::size_t>((picture_line - 1) * 910 + k)])
+          << "lines " << vbi_line << "/" << picture_line << " sample " << k;
+    }
+  }
+}
+
+// The burst is chroma only: luma is unchanged, so on the broad field-sync
+// pulses the burst rides on sync tip, and the chroma differs from a standard
+// render only inside the burst gates of the equalizing and broad sync lines.
+TEST(GenerationStageTest,
+     NtscLaserdiscVbiBurstLeavesLumaAndOtherChromaUnchanged) {
+  GenerationStage stage;
+  std::vector<SampleFixed> y_burst, c_burst, y_plain, c_plain;
+  std::vector<std::string> errors;
+  ASSERT_TRUE(
+      stage.Generate(MakeNtscVbiBurstProject(), &y_burst, &c_burst, &errors));
+  GenerationStage plain_stage;
+  ASSERT_TRUE(plain_stage.Generate(MakeProject(Standard::kNtsc), &y_plain,
+                                   &c_plain, &errors));
+  ASSERT_TRUE(errors.empty());
+  ASSERT_EQ(y_burst, y_plain);
+  ASSERT_EQ(c_burst.size(), c_plain.size());
+
+  const TimingConstants ntsc = GetTimingConstants(Standard::kNtsc);
+  const SignalLevels levels = GetSignalLevels(Standard::kNtsc);
+  const int gate_start =
+      BurstStartSamples(Standard::kNtsc, ntsc.sample_rate_4fsc_hz);
+  const int gate_end =
+      BurstEndSamples(Standard::kNtsc, ntsc.sample_rate_4fsc_hz);
+  for (std::size_t i = 0; i < c_burst.size(); ++i) {
+    if (c_burst[i] == c_plain[i]) {
+      continue;
+    }
+    const int line = static_cast<int>(i / 910U) + 1;
+    const int offset = static_cast<int>(i % 910U);
+    ASSERT_NE(BuildLineTimingPrimitive(Standard::kNtsc, line).sync_pulse_kind,
+              SyncPulseKind::kHorizontal)
+        << "line " << line;
+    ASSERT_GE(offset, gate_start);
+    ASSERT_LT(offset, gate_end);
+  }
+
+  // Line 4 is a broad field-sync line: the gate lies within the broad pulse.
+  const SampleFixed sync_tip_fixed =
+      MillivoltsToSampleFixed(levels.sync_tip_mv);
+  for (int k = gate_start; k < gate_end; ++k) {
+    EXPECT_EQ(y_burst[static_cast<std::size_t>(3 * 910 + k)], sync_tip_fixed);
+  }
+}
+
 // The 625-line PAL colour sequence repeats exactly every four frames: the
 // subcarrier lattice advances 709,379 ≡ 3 (mod 4) samples per frame (ITU-R
 // BT.1700 Annex 1 Part B Table 1 item 10f gives the burst meander its period of

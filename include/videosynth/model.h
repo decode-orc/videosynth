@@ -164,9 +164,11 @@ inline bool IsSupportedSampleEncodingPreset(const std::string& preset) {
 }
 
 // Returns true if the preset can represent sub-sync excursions (below -300 mV).
-// The PAL pilot burst swings ±300 mV about sync tip, so troughs reach -600 mV.
-// U10/U16/TPG21 presets clamp at the 10-bit legal-code floor (~-300 mV);
-// CVBS_S16_4FSC and RAW_S16_* presets carry the full excursion.
+// The PAL pilot burst swings ±300 mV about sync tip, so troughs reach -600 mV;
+// the NTSC laserdisc VBI burst rides on the broad field-sync pulses, so its
+// troughs reach -60 IRE. U10/U16/TPG21 presets clamp at the 10-bit legal-code
+// floor (sync tip); CVBS_S16_4FSC and RAW_S16_* presets carry the full
+// excursion.
 inline bool IsSubSyncCapableSampleEncodingPreset(const std::string& preset) {
   return preset == "CVBS_S16_4FSC" || preset == "RAW_S16_28M" ||
          preset == "RAW_S16_40M";

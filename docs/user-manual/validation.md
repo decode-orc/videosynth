@@ -31,7 +31,7 @@ Unknown keys are rejected outright, at every level, naming the offending key and
 - `sample_encoding_preset` must be one of the four 4fsc presets or `RAW_S16_28M` / `RAW_S16_40M`.
 - `signal_state_preset` must be `STANDARD_STABLE_LOCKED`, or `STANDARD_STABLE_UNLOCKED` for `SECAM`.
 - `SECAM` projects cannot use laserdisc line injections, `line_injections.disc_type` or laserdisc VITS placement; with VITS a warning notes that VITS chroma stays PAL-modulated. `secam_field_identification: false` on another standard is a warning.
-- `pal_laserdisc_pilot_burst` is PAL only; `ntsc_laserdisc_vbi_burst` is NTSC only and, being unimplemented, is an error if enabled at all.
+- `pal_laserdisc_pilot_burst` is PAL only; `ntsc_laserdisc_vbi_burst` is NTSC only. Either with an unsigned sample encoding (`CVBS_U10_4FSC`, `CVBS_U16_4FSC`, `CVBS_TPG21_4FSC`) is a warning, because the burst trough falls below the legal-code floor and is clipped.
 - `ntsc_black_setup_ire` is NTSC/PAL-M only and must be exactly `7.5` or `0.0`.
 - `output.video_path` is required; with `signal_type: yc` it must end in `.cvbsy`.
 - Output resolution is fixed by the standard and must not appear in the project.
@@ -138,7 +138,6 @@ Some of the intended design is described by the schema but has no runtime behavi
 |---------|--------|
 | `type: vitc` — vertical interval timecode | Error: *line injection type 'vitc' is not implemented in the current runtime* (without `target_lines` it fails earlier, on the missing lines) |
 | `type: line_content` — custom per-line content | Error: *unsupported injection type 'line_content'* |
-| `ntsc_laserdisc_vbi_burst: true` | Error: *parsed but not implemented in the current runtime* |
 
 `laserdisc` is therefore the only usable section-level injection type today, and VITS remain project-level.
 

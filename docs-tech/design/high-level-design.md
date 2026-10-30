@@ -332,7 +332,7 @@ $$
 
 - Line-to-line NTSC burst phase alternates at 4fsc because 910 samples/line corresponds to a $\pi$ radian subcarrier phase advance per line (SMPTE 244M §4.1.1 interpretation in this model).
 - The NTSC colour sequence is modeled as a 2-frame SC-H progression using a frame phase offset of $0$ then $\pi$, repeating (SMPTE 170M field/frame color-sequence behavior).
-- Burst is present on horizontal lines and suppressed on equalizing/broad-sync lines. The NTSC laserdisc VBI burst mode of [IEC 60857](../analogue-video-specifications/docs/laserdisc/IEC-60857-1986-Laservision-NTSC/IEC-60857-1986-Laservision-NTSC.md) §9.1.2 (burst also on equalizing and broad-sync pulses) is not implemented: `ntsc_laserdisc_vbi_burst: true` is a validation error.
+- Burst is present on horizontal lines and suppressed on equalizing/broad-sync lines, except with `ntsc_laserdisc_vbi_burst: true`, which keeps it on every line as [IEC 60857](../analogue-video-specifications/docs/laserdisc/IEC-60857-1986-Laservision-NTSC/IEC-60857-1986-Laservision-NTSC.md) §9.1.2 requires (see Section 9, NTSC Laserdisc VBI Burst).
 
 ### **SECAM Chroma Encoding Model**
 
@@ -375,7 +375,7 @@ Source-range capability note:
 | **Progressive Source Ingestion**| Decode progressive frames, convert to 10-bit 4:4:4 YCbCr BT.601 studio swing, split into interlaced fields. | ITU-R BT.470-6, ITU-R BT.601   |
 | **Sync and Burst Insertion**    | Insert HSync, VSync, equalizing pulses, and colour burst.                                | ITU-R BT.470-6, ITU-R BT.1700   |
 | **PAL Laserdisc Pilot Burst**   | Superimpose a 3.75 MHz pilot burst on all sync pulses when enabled (PAL only).           | IEC 60856 §9.1.2                |
-| **NTSC Laserdisc VBI Burst**    | Not implemented: enabling it is a validation error (target: burst on equalizing and broad sync pulses, NTSC only). | IEC 60857 §9.1.2                |
+| **NTSC Laserdisc VBI Burst**    | Keep the colour burst on the equalizing and broad sync lines when enabled (NTSC only).   | IEC 60857 §9.1.2                |
 | **Line Injections**             | Inject VITS and Laserdisc biphase/FM codes into the VBI (VITC and custom line content are planned, rejected by the validator). | IEC 60856, IEC 60857, SMPTE 12M |
 | **Ramping and Smoothing**       | Apply ramping to transitions to simulate analogue behavior.                              | ITU-R BT.470-6, ITU-R BT.1700   |
 | **OSD Overlay**                 | Render monochrome bitmap-font text into the active picture after biphase injection: luma takes the text level, chroma under the text is cleared (or carries the undeviated SECAM subcarrier). | — |
@@ -855,7 +855,7 @@ The current parser, validator, and runtime implement only a subset of the YAML s
 - `video_standard_preset: SECAM` and `secam_field_identification` (default `true`) are parsed, emitted, validated, and implemented; SECAM requires `signal_state_preset: STANDARD_STABLE_UNLOCKED` (the default when the key is omitted). See [SECAM Chroma Encoding Model](#secam-chroma-encoding-model).
 - `pal_laserdisc_pilot_burst` is parsed, validated, and fully implemented: a 3.75 MHz (240 × f_H) sinusoidal burst at ±300 mV is superimposed on every sync pulse in the Y channel when enabled.
 - `ntsc_black_setup_ire` applies to both System M standards (NTSC and PAL-M).
-- `ntsc_laserdisc_vbi_burst` is parsed and validated for standard compatibility, but its runtime signal behavior remains deferred. Because a silent no-op would produce a file that looks compliant and is not, enabling it is a **validation error** ("ntsc_laserdisc_vbi_burst is parsed but not implemented in the current runtime") rather than being ignored.
+- `ntsc_laserdisc_vbi_burst` is parsed, validated, and implemented: the colour burst is kept on the equalizing and broad sync lines of the vertical interval when enabled.
 
 The remainder of Section 7 should therefore be read as the intended project-file design rather than the currently implemented parser surface.
 
@@ -874,7 +874,7 @@ cvbs_presets:
   sample_encoding_preset: CVBS_U10_4FSC  # CVBS_U10_4FSC, CVBS_U16_4FSC, CVBS_TPG21_4FSC, CVBS_S16_4FSC, RAW_S16_28M, RAW_S16_40M
   signal_state_preset: STANDARD_STABLE_LOCKED  # STANDARD_STABLE_LOCKED; STANDARD_STABLE_UNLOCKED for SECAM (default: per standard)
   pal_laserdisc_pilot_burst: false  # PAL only; inject 3.75 MHz pilot burst on all sync pulses (IEC 60856 §9.1.2); default: false
-  ntsc_laserdisc_vbi_burst: false   # NTSC only; not implemented — true is a validation error (target: IEC 60857 §9.1.2 burst on equalizing/broad sync pulses); default: false
+  ntsc_laserdisc_vbi_burst: false   # NTSC only; colour burst also on the equalizing and broad sync lines (IEC 60857 §9.1.2); default: false
   ntsc_black_setup_ire: 7.5     # NTSC and PAL-M only; allowed values: 7.5 (standard setup) or 0.0 (black = blanking); default: 7.5
   secam_field_identification: true  # SECAM only; field identification signals on lines 7-15 / 320-328; default: true
   # No other key is accepted. Field order/dominance follow the standard,
@@ -1273,7 +1273,7 @@ video_path: "{output}/pal_test_video.cvbs" # run output directory (defaults to t
   - Output resolution is fixed by the standard (720x576 for PAL and SECAM, 720x486 for NTSC and PAL-M) and must not be specified in the project file.
   - `sample_encoding_preset` must be one of the supported 4fsc or raw presets, and `signal_state_preset` must be `STANDARD_STABLE_LOCKED` (`STANDARD_STABLE_UNLOCKED` for SECAM).
   - `pal_laserdisc_pilot_burst` can **only be enabled for PAL projects**; any other standard is **invalid**. With a preset that cannot carry sub-sync excursions (U10/U16/TPG21) a warning is emitted.
-  - `ntsc_laserdisc_vbi_burst` can **only be enabled for NTSC projects**; it is also rejected on NTSC because it is not implemented.
+  - `ntsc_laserdisc_vbi_burst` can **only be enabled for NTSC projects**; any other standard is **invalid**. With a preset that cannot carry sub-sync excursions (U10/U16/TPG21) a warning is emitted.
   - `ntsc_black_setup_ire` can **only be specified for NTSC or PAL-M projects**. If specified for PAL or SECAM, the YAML is considered **invalid**.
   - `ntsc_black_setup_ire` allowed values are `7.5` and `0.0`. `7.5` selects standards-based NTSC setup; `0.0` moves NTSC black level to blanking (`0 IRE`).
 2. **Sections**:
@@ -1795,9 +1795,11 @@ For **HSync, VSync, and colour burst insertion**, refer to:
   - $17\,734\,475 = 25 \times 709\,379$, so the pilot advances a whole number of cycles per PAL frame and its waveform is identical on every frame. The runtime therefore derives each burst's phase from its offset **within** the frame — not from the absolute sample index — and renders every burst of the frame once per run.
   - This extends the signal range 300 mV below standard sync tip; see §6.1 for the headroom rationale and the required internal floating-point representation.
 4. **NTSC Laserdisc VBI Burst** (when `ntsc_laserdisc_vbi_burst: true`):
-  - Insert the standard NTSC **colour burst (3.579545 MHz)** on the back porch of **equalizing pulses and broad (field) sync pulses** during the vertical interval, where burst is normally suppressed in standard NTSC (see [IEC 60857](../analogue-video-specifications/docs/laserdisc/IEC-60857-1986-Laservision-NTSC/IEC-60857-1986-Laservision-NTSC.md) §9.1.2).
-  - The burst uses the same amplitude and phase as regular NTSC colour burst; no new frequency or amplitude is introduced.
-  - This applies to all equalizing pulse and broad sync pulse lines in both Field 1 (lines 1–9) and Field 2 (lines 263–271).
+  - Insert the standard NTSC **colour burst (3.579545 MHz)** on the **equalizing and broad (field) sync lines** of the vertical interval, where burst is normally suppressed in standard NTSC (see [IEC 60857](../analogue-video-specifications/docs/laserdisc/IEC-60857-1986-Laservision-NTSC/IEC-60857-1986-Laservision-NTSC.md) §9.1.2 and Figure 6a).
+  - One burst per line at the normal gate position after 0H — not after the mid-line equalizing or broad pulses. The burst uses the same gate, envelope, amplitude and continuous subcarrier phase as the regular NTSC colour burst; no new frequency or amplitude is introduced.
+  - This applies to every line whose 0H pulse is an equalizing or broad pulse: lines 1–9 in Field 1 and 264–272 in Field 2, the lines the timing model marks non-horizontal.
+  - The burst is written to the C channel, so it adds to the luma beneath the gate: on equalizing lines it sits at blanking, and on broad sync lines — whose broad pulse covers the gate — it is centred on sync tip and reaches −60 IRE. That trough is below the NTSC 10-bit legal-code floor (code 16 = sync tip), so unsigned presets clip it and the validator warns.
+  - The NTSC colour sequence period (2 frames) and the template cache are unaffected; the flag is part of the CVBS presets that key the synthesis-resource and template caches.
 
 ---
 
@@ -2121,7 +2123,7 @@ The rule set below remains the intended validation contract for VITC and custom 
   - Output resolution is fixed by the standard (720x576 for PAL and SECAM, 720x486 for NTSC and PAL-M) and must not be specified in the project file.
   - `sample_encoding_preset` must be a supported 4fsc or raw preset; `signal_state_preset` must be `STANDARD_STABLE_LOCKED` (`STANDARD_STABLE_UNLOCKED` for SECAM).
   - `pal_laserdisc_pilot_burst` can **only be enabled for PAL projects**; any other standard is **invalid**. A warning is emitted when the preset cannot carry the burst's sub-sync trough.
-  - `ntsc_laserdisc_vbi_burst` can **only be enabled for NTSC projects**, and is rejected there as not implemented.
+  - `ntsc_laserdisc_vbi_burst` can **only be enabled for NTSC projects**; any other standard is **invalid**. A warning is emitted when the preset cannot carry the burst's sub-sync trough on the broad pulses.
   - `ntsc_black_setup_ire` can **only be specified for NTSC or PAL-M projects**. If specified for PAL or SECAM, the YAML is considered **invalid**.
   - `ntsc_black_setup_ire` must be either `7.5` or `0.0`.
 2. **Sections**:
@@ -2195,7 +2197,6 @@ Representative messages as emitted by the parser (`src/yaml_project_parser.cpp`)
 | Invalid signal state preset                | "Project configuration error: signal_state_preset must be 'STANDARD_STABLE_LOCKED'." (`… 'STANDARD_STABLE_UNLOCKED' for SECAM projects.`) |
 | Invalid pilot burst                        | "Project configuration error: pal_laserdisc_pilot_burst can only be enabled for PAL projects." |
 | Invalid VBI burst                          | "Project configuration error: ntsc_laserdisc_vbi_burst can only be enabled for NTSC projects." |
-| VBI burst not implemented                  | "Project configuration error: ntsc_laserdisc_vbi_burst is parsed but not implemented in the current runtime." |
 | Invalid NTSC black setup scope             | "Project configuration error: ntsc_black_setup_ire can only be specified for NTSC or PAL-M projects." |
 | Unknown asset root                         | "…: unknown asset root '`<name>`' in `<field>`. Known roots: bundled, user, project, output." |
 | Invalid line injection target lines        | "Line injection validation error: VITS target line `<n>` is outside the valid frame-line range for `<standard>`." |
@@ -2475,8 +2476,6 @@ The following features are **reserved for future implementation**:
     - [ANSI/CTA-608-E S-2019](../analogue-video-specifications/docs/video_metadata/ANSI-CTA-608-E-S-2019/ANSI-CTA-608-E-S-2019.md): Line 21 Data Services.
 2. **VITC and custom per-line content**:
   - Runtime synthesis for the `vitc` injection type (parsed today, rejected by the validator) and for custom per-line content.
-3. **NTSC laserdisc VBI burst**:
-  - Burst on equalizing and broad-sync pulses (`ntsc_laserdisc_vbi_burst`, IEC 60857 §9.1.2), parsed today and rejected by the validator.
 
 ---
 

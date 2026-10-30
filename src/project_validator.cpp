@@ -472,12 +472,15 @@ void ValidateDeferredLaserdiscPresetFlags(
     return;
   }
 
-  if (project.cvbs_presets.ntsc_laserdisc_vbi_burst) {
-    result->is_valid = false;
-    result->errors.push_back(
-        "Project configuration error: ntsc_laserdisc_vbi_burst is parsed but "
-        "not "
-        "implemented in the current runtime.");
+  if (project.cvbs_presets.ntsc_laserdisc_vbi_burst &&
+      !videosynth::IsSubSyncCapableSampleEncodingPreset(
+          project.cvbs_presets.sample_encoding_preset)) {
+    result->warnings.push_back(
+        "ntsc_laserdisc_vbi_burst warning: preset '" +
+        project.cvbs_presets.sample_encoding_preset +
+        "' clips sub-sync excursions below sync tip; the colour burst on the "
+        "broad field-sync pulses reaches -60 IRE. Use CVBS_S16_4FSC or "
+        "RAW_S16_28M/RAW_S16_40M to preserve the full burst waveform.");
   }
 }
 

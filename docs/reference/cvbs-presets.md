@@ -56,6 +56,8 @@ Only one standard per project. The output resolution follows from it and must no
 
 **Warning**: enabling `pal_laserdisc_pilot_burst` with `CVBS_U10_4FSC`, `CVBS_U16_4FSC` or `CVBS_TPG21_4FSC` clips the burst trough at −300 mV, where the waveform reaches −600 mV. Use `CVBS_S16_4FSC` or a raw preset.
 
+**Warning**: enabling `ntsc_laserdisc_vbi_burst` with `CVBS_U10_4FSC`, `CVBS_U16_4FSC` or `CVBS_TPG21_4FSC` clips the colour burst on the broad field-sync pulses at sync tip (−40 IRE), where the waveform reaches −60 IRE. Use `CVBS_S16_4FSC` or a raw preset.
+
 ## `signal_state_preset`
 
 | Standard | Required value |
@@ -79,17 +81,9 @@ Superimposes a 3.75 MHz (240 × f_H) sinusoidal burst at ±300 mV on every sync 
 
 ## `ntsc_laserdisc_vbi_burst`
 
-Inserts colour burst on the equalising and broad sync pulses — IEC 60857 §9.1.2.
+Keeps the colour burst on every line of the vertical interval, including the equalising and broad field-sync lines (lines 1–9 and 264–272) where standard NTSC suppresses it — IEC 60857 §9.1.2 and Figure 6a. Each burst is the normal NTSC burst: same gate position after 0H, amplitude and continuous subcarrier phase. On the broad field-sync lines the gate falls inside the broad pulse, so the burst is centred on sync tip.
 
-!!! warning "Not implemented — enabling it is an error"
-    The key is parsed and its NTSC-only scope is checked, but the runtime signal behaviour does not exist. Setting it to `true` is a validation error:
-
-    ```text
-    Project configuration error: ntsc_laserdisc_vbi_burst is parsed but not
-    implemented in the current runtime.
-    ```
-
-    Leave it out, or set it to `false`.
+**NTSC only.** Enabling it on a PAL, PAL-M or SECAM project is a validation error.
 
 ## `ntsc_black_setup_ire`
 
