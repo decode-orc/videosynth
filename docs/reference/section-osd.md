@@ -50,12 +50,14 @@ Only the **luma** channel is written; chroma is untouched, so overlays are monoc
 
 | Token | Resolves to | When unavailable |
 |-------|-------------|------------------|
-| `{picture_number}` | CAV picture number for this frame, 5 digits zero-padded | `00000` |
+| `{picture_number}` | CAV picture number of the picture this field shows, 5 digits zero-padded (the fields of a `"2:3"` frame can differ) | `00000` |
 | `{biphase_hex}` | 6-digit uppercase hex biphase code words, space separated | `000000` |
 | `{phase_id}` | Colour-frame sequence index (0–3 PAL and PAL-M, 0–1 NTSC and SECAM) | — |
 | `{section_name}` | The section's `name:` verbatim | — |
 | `{timecode}` | CLV programme timecode `HH:MM:SS:FF` | `00:00:00:00` |
 | `{frame_number}` | 1-based position in the whole output, 5 digits zero-padded | — |
+| `{film_frame}` | 0-based source frame shown in the field being drawn | — |
+| `{cadence}` | 2:3 pulldown letter and field within it for the field being drawn, e.g. `B2` | `-` (video cadence) |
 
 Unavailable values render at the **same width** as a real value, so overlay layout never shifts between frames.
 
@@ -64,7 +66,7 @@ An unknown token name is a validation error rather than being rendered literally
 ```text
 OSD validation error in section 'Programme': overlay text contains unknown
 token '{pn}'. Supported tokens: {picture_number}, {biphase_hex}, {phase_id},
-{section_name}, {timecode}, {frame_number}.
+{section_name}, {timecode}, {frame_number}, {film_frame}, {cadence}.
 ```
 
 ### Token sources
@@ -72,6 +74,8 @@ token '{pn}'. Supported tokens: {picture_number}, {biphase_hex}, {phase_id},
 `{picture_number}` and `{biphase_hex}` come from the VBI codes actually written into this frame, captured after biphase injection. They follow whatever the disc is doing — restarting or jumping where a section re-anchors `start_value`, and reading zeros on a project with no laserdisc codes.
 
 `{frame_number}` and `{timecode}` are **positional**: they count from the start of the generated output and are never re-anchored by a section. `{timecode}` runs continuously at the standard's CLV frame rate on any CLV disc, regardless of which codes a section injects.
+
+`{film_frame}` and `{cadence}` are **per field**: each field of a frame resolves them separately, because a [`"2:3"` cadence](sections.md#cadence) can show a different film frame in each field. `{film_frame}` counts frames of the source file, so it includes `start_frame`. A field that repeats the previous field's film frame continues its letter, so the padding field after `C C` reads `C3`.
 
 ## Rendering
 

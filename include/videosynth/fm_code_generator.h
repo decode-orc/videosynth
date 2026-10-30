@@ -26,9 +26,10 @@ namespace videosynth {
 //   value)
 //
 // Per IEC 60857 §10.2.3, the picture number is updated on the second field
-// of each new picture. The caller supplies field_one to CurrentData() to
-// reflect the current field; the emitted value itself does not change between
-// fields.
+// of each new picture. The generator holds the number of the next picture;
+// BiphaseInjectionManager handles the update timing, repeating the previous
+// number on a picture's first field (see DataForValue). The caller supplies
+// field_one to reflect the current field.
 //
 // NTSC maximum: 79,999 (IEC 60857 Amendment 2 §10.2.3).
 // Saturates at the maximum rather than wrapping.
@@ -52,6 +53,10 @@ class FmPictureNumberGenerator {
   //                 kProgrammeArea → current_programme_value()
   //                 kLeadOut → frozen_lead_out_value()
   FmData CurrentData(bool field_one, SectionType section_type) const;
+
+  // Returns FmData carrying picture number `value` (0–79999).
+  //   field_one: true = first field (bit 5 = 1 in the FM word).
+  static FmData DataForValue(int value, bool field_one);
 
   // Advances the generator by one frame.
   // In kProgrammeArea: increments current_programme_value and updates

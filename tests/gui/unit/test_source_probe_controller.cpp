@@ -236,5 +236,32 @@ TEST(SourceProbeControllerTest, RapidRequestsCoalesceToLatestSection) {
   EXPECT_EQ(probed_sources[0], "third.mkv");
 }
 
+TEST(SourceProbeControllerTest, SummaryShowsFilmRateAsFilm) {
+  ProgressiveFrameSourceProfile profile = MakeGoodPalMkvProfile();
+  profile.frame_rate_hz = 24000.0 / 1001.0;
+  const QString summary = FormatSourceProfileSummary(profile);
+  EXPECT_TRUE(summary.contains(QStringLiteral("Film 24000/1001")))
+      << summary.toStdString();
+  EXPECT_FALSE(summary.contains(QStringLiteral("fps")));
+}
+
+TEST(SourceProbeControllerTest, FilmSourceFitsOnlyAPulldownSection) {
+  ProgressiveFrameSourceProfile profile = MakeGoodPalMkvProfile();
+  profile.height = 486;
+  profile.field_order = "bt";
+  profile.frame_rate_hz = 24000.0 / 1001.0;
+  profile.average_frame_rate_hz = profile.frame_rate_hz;
+
+  Section section = MakeMkvSection("film.mkv");
+  EXPECT_FALSE(
+      EvaluateSourceProfile(section, Standard::kNtsc, profile).isEmpty());
+
+  section.cadence.pattern = CadencePattern::kPulldown23;
+  section.cadence.continuity = CadenceContinuity::kContinue;
+  const QStringList issues =
+      EvaluateSourceProfile(section, Standard::kNtsc, profile);
+  EXPECT_TRUE(issues.isEmpty()) << issues.join('\n').toStdString();
+}
+
 }  // namespace
 }  // namespace videosynth::gui

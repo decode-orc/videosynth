@@ -2,7 +2,8 @@
 # File:        test_generate_test_projects.py
 # Module:      project_fixture_tests
 # Purpose:     Self-test of scripts/generate_test_projects.py over in-memory
-#              YAML: capture seeds, section removal and replay.
+#              YAML: capture seeds, section removal and replay, standard,
+#              disc type and laserdisc code rewrites.
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileCopyrightText: 2026 Simon Inns
@@ -246,6 +247,70 @@ class CaptureOverridesTest(unittest.TestCase):
         self.assertEqual(values_of(first, 'timing_offset_samples'), ['-0.3'])
         self.assertIn('chroma_error:\n  gain: 1.05', second)
         self.assertEqual(values_of(second, 'timing_offset_samples'), ['1.0'])
+
+
+FILM_DISC = '''project:
+  name: Film
+cvbs_presets:
+  video_standard_preset: NTSC  # System M
+  sample_encoding_preset: CVBS_U10_4FSC
+output:
+  video_path: "{output}/film.cvbs"
+line_injections:
+  disc_type: CAV
+  vits:
+    - vits_type: virs
+sections:
+  - name: Film
+    line_injections:
+      - type: laserdisc
+        codes:
+          - code_type: picture_number
+            start_value: 1
+          - code_type: chapter_number
+            chapter: 1
+          - code_type: fm_picture_number
+          - code_type: fm_white_flag
+'''
+
+
+class DiscRewriteTest(unittest.TestCase):
+
+    def test_video_standard_and_disc_type_keep_comments(self):
+        derived = gen.derive(FILM_DISC, {'video_standard': 'PAL_M',
+                                         'disc_type': 'CLV'})
+        self.assertIn('video_standard_preset: PAL_M  # System M', derived)
+        self.assertIn('  disc_type: CLV\n', derived)
+
+    def test_missing_target_key_is_an_error(self):
+        with self.assertRaises(ValueError):
+            gen.derive(PRESSING, {'disc_type': 'CLV'})
+
+    def test_replace_codes_swaps_entries_and_drops_their_options(self):
+        derived = gen.replace_codes(FILM_DISC, {
+            'picture_number': ['programme_time_code', 'clv_picture_number'],
+            'fm_picture_number': ['fm_programme_time'],
+        })
+        self.assertIn(
+            '          - code_type: programme_time_code\n'
+            '          - code_type: clv_picture_number\n'
+            '          - code_type: chapter_number\n'
+            '            chapter: 1\n'
+            '          - code_type: fm_programme_time\n'
+            '          - code_type: fm_white_flag\n', derived)
+        self.assertNotIn('start_value', derived)
+
+    def test_replace_codes_with_empty_list_removes_entry(self):
+        derived = gen.replace_codes(FILM_DISC, {'chapter_number': []})
+        self.assertNotIn('chapter', derived)
+        self.assertIn('start_value: 1\n          - code_type: '
+                      'fm_picture_number', derived)
+
+    def test_replace_codes_rejects_unmatched_or_malformed_rules(self):
+        with self.assertRaises(ValueError):
+            gen.replace_codes(FILM_DISC, {'picture_stop': []})
+        with self.assertRaises(ValueError):
+            gen.replace_codes(FILM_DISC, {'picture_number': 'clv_code'})
 
 
 if __name__ == '__main__':

@@ -56,6 +56,8 @@ class SectionListDock : public QWidget {
 
  private:
   void OnAddSection();
+  // Adds a 2:3 pulldown film section (525-line projects only).
+  void OnAddFilmSection();
   void OnRemove();
   void OnDuplicate();
   void OnMoveUp();

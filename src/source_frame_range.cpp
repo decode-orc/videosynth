@@ -12,6 +12,7 @@
 
 #include <algorithm>
 
+#include "videosynth/film_cadence.h"
 #include "videosynth/progressive_frame_source.h"
 
 namespace videosynth {
@@ -84,24 +85,94 @@ bool ResolveSourceFrameRange(const Section& section, int source_frame_count,
 }
 
 std::int64_t SectionOutputFrameCount(const Section& section,
-                                     const SourceFrameRange& range) {
+                                     const SourceFrameRange& range,
+                                     int cadence_start_slot) {
   if (!section.duration_frames_all) {
     return section.duration_frames;
   }
-  return static_cast<std::int64_t>(range.count) *
-         std::max(1, section.duration_frames_repeat);
+  const std::int64_t source_frames =
+      static_cast<std::int64_t>(range.count) *
+      std::max(1, section.duration_frames_repeat);
+  if (section.cadence.pattern == CadencePattern::kPulldown23) {
+    return CadenceOutputFramesForFilmFrames(cadence_start_slot, source_frames);
+  }
+  return source_frames;
 }
 
 std::int64_t KnownSectionOutputFrameCount(const Section& section,
-                                          int source_frame_count) {
+                                          int source_frame_count,
+                                          int cadence_start_slot) {
   if (!section.duration_frames_all) {
     return section.duration_frames;
+  }
+  if (section.cadence.pattern == CadencePattern::kPulldown23 &&
+      cadence_start_slot == kUnknownCadenceSlot) {
+    return -1;
   }
   SourceFrameRange range;
   if (!ResolveSourceFrameRange(section, source_frame_count, &range, nullptr)) {
     return -1;
   }
-  return SectionOutputFrameCount(section, range);
+  return SectionOutputFrameCount(section, range, cadence_start_slot);
+}
+
+std::int64_t KnownSectionPictureCount(const Section& section,
+                                      int source_frame_count,
+                                      int cadence_start_slot) {
+  const std::int64_t output_frames = KnownSectionOutputFrameCount(
+      section, source_frame_count, cadence_start_slot);
+  if (output_frames < 0 ||
+      section.cadence.pattern != CadencePattern::kPulldown23) {
+    return output_frames;
+  }
+  if (cadence_start_slot == kUnknownCadenceSlot) {
+    return -1;
+  }
+  if (section.duration_frames_all) {
+    SourceFrameRange range;
+    if (!ResolveSourceFrameRange(section, source_frame_count, &range,
+                                 nullptr)) {
+      return -1;
+    }
+    return static_cast<std::int64_t>(range.count) *
+           std::max(1, section.duration_frames_repeat);
+  }
+  return CadenceFilmFramesForOutputFrames(cadence_start_slot, output_frames);
+}
+
+std::vector<int> ResolveCadenceStartSlots(
+    const std::vector<Section>& sections,
+    const std::vector<int>& source_frame_counts) {
+  std::vector<int> slots(sections.size(), 0);
+  // The slot after the previous section's last field, or kUnknownCadenceSlot
+  // when unknown. Only meaningful after a 2:3 section.
+  int slot_after_previous = kUnknownCadenceSlot;
+  bool previous_is_pulldown = false;
+  for (std::size_t index = 0; index < sections.size(); ++index) {
+    const Section& section = sections[index];
+    if (section.cadence.pattern != CadencePattern::kPulldown23) {
+      previous_is_pulldown = false;
+      continue;
+    }
+    int start_slot = CadencePhaseStartSlot(section.cadence.phase);
+    if (section.cadence.continuity == CadenceContinuity::kContinue &&
+        previous_is_pulldown) {
+      start_slot = slot_after_previous;
+    }
+    slots[index] = start_slot;
+
+    const int source_frame_count = index < source_frame_counts.size()
+                                       ? source_frame_counts[index]
+                                       : kUnknownSourceFrameCount;
+    const std::int64_t output_frames =
+        KnownSectionOutputFrameCount(section, source_frame_count, start_slot);
+    slot_after_previous =
+        (start_slot == kUnknownCadenceSlot || output_frames < 0)
+            ? kUnknownCadenceSlot
+            : CadenceSlotAfter(start_slot, output_frames);
+    previous_is_pulldown = true;
+  }
+  return slots;
 }
 
 int SourceFrameAtSectionPosition(const SourceFrameRange& range,

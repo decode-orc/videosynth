@@ -49,6 +49,16 @@ int RemapBundledDefaultSources(Project* project, Standard standard);
 // colour-bar default source for the matching active raster.
 Section MakeProgressiveSectionTemplate(int ordinal, Standard standard);
 
+// The bundled 24000/1001 film clip MakeFilmSectionTemplate seeds, referenced
+// through the {bundled} logical asset root (525-line raster).
+std::string FilmBundledSource();
+
+// Film section shown with 2:3 pulldown (cadence pattern "2:3", phase A,
+// restarting the cadence), playing every frame of the bundled film clip.
+// Offered for 525-line projects only (SupportsFilmPulldown). `ordinal` seeds
+// the default name ("Film <ordinal>"); `standard` must be NTSC or PAL-M.
+Section MakeFilmSectionTemplate(int ordinal, Standard standard);
+
 // Project-wide line_injections for a laserdisc project: the CAV disc format
 // and, for NTSC/PAL-M, the mandatory virs VITS colour reference
 // (IEC 60857 §9.1.3). Pair this with the laserdisc section templates below,

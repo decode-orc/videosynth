@@ -399,6 +399,89 @@ bool ParseLumaBandwidth(const YAML::Node& node,
   return true;
 }
 
+// Reads a string-valued key into *value. Returns false, with an error naming
+// the key, when the value is not a scalar.
+bool ParseScalarString(const YAML::Node& node, const std::string& key,
+                       const std::string& context, std::string* value,
+                       std::vector<std::string>* errors) {
+  const YAML::Node value_node = node[key];
+  if (!value_node.IsScalar()) {
+    errors->push_back(context + "." + key + " must be a string.");
+    return false;
+  }
+  *value = value_node.as<std::string>("");
+  return true;
+}
+
+// Parses `section.cadence:`, the section's field cadence (pattern, phase and
+// continuity). Unknown values are rejected here so the model only holds
+// valid enumerators; cross-section and standard rules are the validator's.
+bool ParseCadence(const YAML::Node& node, CadenceParameters* cadence,
+                  std::vector<std::string>* errors) {
+  const std::string context = "section.cadence";
+  if (!node.IsMap()) {
+    errors->push_back(context + " must be a map/object.");
+    return false;
+  }
+  const std::set<std::string> keys = {"pattern", "phase", "continuity"};
+  ValidateAllowedKeys(node, keys, context, errors);
+  if (!errors->empty()) {
+    return false;
+  }
+
+  std::string text;
+  if (node["pattern"]) {
+    if (!ParseScalarString(node, "pattern", context, &text, errors)) {
+      return false;
+    }
+    if (text == "video") {
+      cadence->pattern = CadencePattern::kVideo;
+    } else if (text == "2:3") {
+      cadence->pattern = CadencePattern::kPulldown23;
+    } else {
+      errors->push_back(context + ".pattern has unrecognised value '" + text +
+                        "'. Expected one of: video, \"2:3\".");
+      return false;
+    }
+  }
+
+  if (node["phase"]) {
+    if (!ParseScalarString(node, "phase", context, &text, errors)) {
+      return false;
+    }
+    if (text == "A") {
+      cadence->phase = CadencePhase::kA;
+    } else if (text == "B") {
+      cadence->phase = CadencePhase::kB;
+    } else if (text == "C") {
+      cadence->phase = CadencePhase::kC;
+    } else if (text == "D") {
+      cadence->phase = CadencePhase::kD;
+    } else {
+      errors->push_back(context + ".phase has unrecognised value '" + text +
+                        "'. Expected one of: A, B, C, D.");
+      return false;
+    }
+    cadence->phase_specified = true;
+  }
+
+  if (node["continuity"]) {
+    if (!ParseScalarString(node, "continuity", context, &text, errors)) {
+      return false;
+    }
+    if (text == "restart") {
+      cadence->continuity = CadenceContinuity::kRestart;
+    } else if (text == "continue") {
+      cadence->continuity = CadenceContinuity::kContinue;
+    } else {
+      errors->push_back(context + ".continuity has unrecognised value '" +
+                        text + "'. Expected one of: restart, continue.");
+      return false;
+    }
+  }
+  return true;
+}
+
 // Parses one `section.dropouts.random:` or `section.dropouts.scratch:` block.
 template <typename DropoutBlock>
 bool ParseDropoutType(const YAML::Node& node, const std::string& name,
@@ -1004,6 +1087,7 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
                                                   "source",
                                                   "start_frame",
                                                   "end_frame",
+                                                  "cadence",
                                                   "luma_bandwidth",
                                                   "noise",
                                                   "dropouts",
@@ -1111,6 +1195,12 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
                               &result.errors)) {
           return result;
         }
+      }
+
+      if (section_node["cadence"] &&
+          !ParseCadence(section_node["cadence"], &section.cadence,
+                        &result.errors)) {
+        return result;
       }
 
       if (section_node["luma_bandwidth"] &&

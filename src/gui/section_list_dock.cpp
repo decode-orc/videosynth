@@ -13,6 +13,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QItemSelectionModel>
+#include <QMenu>
 #include <QTableView>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -21,6 +22,7 @@
 #include <utility>
 
 #include "project_templates.h"
+#include "section_block_presenters.h"
 
 namespace videosynth::gui {
 
@@ -34,6 +36,21 @@ SectionListDock::SectionListDock(ProjectDocument* document, QWidget* parent)
   auto* buttons = new QHBoxLayout();
   auto* add_button = new QToolButton(this);
   add_button->setText(tr("Add"));
+  // Clicking adds a plain section; the arrow offers the section templates.
+  // The film template is offered only while the project is 525-line.
+  auto* add_menu = new QMenu(add_button);
+  QAction* add_section_action = add_menu->addAction(tr("Section"));
+  QAction* add_film_action = add_menu->addAction(tr("Film (2:3 pulldown)"));
+  connect(add_menu, &QMenu::aboutToShow, this, [this, add_film_action] {
+    add_film_action->setVisible(SupportsFilmPulldown(
+        document_->project().cvbs_presets.video_standard_preset));
+  });
+  connect(add_section_action, &QAction::triggered, this,
+          &SectionListDock::OnAddSection);
+  connect(add_film_action, &QAction::triggered, this,
+          &SectionListDock::OnAddFilmSection);
+  add_button->setMenu(add_menu);
+  add_button->setPopupMode(QToolButton::MenuButtonPopup);
 
   remove_button_ = new QToolButton(this);
   remove_button_->setText(tr("Remove"));
@@ -135,6 +152,12 @@ void SectionListDock::SelectSectionRange(int first, int last) {
 
 void SectionListDock::OnAddSection() {
   AddSection(MakeProgressiveSectionTemplate(
+      document_->section_count() + 1,
+      document_->project().cvbs_presets.video_standard_preset));
+}
+
+void SectionListDock::OnAddFilmSection() {
+  AddSection(MakeFilmSectionTemplate(
       document_->section_count() + 1,
       document_->project().cvbs_presets.video_standard_preset));
 }

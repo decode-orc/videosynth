@@ -14,7 +14,9 @@
 #include <cmath>
 #include <cstdint>
 
+#include "videosynth/film_cadence.h"
 #include "videosynth/progressive_frame_source.h"
+#include "videosynth/source_frame_range.h"
 #include "videosynth/timing_constants.h"
 
 namespace videosynth::gui {
@@ -67,6 +69,12 @@ void SetDropoutAnchor(Parameters* parameters, DropoutAnchor anchor) {
 // Freshly-enabled ramp: audible sweep well inside [0, 22000] Hz.
 constexpr double kDefaultRampStartHz = 200.0;
 constexpr double kDefaultRampEndHz = 4000.0;
+
+// The cycle position a 2:3 section's first field takes, e.g. "B2".
+std::string CadenceStartLabel(int start_slot) {
+  const CadenceField first = CadenceFieldAt(start_slot, 0);
+  return std::string(1, first.letter) + std::to_string(first.field_in_slot);
+}
 
 }  // namespace
 
@@ -409,6 +417,8 @@ void ApplySourceSelectionDefaults(const std::string& previous_source,
     return;
   }
   if (IsProgressiveStillSource(section->source)) {
+    // A still has no film frames to spread over fields.
+    SetCadencePattern(section, CadencePattern::kVideo);
     section->start_frame = 0;
     section->end_frame = 0;
     section->end_frame_specified = false;
@@ -431,6 +441,113 @@ SourceRangeEditorState SourceRangeEditorStateFor(const Section& section,
                       ? std::max(probed_frame_count - 1, stored_max)
                       : unbounded_maximum;
   return state;
+}
+
+bool SupportsFilmPulldown(Standard standard) {
+  return standard == Standard::kNtsc || standard == Standard::kPalM;
+}
+
+CadenceEditorState CadenceEditorStateFor(const Section& section,
+                                         Standard standard) {
+  const bool pulldown = section.cadence.pattern == CadencePattern::kPulldown23;
+  CadenceEditorState state;
+  state.pattern_enabled = SupportsFilmPulldown(standard) || pulldown;
+  state.continue_enabled = state.pattern_enabled && pulldown;
+  state.phase_enabled =
+      state.continue_enabled &&
+      section.cadence.continuity == CadenceContinuity::kRestart;
+  return state;
+}
+
+void SetCadencePattern(Section* section, CadencePattern pattern) {
+  if (section == nullptr) {
+    return;
+  }
+  if (pattern == CadencePattern::kVideo) {
+    section->cadence = CadenceParameters{};
+    return;
+  }
+  section->cadence.pattern = pattern;
+}
+
+void SetCadencePhase(Section* section, CadencePhase phase) {
+  if (section == nullptr) {
+    return;
+  }
+  section->cadence.phase = phase;
+  section->cadence.phase_specified = true;
+}
+
+void SetCadenceContinuity(Section* section, CadenceContinuity continuity) {
+  if (section == nullptr) {
+    return;
+  }
+  section->cadence.continuity = continuity;
+  if (continuity == CadenceContinuity::kContinue) {
+    section->cadence.phase = CadencePhase::kA;
+    section->cadence.phase_specified = false;
+  }
+}
+
+std::string DurationSummaryFor(const Section& section, int probed_frame_count,
+                               int cadence_start_slot) {
+  SourceFrameRange range;
+  std::string range_error;
+  const bool range_known = ResolveSourceFrameRange(section, probed_frame_count,
+                                                   &range, &range_error);
+  const bool pulldown = section.cadence.pattern == CadencePattern::kPulldown23;
+  const bool slot_known = cadence_start_slot != kUnknownCadenceSlot;
+  const std::string unknown_slot_note =
+      "depend on where the previous section's cadence ends";
+
+  if (!section.duration_frames_all) {
+    if (!IsProgressiveVideoSource(section.source)) {
+      return {};
+    }
+    std::string text;
+    std::int64_t played = section.duration_frames;
+    if (pulldown) {
+      if (!slot_known) {
+        return "Film frames played " + unknown_slot_note;
+      }
+      played = CadenceFilmFramesForOutputFrames(cadence_start_slot, played);
+      text = "Plays " + std::to_string(played) + " film frames (2:3 from " +
+             CadenceStartLabel(cadence_start_slot) + ")";
+    }
+    if (range_known && played > range.count) {
+      text += text.empty() ? "Loops" : "; loops";
+      text += " the " + std::to_string(range.count) + "-frame source range";
+    }
+    return text;
+  }
+
+  const int repeat = std::max(1, section.duration_frames_repeat);
+  if (!range_known) {
+    if (probed_frame_count != kUnknownSourceFrameCount) {
+      // The probe answered, so the range itself is invalid.
+      return range_error;
+    }
+    // Probe pending or unavailable: still convey the multiplier.
+    return repeat > 1 ? "Source frame count x " + std::to_string(repeat) +
+                            " (probing source…)"
+                      : "Using source frame count (probing source…)";
+  }
+
+  const std::int64_t total = static_cast<std::int64_t>(range.count) * repeat;
+  const std::string played = std::to_string(range.count) +
+                             (pulldown ? " film frames x " : " frames x ") +
+                             std::to_string(repeat) + " = " +
+                             std::to_string(total);
+  if (!pulldown) {
+    return played + " total";
+  }
+  if (!slot_known) {
+    return played + " film frames; output frames " + unknown_slot_note;
+  }
+  return played + " → " +
+         std::to_string(
+             SectionOutputFrameCount(section, range, cadence_start_slot)) +
+         " frames (2:3 from " + CadenceStartLabel(cadence_start_slot) + ")";
 }
 
 Section ApplySectionEditDelta(const Section& before, const Section& after,
@@ -470,6 +587,12 @@ Section ApplySectionEditDelta(const Section& before, const Section& after,
     const SharedNoiseParameters shared = target.noise.shared;
     target.noise = after.noise;
     target.noise.shared = shared;
+  }
+  // The cadence widgets couple pattern, phase and continuity (see
+  // SetCadencePattern), so the block propagates as a unit.
+  if (!(after.cadence == before.cadence) ||
+      after.cadence.phase_specified != before.cadence.phase_specified) {
+    target.cadence = after.cadence;
   }
   if (!(after.luma_bandwidth == before.luma_bandwidth)) {
     target.luma_bandwidth = after.luma_bandwidth;
@@ -578,6 +701,9 @@ std::vector<OsdTokenHelp> OsdTokenCatalogue() {
        "CLV programme timecode HH:MM:SS:FF, counting from output start "
        "(CLV discs only)"},
       {"{frame_number}", "Sequential output frame number (1-based)"},
+      {"{film_frame}", "Source frame shown in the field being drawn (0-based)"},
+      {"{cadence}",
+       "2:3 pulldown letter and field, e.g. B2 (\"-\" for video cadence)"},
   };
 }
 

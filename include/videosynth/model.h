@@ -447,8 +447,8 @@ inline double OsdBgLevelToLuma(OsdBgLevel level) {
 // Thread-safety: OsdOverlay and OsdConfig are plain data containers with no
 // mutable state. They may be read concurrently from multiple threads.
 struct OsdOverlay {
-  // Literal text or template containing {picture_number}, {biphase_hex},
-  // {phase_id}, or {section_name} tokens (resolved per-frame at render time).
+  // Literal text or template containing tokens such as {picture_number} or
+  // {film_frame} (see OsdTokenResolver), resolved per field at render time.
   std::string text;
   // Active-area x offset in pixels (0 = left edge of active area).
   int x = 0;
@@ -591,6 +591,35 @@ struct AudioChannelPair {
   VideoAudioInput video_audio = {};
 };
 
+// How a section's source frames map onto output fields. kVideo is the native
+// one frame → two fields weave; kPulldown23 spreads 24000/1001 film frames
+// over 59.94 Hz fields in the 2:3 cadence (525-line standards only).
+enum class CadencePattern { kVideo, kPulldown23 };
+
+// The film-frame letter of the 10-field 2:3 cycle `A A B B B C C D D D`
+// whose first field opens a section.
+enum class CadencePhase { kA, kB, kC, kD };
+
+// Where a 2:3 section's cadence starts: at `phase` (kRestart, breaking the
+// cadence at the section boundary) or where the previous 2:3 section's cycle
+// left off (kContinue).
+enum class CadenceContinuity { kRestart, kContinue };
+
+// Thread-safety: CadenceParameters is a plain data container with no mutable
+// state. It may be read concurrently from multiple threads.
+//
+// Per-section field cadence (YAML `cadence:`). The defaults describe a native
+// video section, so an omitted block is the existing behaviour.
+struct CadenceParameters {
+  CadencePattern pattern = CadencePattern::kVideo;
+  CadencePhase phase = CadencePhase::kA;
+  // True when the project file set `phase`, so validation can warn that it is
+  // ignored under `continuity: continue`. Not compared by operator== (the
+  // emitter writes `phase` whenever it is specified or not kA).
+  bool phase_specified = false;
+  CadenceContinuity continuity = CadenceContinuity::kRestart;
+};
+
 struct Section {
   struct LineInjectionCode {
     std::string code_type;
@@ -631,6 +660,7 @@ struct Section {
   // source's last frame.
   int end_frame = 0;
   bool end_frame_specified = false;
+  CadenceParameters cadence = {};
   LumaBandwidthParameters luma_bandwidth = {};
   NoiseParameters noise = {};
   DropoutParameters dropouts = {};
@@ -905,6 +935,11 @@ inline bool operator==(const ProjectLineInjections& a,
          a.vits == b.vits;
 }
 
+inline bool operator==(const CadenceParameters& a, const CadenceParameters& b) {
+  return a.pattern == b.pattern && a.phase == b.phase &&
+         a.continuity == b.continuity;
+}
+
 inline bool operator==(const Section& a, const Section& b) {
   return a.name == b.name && a.type == b.type &&
          a.section_type == b.section_type &&
@@ -914,8 +949,8 @@ inline bool operator==(const Section& a, const Section& b) {
          a.duration_frames_repeat == b.duration_frames_repeat &&
          a.start_frame == b.start_frame && a.end_frame == b.end_frame &&
          a.end_frame_specified == b.end_frame_specified &&
-         a.luma_bandwidth == b.luma_bandwidth && a.noise == b.noise &&
-         a.dropouts == b.dropouts && a.osd == b.osd &&
+         a.cadence == b.cadence && a.luma_bandwidth == b.luma_bandwidth &&
+         a.noise == b.noise && a.dropouts == b.dropouts && a.osd == b.osd &&
          a.audio_channel_pairs == b.audio_channel_pairs;
 }
 

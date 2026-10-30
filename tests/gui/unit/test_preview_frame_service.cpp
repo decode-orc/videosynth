@@ -12,6 +12,7 @@
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -354,6 +355,27 @@ TEST(PreviewFrameServiceTest, OutOfRangeRequestFailsButPublishesSchedule) {
   const PreviewScheduleInfo info =
       service.schedule_info().value_or(PreviewScheduleInfo{});
   EXPECT_EQ(info.output_frame_count, 2U);
+}
+
+TEST(PreviewFrameServiceTest, FieldCadenceNamesEachFieldsFilmFrame) {
+  std::array<IGenerationStage::FieldPicture, 2> fields{};
+  fields[0] = {.source_frame_index = 37,
+               .starts_picture = false,
+               .cadence_letter = 'B',
+               .cadence_field_in_letter = 3};
+  fields[1] = {.source_frame_index = 38,
+               .starts_picture = true,
+               .cadence_letter = 'C',
+               .cadence_field_in_letter = 1};
+  EXPECT_EQ(FormatFieldCadence(fields),
+            QStringLiteral("F1: film 37 (B3) · F2: film 38 (C1)"));
+}
+
+TEST(PreviewFrameServiceTest, FieldCadenceIsEmptyForVideoFrames) {
+  std::array<IGenerationStage::FieldPicture, 2> fields{};
+  fields[0] = {.source_frame_index = 5, .starts_picture = true};
+  fields[1] = {.source_frame_index = 5};
+  EXPECT_TRUE(FormatFieldCadence(fields).isEmpty());
 }
 
 }  // namespace

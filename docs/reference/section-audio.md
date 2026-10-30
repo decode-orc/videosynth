@@ -102,6 +102,8 @@ Mono files play on both channels. Files with more than two channels are rejected
 
 The sound follows the picture. Each output frame takes the soundtrack samples at the time of the source frame it shows (source frame index ÷ frame rate, measured from the video's first frame). So a section with `start_frame` starts the sound at that frame, a fixed duration that [loops the range](../user-manual/sources.md#choosing-frames-from-the-source) loops the sound with it, and each `duration_repeat` pass replays it. Where the soundtrack starts after the first picture, or ends before the last, those frames are silent.
 
+In a [`"2:3"` pulldown section](sections.md#cadence) the sound runs in real time instead of jumping with the cadence: it starts at the time of the range's first film frame and plays on unbroken, because four film frames last exactly as long as five output frames. A looped range or a `duration_repeat` pass still starts it again from the range's first frame.
+
 Mono soundtracks play on both channels and soundtracks with more than two channels are downmixed to stereo. A sample rate other than 48 kHz is resampled.
 
 ## Frame lock

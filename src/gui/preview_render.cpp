@@ -78,24 +78,30 @@ int LineNumberToField(Standard standard, int line_1based) {
 }
 
 std::vector<int> InterlacedLineOrder(Standard standard) {
-  const int total = GetTimingConstants(standard).lines_per_frame;
+  const TimingConstants timing = GetTimingConstants(standard);
+  const int total = timing.lines_per_frame;
   const int field1_lines = Field1LineCount(standard);
   std::vector<int> order;
   order.reserve(static_cast<std::size_t>(std::max(0, total)));
 
-  // Weave field 1 (lines 1..field1_lines) and field 2 (the remainder),
-  // starting with field 1. Any leftover from the longer field is appended.
-  int a = 1;                 // next field-1 line
-  int b = field1_lines + 1;  // next field-2 line
-  bool prefer_a = true;
-  while (static_cast<int>(order.size()) < total) {
-    const bool take_a = (prefer_a && a <= field1_lines) || b > total;
-    if (take_a) {
-      order.push_back(a++);
-    } else {
-      order.push_back(b++);
+  // Pair the lines as the generation stage maps a progressive source onto
+  // them: the n-th picture line of field 2 takes source row 2n and the n-th
+  // of field 1 row 2n + 1, so field 2 line L + offset sits directly above
+  // field 1 line L. Field 2 lines without a field 1 partner go above (before
+  // field 1 line 1) or below (after field 1's last line).
+  const ActiveRasterGeometry active =
+      GetActiveRasterGeometry(standard, timing.sample_rate_4fsc_hz);
+  const int offset =
+      active.first_active_line_field2 - active.first_active_line_field1;
+  int field2_line = field1_lines + 1;
+  for (int field1_line = 1; field1_line <= field1_lines; ++field1_line) {
+    while (field2_line <= total && field2_line <= field1_line + offset) {
+      order.push_back(field2_line++);
     }
-    prefer_a = !prefer_a;
+    order.push_back(field1_line);
+  }
+  while (field2_line <= total) {
+    order.push_back(field2_line++);
   }
   return order;
 }

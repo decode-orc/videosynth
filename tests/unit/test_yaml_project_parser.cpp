@@ -10,6 +10,8 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "videosynth/yaml_project_parser.h"
 
@@ -95,6 +97,76 @@ TEST(YamlProjectParserTest, RejectsNonIntegerEndFrame) {
   EXPECT_FALSE(result.ok);
   ASSERT_FALSE(result.errors.empty());
   EXPECT_NE(result.errors[0].find("end_frame"), std::string::npos)
+      << result.errors[0];
+}
+
+TEST(YamlProjectParserTest, CadenceDefaultsToVideoWhenAbsent) {
+  YamlProjectParser parser;
+  const ParseResult result =
+      parser.ParseString(MakeVideoSectionYaml("    duration_frames: 10\n"));
+
+  ASSERT_TRUE(result.ok);
+  const CadenceParameters& cadence = result.project.sections[0].cadence;
+  EXPECT_EQ(cadence.pattern, CadencePattern::kVideo);
+  EXPECT_EQ(cadence.phase, CadencePhase::kA);
+  EXPECT_FALSE(cadence.phase_specified);
+  EXPECT_EQ(cadence.continuity, CadenceContinuity::kRestart);
+}
+
+TEST(YamlProjectParserTest, ParsesPulldownCadence) {
+  YamlProjectParser parser;
+  const ParseResult result =
+      parser.ParseString(MakeVideoSectionYaml("    cadence:\n"
+                                              "      pattern: \"2:3\"\n"
+                                              "      phase: C\n"
+                                              "      continuity: continue\n"));
+
+  ASSERT_TRUE(result.ok) << (result.errors.empty() ? "" : result.errors[0]);
+  const CadenceParameters& cadence = result.project.sections[0].cadence;
+  EXPECT_EQ(cadence.pattern, CadencePattern::kPulldown23);
+  EXPECT_EQ(cadence.phase, CadencePhase::kC);
+  EXPECT_TRUE(cadence.phase_specified);
+  EXPECT_EQ(cadence.continuity, CadenceContinuity::kContinue);
+}
+
+TEST(YamlProjectParserTest, ParsesUnquotedPulldownPattern) {
+  YamlProjectParser parser;
+  const ParseResult result = parser.ParseString(
+      MakeVideoSectionYaml("    cadence:\n      pattern: 2:3\n"));
+
+  ASSERT_TRUE(result.ok) << (result.errors.empty() ? "" : result.errors[0]);
+  EXPECT_EQ(result.project.sections[0].cadence.pattern,
+            CadencePattern::kPulldown23);
+}
+
+// Each unknown cadence value is an error naming its key.
+TEST(YamlProjectParserTest, RejectsUnknownCadenceValues) {
+  const std::vector<std::pair<std::string, std::string>> cases = {
+      {"      pattern: \"3:2\"\n", "cadence.pattern"},
+      {"      phase: E\n", "cadence.phase"},
+      {"      continuity: resume\n", "cadence.continuity"},
+      {"      cycle: 10\n", "cycle"},
+      {"      phase: [A]\n", "cadence.phase"},
+  };
+  YamlProjectParser parser;
+  for (const auto& [body, key] : cases) {
+    const ParseResult result =
+        parser.ParseString(MakeVideoSectionYaml("    cadence:\n" + body));
+    EXPECT_FALSE(result.ok) << body;
+    ASSERT_FALSE(result.errors.empty()) << body;
+    EXPECT_NE(result.errors[0].find(key), std::string::npos)
+        << result.errors[0];
+  }
+}
+
+TEST(YamlProjectParserTest, RejectsNonMapCadence) {
+  YamlProjectParser parser;
+  const ParseResult result =
+      parser.ParseString(MakeVideoSectionYaml("    cadence: \"2:3\"\n"));
+
+  EXPECT_FALSE(result.ok);
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors[0].find("section.cadence"), std::string::npos)
       << result.errors[0];
 }
 

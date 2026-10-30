@@ -2,7 +2,7 @@
  * File:        audio_media_reader.cpp
  * Module:      audio_media_reader
  * Purpose:     Produces frame-sized blocks of a channel pair's file or video
- *              soundtrack audio, following the section's source frames.
+ *              soundtrack audio, following the section's source time.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -15,6 +15,13 @@
 #include <utility>
 
 namespace videosynth {
+
+namespace {
+
+// Interlaced output: two fields per frame.
+constexpr double kFieldsPerFrame = 2.0;
+
+}  // namespace
 
 AudioMediaReader::AudioMediaReader(AudioSampleSourceFactory factory,
                                    int sample_rate_hz)
@@ -59,10 +66,8 @@ bool AudioMediaReader::OpenAt(double start_seconds, std::string* error) {
   return true;
 }
 
-bool AudioMediaReader::SeekVideo(int source_frame_index, std::string* error) {
-  double start =
-      timing_.video_start_offset_seconds +
-      (static_cast<double>(source_frame_index) / timing_.frame_rate_hz);
+bool AudioMediaReader::SeekVideo(double source_seconds, std::string* error) {
+  double start = timing_.video_start_offset_seconds + source_seconds;
   leading_silence_ = 0;
   if (start < timing_.audio_start_offset_seconds) {
     // The picture starts before its soundtrack: hold silence until the
@@ -104,6 +109,7 @@ bool AudioMediaReader::AppendFromStream(int count,
 }
 
 bool AudioMediaReader::ReadFrame(int sample_count, int source_frame_index,
+                                 std::int64_t fields_after,
                                  std::vector<std::int32_t>* left,
                                  std::vector<std::int32_t>* right,
                                  std::string* error) {
@@ -119,12 +125,23 @@ bool AudioMediaReader::ReadFrame(int sample_count, int source_frame_index,
     if (!opened_ && !OpenAt(0.0, error)) {
       return false;
     }
-  } else if (!opened_ || source_frame_index != next_source_frame_) {
-    if (!SeekVideo(source_frame_index, error)) {
-      return false;
+  } else {
+    double source_seconds =
+        static_cast<double>(source_frame_index) / timing_.frame_rate_hz;
+    if (fields_after != 0) {
+      source_seconds += static_cast<double>(fields_after) /
+                        (kFieldsPerFrame * timing_.output_frame_rate_hz);
     }
+    // Times within half a sample of the stream position continue it.
+    if (!opened_ || std::abs(source_seconds - next_source_seconds_) >
+                        0.5 / sample_rate_hz_) {
+      if (!SeekVideo(source_seconds, error)) {
+        return false;
+      }
+    }
+    next_source_seconds_ =
+        source_seconds + (1.0 / timing_.output_frame_rate_hz);
   }
-  next_source_frame_ = source_frame_index + 1;
 
   const int silent =
       static_cast<int>(std::min<std::int64_t>(leading_silence_, sample_count));

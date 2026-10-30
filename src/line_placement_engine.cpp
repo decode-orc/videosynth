@@ -97,32 +97,41 @@ bool LinePlacementEngine::Has(const std::string& code_type) const {
 
 LineCodeAssignment LinePlacementEngine::GetAssignment(int line_number,
                                                       bool field_one) const {
+  return GetAssignment(line_number,
+                       PictureFieldRole{.starts_picture = field_one,
+                                        .follows_picture_start = !field_one});
+}
+
+LineCodeAssignment LinePlacementEngine::GetAssignment(
+    int line_number, const PictureFieldRole& role) const {
   if (!IsInBiphaseReservedRange(standard_, line_number)) {
     return None();
   }
 
   if (standard_ == Standard::kPal) {
-    return GetPalAssignment(line_number, field_one);
+    return GetPalAssignment(line_number, role);
   }
-  return GetNtscAssignment(line_number, field_one);
+  return GetNtscAssignment(line_number, role);
 }
 
 // ---------------------------------------------------------------------------
 // PAL dispatch
 // ---------------------------------------------------------------------------
 
-LineCodeAssignment LinePlacementEngine::GetPalAssignment(int line,
-                                                         bool field_one) const {
+LineCodeAssignment LinePlacementEngine::GetPalAssignment(
+    int line, const PictureFieldRole& role) const {
   if (section_type_ == SectionType::kLeadIn ||
       section_type_ == SectionType::kLeadOut) {
     return GetPalLeadInOut(line);
   }
   if (section_type_ == SectionType::kProgrammeArea) {
+    // PAL field-2 biphase lines 329-331 map to field-1 lines 16-18.
+    const int canonical = (line >= 329) ? (line - 313) : line;
     if (disc_type_ == DiscType::kCAV) {
-      return GetPalCavProgramme(line, field_one);
+      return GetCavProgrammeBiphase(canonical, role);
     }
     if (disc_type_ == DiscType::kCLV) {
-      return GetPalClvProgramme(line, field_one);
+      return GetClvProgrammeBiphase(canonical, role);
     }
   }
   return None();
@@ -159,48 +168,52 @@ LineCodeAssignment LinePlacementEngine::GetPalLeadInOut(int line) const {
 // ---------------------------------------------------------------------------
 // Picture fields
 //
-// Every output frame is one picture whose first field is field 1, so the
-// codes IEC 60856/60857 place in "the first field of the picture" go in
-// field 1 and the codes placed in the remaining fields go in field 2. When a
-// section carries none of the first-field codes, no field is a picture field
-// and the remaining-field codes are written in both fields.
+// IEC 60856/60857 place some codes in "the first field of the picture" and
+// the rest in the fields without them. A video-cadence frame is one picture
+// opened by field 1; a 2:3 pulldown picture opens on whichever field starts
+// it. When a section carries none of the first-field codes, no field is a
+// picture field and the remaining-field codes are written in every field.
 // ---------------------------------------------------------------------------
 
-bool LinePlacementEngine::IsPictureField(bool field_one) const {
-  if (!field_one) {
-    return false;
-  }
+bool LinePlacementEngine::HasPictureFieldCodes() const {
   if (disc_type_ == DiscType::kCAV) {
     return Has("picture_number");
   }
   return Has("programme_time_code") || Has("clv_picture_number");
 }
 
+bool LinePlacementEngine::IsPictureField(const PictureFieldRole& role) const {
+  return role.starts_picture && HasPictureFieldCodes();
+}
+
 // ---------------------------------------------------------------------------
-// CAV programme_area biphase (IEC 60856 §10.1.4-10.1.7, IEC 60857 same):
-//   Picture field, lines 16/17/18:  programme_status / picture_number x2
-//   Other field,   line 16:         picture_stop > programme_status
-//                  line 17:         picture_stop > chapter_number
-//                  line 18:         chapter_number
+// CAV programme_area biphase (IEC 60856 §10.1.3-10.1.8, IEC 60857 same):
+//   Picture field, lines 17/18:  picture_number
+//   Stop field,    lines 16/17:  picture_stop
+//   Other lines,   line 16:      programme_status
+//                  lines 17/18:  chapter_number
+// The stop field is the one after a picture's first field (§10.1.4), or
+// every field when the section carries no picture_number. A picture field
+// that is also a stop field keeps its picture_number on line 17.
 // programme_status uses the 0.172H offset. `canonical` is the field-1 line.
 // ---------------------------------------------------------------------------
 
 LineCodeAssignment LinePlacementEngine::GetCavProgrammeBiphase(
-    int canonical, bool field_one) const {
-  const bool picture_field = IsPictureField(field_one);
+    int canonical, const PictureFieldRole& role) const {
+  const bool picture_field = IsPictureField(role);
+  const bool stop_field = Has("picture_stop") && (role.follows_picture_start ||
+                                                  !HasPictureFieldCodes());
 
   switch (canonical) {
     case 16:
-      if (!picture_field && Has("picture_stop")) {
-        return Biphase("picture_stop");
-      }
+      if (stop_field) return Biphase("picture_stop");
       if (Has("programme_status")) return Biphase("programme_status", true);
       return None();
 
     case 17:
       if (picture_field) return Biphase("picture_number");
-      // IEC 60856 §10.1.6: picture stop has priority over chapter on line 17.
-      if (Has("picture_stop")) return Biphase("picture_stop");
+      // IEC 60856 §10.1.5: picture stop has priority over chapter on line 17.
+      if (stop_field) return Biphase("picture_stop");
       if (Has("chapter_number")) return Biphase("chapter_number");
       return None();
 
@@ -224,8 +237,8 @@ LineCodeAssignment LinePlacementEngine::GetCavProgrammeBiphase(
 // ---------------------------------------------------------------------------
 
 LineCodeAssignment LinePlacementEngine::GetClvProgrammeBiphase(
-    int canonical, bool field_one) const {
-  const bool picture_field = IsPictureField(field_one);
+    int canonical, const PictureFieldRole& role) const {
+  const bool picture_field = IsPictureField(role);
 
   switch (canonical) {
     case 16:
@@ -260,33 +273,22 @@ LineCodeAssignment LinePlacementEngine::GetClvProgrammeBiphase(
   }
 }
 
-LineCodeAssignment LinePlacementEngine::GetPalCavProgramme(
-    int line, bool field_one) const {
-  // PAL field-2 biphase lines 329-331 map to field-1 lines 16-18.
-  return GetCavProgrammeBiphase((line >= 329) ? (line - 313) : line, field_one);
-}
-
-LineCodeAssignment LinePlacementEngine::GetPalClvProgramme(
-    int line, bool field_one) const {
-  return GetClvProgrammeBiphase((line >= 329) ? (line - 313) : line, field_one);
-}
-
 // ---------------------------------------------------------------------------
 // NTSC dispatch
 // ---------------------------------------------------------------------------
 
 LineCodeAssignment LinePlacementEngine::GetNtscAssignment(
-    int line, bool field_one) const {
+    int line, const PictureFieldRole& role) const {
   if (section_type_ == SectionType::kLeadIn ||
       section_type_ == SectionType::kLeadOut) {
-    return GetNtscLeadInOut(line, field_one);
+    return GetNtscLeadInOut(line);
   }
   if (section_type_ == SectionType::kProgrammeArea) {
     if (disc_type_ == DiscType::kCAV) {
-      return GetNtscCavProgramme(line, field_one);
+      return GetNtscCavProgramme(line, role);
     }
     if (disc_type_ == DiscType::kCLV) {
-      return GetNtscClvProgramme(line, field_one);
+      return GetNtscClvProgramme(line, role);
     }
   }
   return None();
@@ -304,8 +306,7 @@ LineCodeAssignment LinePlacementEngine::GetNtscAssignment(
 //   Field 2: 279 → users_code, 280–281 → section marker
 // ---------------------------------------------------------------------------
 
-LineCodeAssignment LinePlacementEngine::GetNtscLeadInOut(int line,
-                                                         bool field_one) const {
+LineCodeAssignment LinePlacementEngine::GetNtscLeadInOut(int line) const {
   const std::string marker =
       (section_type_ == SectionType::kLeadIn) ? "lead_in" : "lead_out";
 
@@ -343,7 +344,6 @@ LineCodeAssignment LinePlacementEngine::GetNtscLeadInOut(int line,
     return Biphase(marker);
   }
 
-  (void)field_one;
   return None();
 }
 
@@ -352,30 +352,27 @@ LineCodeAssignment LinePlacementEngine::GetNtscLeadInOut(int line,
 //
 // FM lines (IEC 60857 §10.2):
 //   Line 10/273:  fm_picture_number (40-bit FM)
-//   Line 11:      fm_white_flag (100 IRE, first field only — §10.2.4)
-//   Line 274:     (not used — white flag is first-field only in programme area)
+//   Line 11/274:  fm_white_flag (100 IRE) on the picture's first field —
+//                 line 11 when field 1 starts the picture, line 274 when
+//                 field 2 does (§10.2.4)
 //
 // 24-bit biphase on lines 16-18 / 279-281: see GetCavProgrammeBiphase.
 // ---------------------------------------------------------------------------
 
 LineCodeAssignment LinePlacementEngine::GetNtscCavProgramme(
-    int line, bool field_one) const {
+    int line, const PictureFieldRole& role) const {
   // FM signal lines.
   if (line == 10 || line == 273) {
     if (Has("fm_picture_number")) return Fm("fm_picture_number");
     return None();
   }
-  // White flag is first-field only in programme area (IEC 60857 §10.2.4).
-  if (line == 11) {
-    if (Has("fm_white_flag")) return WhiteFlag();
-    return None();
-  }
-  if (line == 274) {
+  if (line == 11 || line == 274) {
+    if (role.starts_picture && Has("fm_white_flag")) return WhiteFlag();
     return None();
   }
 
   // NTSC field-2 biphase lines 279-281 map to field-1 lines 16-18.
-  return GetCavProgrammeBiphase((line >= 279) ? (line - 263) : line, field_one);
+  return GetCavProgrammeBiphase((line >= 279) ? (line - 263) : line, role);
 }
 
 // ---------------------------------------------------------------------------
@@ -383,30 +380,27 @@ LineCodeAssignment LinePlacementEngine::GetNtscCavProgramme(
 //
 // FM lines (IEC 60857 §10.2):
 //   Line 10/273:  fm_programme_time (40-bit FM)
-//   Line 11:      fm_white_flag (100 IRE, first field only — §10.2.4)
-//   Line 274:     (not used — white flag is first-field only in programme area)
+//   Line 11/274:  fm_white_flag (100 IRE) on the picture's first field —
+//                 line 11 when field 1 starts the picture, line 274 when
+//                 field 2 does (§10.2.4)
 //
 // 24-bit biphase on lines 16-18 / 279-281: see GetClvProgrammeBiphase.
 // ---------------------------------------------------------------------------
 
 LineCodeAssignment LinePlacementEngine::GetNtscClvProgramme(
-    int line, bool field_one) const {
+    int line, const PictureFieldRole& role) const {
   // FM signal lines.
   if (line == 10 || line == 273) {
     if (Has("fm_programme_time")) return Fm("fm_programme_time");
     return None();
   }
-  // White flag is first-field only in programme area (IEC 60857 §10.2.4).
-  if (line == 11) {
-    if (Has("fm_white_flag")) return WhiteFlag();
-    return None();
-  }
-  if (line == 274) {
+  if (line == 11 || line == 274) {
+    if (role.starts_picture && Has("fm_white_flag")) return WhiteFlag();
     return None();
   }
 
   // NTSC field-2 biphase lines 279-281 map to field-1 lines 16-18.
-  return GetClvProgrammeBiphase((line >= 279) ? (line - 263) : line, field_one);
+  return GetClvProgrammeBiphase((line >= 279) ? (line - 263) : line, role);
 }
 
 }  // namespace videosynth

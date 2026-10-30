@@ -280,7 +280,7 @@ Hand-authored projects live in [projects/](projects/):
 
 | Directory | Contents |
 |-----------|----------|
-| [projects/general/](projects/general/) | Feature examples — audio, EFM audio, VITS, progressive EXR/MKV sources, PAL pilot burst (composite) |
+| [projects/general/](projects/general/) | Feature examples — audio, EFM audio, VITS, progressive EXR/MKV sources, PAL pilot burst, NTSC 2:3 pulldown film (composite) |
 | [projects/general-yc/](projects/general-yc/) | PAL and NTSC audio examples with Y/C output |
 | [projects/stacking/](projects/stacking/) | Laserdisc disc simulation and multi-source stacking sets for PAL, PAL-M and NTSC |
 | [projects/long-form/](projects/long-form/) | Three-hour capture-sized PAL and NTSC examples (VITS, analogue stereo audio) for testing against realistic file sizes |

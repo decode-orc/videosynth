@@ -1,9 +1,9 @@
 /*
  * File:        section_editor.h
  * Module:      gui
- * Purpose:     Per-section form editor: source and span, optional audio,
- *              luma bandwidth, noise, dropout, OSD blocks, and line
- *              injections
+ * Purpose:     Per-section form editor: source and span, field cadence,
+ *              optional audio, luma bandwidth, noise, dropout, OSD blocks,
+ *              and line injections
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -12,6 +12,7 @@
 #pragma once
 
 #include <QWidget>
+#include <functional>
 #include <vector>
 
 #include "audio_channel_pairs_editor.h"
@@ -80,6 +81,7 @@ class SectionEditor : public QWidget {
  private:
   void BuildUi();
   QWidget* BuildGeneralGroup();
+  QWidget* BuildCadenceGroup();
   QWidget* BuildProbeGroup();
   QWidget* BuildAudioGroup();
   QWidget* BuildLumaBandwidthGroup();
@@ -113,6 +115,14 @@ class SectionEditor : public QWidget {
   // Re-limits the cutoff spinbox to what the project standard and the current
   // transition width allow.
   void UpdateLumaCutoffRange();
+  // Commits a cadence widget edit through the SetCadence* presenter helper
+  // `apply` and refreshes the group's enablement.
+  void CommitCadenceEdit(const std::function<void(Section*)>& apply);
+  // Applies CadenceEditorStateFor to the Cadence group's widgets.
+  void UpdateCadenceWidgets(const Section& section);
+  // The current section's 2:3 start slot (ResolveCadenceStartSlots), with
+  // only this section's source length known from the latest probe.
+  int CurrentCadenceStartSlot() const;
   void RequestProbe();
   void UpdateProbeDisplay();
 
@@ -134,10 +144,8 @@ class SectionEditor : public QWidget {
   void PopulateBuiltinFiles(const QString& keep_file);
   // The bundled raster subfolder ("720x576"/"720x486") for the project.
   QString ProjectBundledRaster() const;
-  // Refreshes the "N frames x R = T total" duration hint from the selected
-  // source range (resolved against the latest probe result) and the current
-  // repeat multiplier, or the loop note for a fixed duration longer than the
-  // range.
+  // Refreshes the duration hint (DurationSummaryFor) from the duration
+  // widgets, the latest probe result and the section's cadence start slot.
   void UpdateDurationSummary();
   // Hands the audio editor the section source and the latest probe report,
   // which decide the video soundtrack streams it offers.
@@ -210,6 +218,12 @@ class SectionEditor : public QWidget {
   // programme area (lead-in/lead-out carry no picture numbers or timecodes).
   QLabel* disc_range_title_ = nullptr;
   QLabel* disc_range_label_ = nullptr;
+
+  // Cadence: pattern (video / 2:3), phase A-D and continue-from-previous.
+  QGroupBox* cadence_group_ = nullptr;
+  QComboBox* cadence_pattern_combo_ = nullptr;
+  QComboBox* cadence_phase_combo_ = nullptr;
+  QCheckBox* cadence_continue_check_ = nullptr;
 
   // Probe.
   QLabel* probe_status_label_ = nullptr;

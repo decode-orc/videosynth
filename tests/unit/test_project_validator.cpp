@@ -1344,7 +1344,7 @@ TEST(ProjectValidatorTest,
   ASSERT_FALSE(result.errors.empty());
   EXPECT_EQ(result.errors[0],
             "Progressive section validation error: source frame rate must "
-            "match selected video standard.");
+            "be 25 fps.");
 }
 
 TEST(ProjectValidatorTest, PropagatesProgressiveProbeErrorMessage) {

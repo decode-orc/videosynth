@@ -198,13 +198,10 @@ bool VideoSynthPipeline::RunProject(const Project& project,
   const bool audio_enabled =
       audio_generator_ != nullptr && ProjectEnablesAudio(project);
   if (audio_enabled) {
-    // The section and source frame of each stored output frame, in output
-    // order; video-soundtrack pairs follow the source frames.
-    std::vector<AudioOutputFrame> output_frames;
-    output_frames.reserve(total_disc_frames);
-    for (const IGenerationStage::FrameScheduleItem& item : schedule) {
-      output_frames.push_back({item.section, item.source_frame_index});
-    }
+    // The section and source time of each stored output frame, in output
+    // order; video-soundtrack pairs follow the source time.
+    const std::vector<AudioOutputFrame> output_frames =
+        AudioOutputFramesForSchedule(schedule);
 
     std::vector<std::string> audio_errors;
     if (!audio_generator_->Begin(project, output_frames, &audio_errors)) {

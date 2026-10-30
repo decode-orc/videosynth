@@ -27,6 +27,7 @@ This directory contains reference media in EXR and MKV formats, plus verificatio
 
 - [Generate BLACK.exr for both rasters (shell)](scripts/generate_black_exr.sh) — writes `assets/exr/<raster>/BLACK.exr` with every pixel `R=G=B=0.0` (BT.601 studio black). Runs in an ad-hoc Nix shell with `ffmpeg` and `openexr`.
 - [Generate MOVING_BARS_75.mkv for both rasters (shell)](scripts/generate_moving_bars_mkv.sh) — writes `assets/mkv/<raster>/MOVING_BARS_75.mkv`: 75% colour bars in the 704-sample active image, scrolling left 4 pixels per frame for 176 frames (one seamless loop), so the picture chroma moves. Runs in an ad-hoc Nix shell with `ffmpeg`.
+- [Generate FILM_COUNTER_24P.mkv (shell)](scripts/generate_film_counter_mkv.sh) — writes `assets/mkv/720x486/FILM_COUNTER_24P.mkv`: 240 progressive film frames at 24000/1001 fps for 2:3 pulldown. Each frame shows its 0-based frame number in large digits, over a white bar and a 75% colour-bar strip that both move 8 pixels per frame, so pulldown's woven frames show combing. Runs in an ad-hoc Nix shell with `ffmpeg` and the DejaVu fonts.
 
 ## Quick Start
 

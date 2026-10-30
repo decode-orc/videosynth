@@ -29,6 +29,7 @@
 #include "videosynth/biphase_injection_manager.h"
 #include "videosynth/chroma_encoder.h"
 #include "videosynth/clv_code_generator.h"
+#include "videosynth/film_cadence.h"
 #include "videosynth/fixed_point.h"
 #include "videosynth/frame_enrichment.h"
 #include "videosynth/frame_line_layout.h"
@@ -290,81 +291,176 @@ int FindSectionPictureNumberStart(const Section& section) {
   return 0;
 }
 
+// The pictures of one output frame of a section: a video cadence shows the
+// frame's source frame in both fields; a 2:3 pulldown section maps each field
+// onto its film frame through the cadence cycle (film_cadence.h).
+std::array<IGenerationStage::FieldPicture, 2> SectionFramePictures(
+    const Section& section, const SourceFrameRange& range,
+    std::int64_t section_position, int cadence_start_slot,
+    std::int64_t film_frame_count) {
+  std::array<IGenerationStage::FieldPicture, 2> fields{};
+  if (section.cadence.pattern != CadencePattern::kPulldown23) {
+    const int source_frame =
+        SourceFrameAtSectionPosition(range, section_position);
+    fields[0] = {.source_frame_index = source_frame, .starts_picture = true};
+    fields[1] = {.source_frame_index = source_frame};
+    return fields;
+  }
+
+  for (std::size_t field = 0; field < fields.size(); ++field) {
+    const std::int64_t section_field =
+        section_position * 2 + static_cast<std::int64_t>(field);
+    const CadenceField cadence =
+        CadenceFieldAt(cadence_start_slot, section_field);
+    IGenerationStage::FieldPicture& picture = fields[field];
+    if (film_frame_count > 0 && cadence.film_frame_offset >= film_frame_count) {
+      // The padding field that completes an odd field count repeats the last
+      // film frame: one more field of the previous letter.
+      const CadenceField last =
+          CadenceFieldAt(cadence_start_slot, section_field - 1);
+      picture.source_frame_index =
+          SourceFrameAtSectionPosition(range, last.film_frame_offset);
+      picture.starts_picture = false;
+      picture.cadence_letter = last.letter;
+      picture.cadence_field_in_letter = last.field_in_slot + 1;
+      continue;
+    }
+    picture.source_frame_index =
+        SourceFrameAtSectionPosition(range, cadence.film_frame_offset);
+    picture.starts_picture = cadence.starts_picture;
+    picture.cadence_letter = cadence.letter;
+    picture.cadence_field_in_letter = cadence.field_in_slot;
+  }
+  return fields;
+}
+
+// Where a 2:3 pulldown frame's sound starts. Four film frames last exactly
+// as long as five output frames, so film sound plays in real time across the
+// cadence: it runs from the range's first frame in output fields, restarting
+// with each pass of a looped or replayed range. The pass is field 1's (field 1
+// is never the padding field).
+IGenerationStage::SourceTime PulldownSourceTime(const SourceFrameRange& range,
+                                                std::int64_t section_position,
+                                                int cadence_start_slot) {
+  const std::int64_t field = section_position * 2;
+  const std::int64_t film_frame =
+      CadenceFieldAt(cadence_start_slot, field).film_frame_offset;
+  const std::int64_t pass_first_film_frame =
+      film_frame - (film_frame % range.count);
+  return {
+      .frame_index = range.first,
+      .fields_after = field - CadenceFieldsForFilmFrames(
+                                  cadence_start_slot, pass_first_film_frame)};
+}
+
+// Lays out every section's output frames. Each item carries its section, the
+// section-relative position and the source frame of each field;
+// BuildFrameSchedule adds the disc picture number and enrichment.
 bool BuildFramePatternSchedule(
     const Project& project, const ProgressiveFrameSource& progressive_source,
     Standard standard,
-    std::vector<std::pair<const Section*, int>>* out_frame_sections,
+    std::vector<IGenerationStage::FrameScheduleItem>* out_items,
     std::string* error) {
-  if (out_frame_sections == nullptr) {
+  if (out_items == nullptr) {
     return false;
   }
 
-  out_frame_sections->clear();
-  for (const Section& section : project.sections) {
-    if (section.type == "progressive") {
-      if (!progressive_source.SupportsSection(section)) {
-        if (error != nullptr) {
-          *error = "Unsupported progressive source family in section schedule.";
-        }
-        return false;
-      }
+  out_items->clear();
 
-      // Only a video has a length to probe; a still is one frame.
-      int source_frame_count = kUnknownSourceFrameCount;
-      if (IsProgressiveVideoSource(section.source)) {
-        std::string count_error;
-        if (!progressive_source.ResolveFrameCount(
-                section, standard, &source_frame_count, &count_error)) {
-          if (error != nullptr) {
-            *error = count_error.empty()
-                         ? "Failed to resolve progressive section frame count."
-                         : count_error;
-          }
-          return false;
-        }
+  // Pass 1: each section's selected source range. A 2:3 section's start in
+  // the cadence cycle can depend on the lengths of the sections before it,
+  // so every length is known before any frame is laid out.
+  std::vector<int> source_frame_counts(project.sections.size(),
+                                       kUnknownSourceFrameCount);
+  std::vector<SourceFrameRange> ranges(project.sections.size());
+  for (std::size_t index = 0; index < project.sections.size(); ++index) {
+    const Section& section = project.sections[index];
+    if (section.type != "progressive") {
+      if (error != nullptr) {
+        *error = "Unsupported section type in generation schedule.";
       }
-
-      SourceFrameRange range;
-      if (!ResolveSourceFrameRange(section, source_frame_count, &range,
-                                   error)) {
-        return false;
+      return false;
+    }
+    if (!progressive_source.SupportsSection(section)) {
+      if (error != nullptr) {
+        *error = "Unsupported progressive source family in section schedule.";
       }
-      if (range.count <= 0) {
-        if (error != nullptr) {
-          *error = "Progressive section '" + section.name +
-                   "' selects no source frames.";
-        }
-        return false;
-      }
-
-      const std::int64_t output_frames =
-          SectionOutputFrameCount(section, range);
-      if (output_frames <= 0) {
-        if (error != nullptr) {
-          *error =
-              "Progressive sections must define duration_frames > 0 or 'all'.";
-        }
-        return false;
-      }
-
-      // An "all" duration replays the range duration_frames_repeat times and
-      // a fixed duration longer than the range loops it; either way every
-      // pass restarts at the range's first frame, so the source index never
-      // leaves the selected range.
-      for (std::int64_t i = 0; i < output_frames; ++i) {
-        out_frame_sections->push_back(
-            std::make_pair(&section, SourceFrameAtSectionPosition(range, i)));
-      }
-      continue;
+      return false;
     }
 
-    if (error != nullptr) {
-      *error = "Unsupported section type in generation schedule.";
+    // Only a video has a length to probe; a still is one frame.
+    if (IsProgressiveVideoSource(section.source)) {
+      std::string count_error;
+      if (!progressive_source.ResolveFrameCount(
+              section, standard, &source_frame_counts[index], &count_error)) {
+        if (error != nullptr) {
+          *error = count_error.empty()
+                       ? "Failed to resolve progressive section frame count."
+                       : count_error;
+        }
+        return false;
+      }
     }
-    return false;
+
+    if (!ResolveSourceFrameRange(section, source_frame_counts[index],
+                                 &ranges[index], error)) {
+      return false;
+    }
+    if (ranges[index].count <= 0) {
+      if (error != nullptr) {
+        *error = "Progressive section '" + section.name +
+                 "' selects no source frames.";
+      }
+      return false;
+    }
   }
 
-  return !out_frame_sections->empty();
+  // Pass 2: lay out the frames.
+  const std::vector<int> cadence_start_slots =
+      ResolveCadenceStartSlots(project.sections, source_frame_counts);
+  for (std::size_t index = 0; index < project.sections.size(); ++index) {
+    const Section& section = project.sections[index];
+    const SourceFrameRange& range = ranges[index];
+    const int cadence_start_slot = cadence_start_slots[index];
+
+    const std::int64_t output_frames =
+        SectionOutputFrameCount(section, range, cadence_start_slot);
+    if (output_frames <= 0) {
+      if (error != nullptr) {
+        *error =
+            "Progressive sections must define duration_frames > 0 or 'all'.";
+      }
+      return false;
+    }
+
+    // An "all" duration plays a fixed number of film frames and pads an odd
+    // field count with the last one; a fixed duration loops the range.
+    const std::int64_t film_frame_count =
+        section.duration_frames_all
+            ? static_cast<std::int64_t>(range.count) *
+                  std::max(1, section.duration_frames_repeat)
+            : 0;
+
+    // An "all" duration replays the range duration_frames_repeat times and
+    // a fixed duration longer than the range loops it; either way every
+    // pass restarts at the range's first frame, so the source index never
+    // leaves the selected range.
+    for (std::int64_t position = 0; position < output_frames; ++position) {
+      IGenerationStage::FrameScheduleItem item;
+      item.section = &section;
+      item.section_frame_index = static_cast<int>(position);
+      item.fields = SectionFramePictures(section, range, position,
+                                         cadence_start_slot, film_frame_count);
+      item.source_frame_index = item.fields[0].source_frame_index;
+      if (section.cadence.pattern == CadencePattern::kPulldown23) {
+        item.source_time =
+            PulldownSourceTime(range, position, cadence_start_slot);
+      }
+      out_items->push_back(std::move(item));
+    }
+  }
+
+  return !out_items->empty();
 }
 
 int InvertCenteredChromaCode(int code) { return 1024 - code; }
@@ -1221,8 +1317,9 @@ class GenerationStage::TemplateCache {
   // would exceed the capacity; the caller then synthesises directly into its
   // own buffers.
   std::shared_ptr<const FrameTemplate> Acquire(
-      const Project& project, const Section& section, int source_frame_index,
-      std::size_t sequence_phase, std::size_t template_bytes,
+      const Project& project, const Section& section,
+      const std::array<int, 2>& field_source_frames, std::size_t sequence_phase,
+      std::size_t template_bytes,
       const std::function<void(FrameTemplate*)>& synthesise) {
     std::shared_ptr<Slot> slot;
     {
@@ -1242,7 +1339,7 @@ class GenerationStage::TemplateCache {
       }
 
       SlotKey key{section.source, section.type, section.luma_bandwidth,
-                  source_frame_index, sequence_phase};
+                  field_source_frames, sequence_phase};
       auto it = slots_.find(key);
       if (it == slots_.end()) {
         // Admission on second request: a template is only worth building and
@@ -1287,11 +1384,12 @@ class GenerationStage::TemplateCache {
     std::string source;
     std::string section_type;
     LumaBandwidthParameters luma_bandwidth;
-    int source_frame_index = 0;
+    // Source frame of field 1 and field 2.
+    std::array<int, 2> field_source_frames{};
     std::size_t sequence_phase = 0;
 
     bool operator==(const SlotKey& other) const {
-      return source_frame_index == other.source_frame_index &&
+      return field_source_frames == other.field_source_frames &&
              sequence_phase == other.sequence_phase && source == other.source &&
              section_type == other.section_type &&
              luma_bandwidth == other.luma_bandwidth;
@@ -1303,8 +1401,10 @@ class GenerationStage::TemplateCache {
       std::size_t hash = std::hash<std::string>{}(key.source);
       hash ^= std::hash<std::string>{}(key.section_type) +
               0x9e3779b97f4a7c15ULL + (hash << 6) + (hash >> 2);
-      hash ^= std::hash<int>{}(key.source_frame_index) + 0x9e3779b97f4a7c15ULL +
-              (hash << 6) + (hash >> 2);
+      for (const int source_frame : key.field_source_frames) {
+        hash ^= std::hash<int>{}(source_frame) + 0x9e3779b97f4a7c15ULL +
+                (hash << 6) + (hash >> 2);
+      }
       hash ^= std::hash<std::size_t>{}(key.sequence_phase) +
               0x9e3779b97f4a7c15ULL + (hash << 6) + (hash >> 2);
       return hash;
@@ -1333,11 +1433,15 @@ class GenerationStage::TemplateCache {
 
 GenerationStage::GenerationStage(
     ILogger* logger, const IVitsDefinitionProvider* vits_definition_provider,
-    const IVitsGenerator* vits_generator)
+    const IVitsGenerator* vits_generator,
+    std::unique_ptr<ProgressiveFrameSource> progressive_source)
     : logger_(logger),
       resource_cache_(std::make_unique<SynthesisResourceCache>()),
       template_cache_(
           std::make_unique<TemplateCache>(kDefaultTemplateCacheCapacityBytes)),
+      progressive_source_(progressive_source != nullptr
+                              ? std::move(progressive_source)
+                              : std::make_unique<ProgressiveFrameSource>()),
       vits_definition_provider_(vits_definition_provider != nullptr
                                     ? vits_definition_provider
                                     : &default_vits_definition_provider_),
@@ -1359,7 +1463,7 @@ bool GenerationStage::BuildFrameSchedule(
   }
 
   out_schedule->clear();
-  progressive_source_.ClearCache();
+  progressive_source_->ClearCache();
   template_cache_->Clear();
   biphase_manager_.Reset();
   biphase_manager_.SetProjectDiscType(
@@ -1390,41 +1494,36 @@ bool GenerationStage::BuildFrameSchedule(
   }
   biphase_manager_.SetInitialFrameCount(static_cast<int>(initial_frame_offset));
 
-  std::vector<std::pair<const Section*, int>> frame_sections;
   std::string schedule_error;
-  if (!BuildFramePatternSchedule(project, progressive_source_,
+  if (!BuildFramePatternSchedule(project, *progressive_source_,
                                  project.cvbs_presets.video_standard_preset,
-                                 &frame_sections, &schedule_error)) {
+                                 out_schedule, &schedule_error)) {
+    out_schedule->clear();
     errors->push_back(schedule_error.empty()
                           ? "Unable to build section frame schedule."
                           : schedule_error);
     return false;
   }
 
-  // Build the output schedule, computing the per-frame disc picture number so
-  // that colour-subcarrier phase is derived from disc position (PN - 1) rather
-  // than file position even when sections have non-contiguous start_values
-  // (backward-skip replay or post-gap forward-skip sections).
-  out_schedule->reserve(frame_sections.size());
+  // Compute the per-frame disc picture number so that colour-subcarrier phase
+  // is derived from disc position (PN - 1) rather than file position even
+  // when sections have non-contiguous start_values (backward-skip replay or
+  // post-gap forward-skip sections). A 2:3 pulldown section's picture numbers
+  // count film pictures, not disc frames, so its frames keep the disc frame
+  // counter instead.
   const Section* prev_schedule_section = nullptr;
   int section_pn_start = 0;
-  int section_frame_offset = 0;
-  for (const std::pair<const Section*, int>& frame_section : frame_sections) {
-    const Section* sec = frame_section.first;
-    if (sec != prev_schedule_section) {
-      section_pn_start = FindSectionPictureNumberStart(*sec);
-      section_frame_offset = 0;
-      prev_schedule_section = sec;
+  for (FrameScheduleItem& item : *out_schedule) {
+    if (item.section != prev_schedule_section) {
+      section_pn_start =
+          (item.section->cadence.pattern == CadencePattern::kPulldown23)
+              ? 0
+              : FindSectionPictureNumberStart(*item.section);
+      prev_schedule_section = item.section;
     }
-    const int disc_pn =
-        (section_pn_start > 0) ? (section_pn_start + section_frame_offset) : 0;
-    out_schedule->push_back(FrameScheduleItem{
-        .section = sec,
-        .source_frame_index = frame_section.second,
-        .section_frame_index = section_frame_offset,
-        .disc_picture_number = disc_pn,
-    });
-    ++section_frame_offset;
+    item.disc_picture_number =
+        (section_pn_start > 0) ? (section_pn_start + item.section_frame_index)
+                               : 0;
   }
 
   // Record what follows each section so synthesis can start the next
@@ -1463,8 +1562,10 @@ bool GenerationStage::BuildFrameSchedule(
     FrameScheduleItem& item = (*out_schedule)[frame_index];
     auto enrichment = std::make_shared<FrameEnrichment>();
 
-    // disc_frame_index represents (PN - 1) for the frame, anchoring
-    // colour-subcarrier and pilot-burst phase to the disc picture number.
+    // disc_frame_index is the disc video-frame counter: the schedule
+    // position plus the first picture number's offset, re-anchored to
+    // (PN - 1) in a video section whose picture_number has a start_value.
+    // It anchors colour-subcarrier and pilot-burst phase to the disc frame.
     enrichment->disc_frame_index =
         (item.disc_picture_number > 0)
             ? static_cast<std::size_t>(item.disc_picture_number - 1)
@@ -1472,6 +1573,7 @@ bool GenerationStage::BuildFrameSchedule(
 
     if (!biphase_manager_.ResolveFrame(
             *item.section, standard, synth.sample_rate_hz, active_window_start,
+            {item.fields[0].starts_picture, item.fields[1].starts_picture},
             enrichment.get(), errors)) {
       return false;
     }
@@ -1495,10 +1597,23 @@ bool GenerationStage::BuildFrameSchedule(
       enrichment->context.clv_frames = tc.frames;
     }
 
-    enrichment->osd_texts.reserve(item.section->osd.overlays.size());
-    for (const OsdOverlay& overlay : item.section->osd.overlays) {
-      enrichment->osd_texts.push_back(osd_token_resolver_.Resolve(
-          overlay.text, enrichment->context, item.section->name));
+    // OSD is drawn once per field, and the field tokens ({film_frame},
+    // {cadence}) can differ between the two fields of a pulldown frame.
+    for (std::size_t field = 0; field < item.fields.size(); ++field) {
+      PerFrameContext field_context = enrichment->context;
+      field_context.picture_number = enrichment->field_picture_numbers[field];
+      field_context.film_frame = item.fields[field].source_frame_index;
+      if (item.section->cadence.pattern == CadencePattern::kPulldown23) {
+        field_context.cadence_letter = item.fields[field].cadence_letter;
+        field_context.cadence_field_in_letter =
+            item.fields[field].cadence_field_in_letter;
+      }
+      std::vector<std::string>& texts = enrichment->field_osd_texts[field];
+      texts.reserve(item.section->osd.overlays.size());
+      for (const OsdOverlay& overlay : item.section->osd.overlays) {
+        texts.push_back(osd_token_resolver_.Resolve(overlay.text, field_context,
+                                                    item.section->name));
+      }
     }
 
     item.enrichment = std::move(enrichment);
@@ -1517,13 +1632,11 @@ bool GenerationStage::BuildFrameSchedule(
 // frame beyond the colour sequence phase (VBI code words, OSD text, noise,
 // dropouts) is applied afterwards as a localised patch, so for constant
 // source content the result is an exact function of
-// (source, source frame, sequence_phase).
-void GenerationStage::SynthesiseTemplate(SynthesisResources& resources,
-                                         const Section& section,
-                                         const FrameSourceImage& source_frame,
-                                         std::size_t sequence_phase,
-                                         SampleFixed* y_out,
-                                         SampleFixed* c_out) {
+// (source, each field's source frame, sequence_phase).
+void GenerationStage::SynthesiseTemplate(
+    SynthesisResources& resources, const Section& section,
+    const std::array<const FrameSourceImage*, 2>& field_sources,
+    std::size_t sequence_phase, SampleFixed* y_out, SampleFixed* c_out) {
   const SignalLevels& levels = resources.levels;
   const generation_detail::SampledSynthesisContext& synth = resources.synth;
   const Standard video_standard = synth.standard;
@@ -1565,8 +1678,10 @@ void GenerationStage::SynthesiseTemplate(SynthesisResources& resources,
   std::vector<int>& active_sample_indices = resources.active_sample_indices;
   std::vector<SampleFixed>& encoded_line_chroma = resources.encoded_line_chroma;
   ActiveSampleColumnMap& column_map = resources.column_map;
-  if (!column_map.MatchesSource(source_frame)) {
-    column_map.Rebuild(source_frame, active_window_samples);
+  // Both fields come from the same source, so they share one raster.
+  const FrameSourceImage& field1_source = *field_sources[0];
+  if (!column_map.MatchesSource(field1_source)) {
+    column_map.Rebuild(field1_source, active_window_samples);
   }
 
   // The section's luma bandwidth limit, designed once per change of settings.
@@ -1760,7 +1875,10 @@ void GenerationStage::SynthesiseTemplate(SynthesisResources& resources,
         // Map field lines onto progressive source rows by interleaving
         // fields. Progressive imports use field-2-dominant row pairing, so
         // field 1 consumes odd rows and field 2 consumes even rows. The row
-        // is the same for every sample of the line.
+        // is the same for every sample of the line. Each field reads its own
+        // source frame (they differ only across a 2:3 pulldown picture).
+        const FrameSourceImage& source_frame =
+            *field_sources[line.field_index_1based == 1 ? 0U : 1U];
         const int field_line = active_y % synth.active.active_lines_per_field;
         const int source_row =
             source_frame.active_y +
@@ -2016,7 +2134,7 @@ bool GenerationStage::GenerateFrameBatch(
         const FrameScheduleItem& next_item = schedule[next->second];
         if (next_item.section != nullptr &&
             next_item.section->source != section->source) {
-          progressive_source_.PrefetchSection(
+          progressive_source_->PrefetchSection(
               *next_item.section, next_item.source_frame_index, video_standard);
         }
       }
@@ -2029,22 +2147,36 @@ bool GenerationStage::GenerateFrameBatch(
                      section->name + "' (" + section->type + ").");
     }
 
-    // Shared, immutable decoded source image: delivery is a reference count,
-    // not a per-frame copy of the ~2.4 MiB raster.
-    std::shared_ptr<const FrameSourceImage> source_frame_image;
-    std::string frame_error;
-    const bool generated = progressive_source_.GenerateFrame(
-        *section, source_frame_index,
-        project.cvbs_presets.video_standard_preset, &source_frame_image,
-        &frame_error);
+    // A video-cadence frame shows one source frame in both fields; a 2:3
+    // pulldown frame can show a different film frame in each.
+    const bool pulldown =
+        section->cadence.pattern == CadencePattern::kPulldown23;
+    const std::array<int, 2> field_source_frames = {
+        source_frame_index, pulldown ? frame_item.fields[1].source_frame_index
+                                     : source_frame_index};
 
-    if (!generated || source_frame_image == nullptr) {
-      errors->push_back(frame_error.empty()
-                            ? "Unable to generate frame-based source data."
-                            : frame_error);
-      return false;
+    // Shared, immutable decoded source images: delivery is a reference count,
+    // not a per-frame copy of the ~2.4 MiB raster.
+    std::array<std::shared_ptr<const FrameSourceImage>, 2> field_images;
+    for (std::size_t field = 0; field < field_images.size(); ++field) {
+      if (field > 0U && field_source_frames[field] == field_source_frames[0]) {
+        field_images[field] = field_images[0];
+        continue;
+      }
+      std::string frame_error;
+      const bool generated = progressive_source_->GenerateFrame(
+          *section, field_source_frames[field],
+          project.cvbs_presets.video_standard_preset, &field_images[field],
+          &frame_error);
+      if (!generated || field_images[field] == nullptr) {
+        errors->push_back(frame_error.empty()
+                              ? "Unable to generate frame-based source data."
+                              : frame_error);
+        return false;
+      }
     }
-    const FrameSourceImage& source_frame = *source_frame_image;
+    const std::array<const FrameSourceImage*, 2> field_sources = {
+        field_images[0].get(), field_images[1].get()};
 
     const int local_frame_base =
         static_cast<int>(local_frame_index * frame_span);
@@ -2065,8 +2197,9 @@ bool GenerationStage::GenerateFrameBatch(
 
     // A still source delivers the same image for every schedule position, so
     // its schedule indices collapse onto one cached identity per phase.
-    const int source_frame_identity =
-        SourceIgnoresFrameIndex(section->source) ? 0 : source_frame_index;
+    const std::array<int, 2> source_frame_identity =
+        SourceIgnoresFrameIndex(section->source) ? std::array<int, 2>{0, 0}
+                                                 : field_source_frames;
 
     const std::shared_ptr<const FrameTemplate> frame_template =
         template_cache_->Acquire(
@@ -2074,7 +2207,7 @@ bool GenerationStage::GenerateFrameBatch(
             template_bytes, [&](FrameTemplate* out) {
               out->y_mv.resize(frame_span);
               out->c_mv.resize(frame_span);
-              SynthesiseTemplate(*resources, *section, source_frame,
+              SynthesiseTemplate(*resources, *section, field_sources,
                                  sequence_phase, out->y_mv.data(),
                                  out->c_mv.data());
             });
@@ -2098,7 +2231,7 @@ bool GenerationStage::GenerateFrameBatch(
         out_y_mv->resize(sample_count);
         out_c_mv->resize(sample_count);
       }
-      SynthesiseTemplate(*resources, *section, source_frame, sequence_phase,
+      SynthesiseTemplate(*resources, *section, field_sources, sequence_phase,
                          out_y_mv->data() + local_frame_base,
                          out_c_mv->data() + local_frame_base);
     }
@@ -2112,7 +2245,8 @@ bool GenerationStage::GenerateFrameBatch(
     if (!section->osd.overlays.empty()) {
       // Non-null and correctly sized: enforced by the enrichment guard above
       // and the BuildFrameSchedule enrichment pass.
-      const std::vector<std::string>& resolved_texts = enrichment->osd_texts;
+      const std::array<std::vector<std::string>, 2>& field_texts =
+          enrichment->field_osd_texts;
       const SignalLevels osd_levels =
           GetSignalLevels(project.cvbs_presets.video_standard_preset);
       // SECAM text keeps the undeviated subcarrier rather than blanking it.
@@ -2122,7 +2256,7 @@ bool GenerationStage::GenerateFrameBatch(
               : nullptr;
       const int field1_start = synth.active.first_active_line_field1 - 1;
       const int field1_end = field1_start + synth.active.active_lines_per_field;
-      osd_renderer_.Render(section->osd, resolved_texts, out_y_mv, out_c_mv,
+      osd_renderer_.Render(section->osd, field_texts[0], out_y_mv, out_c_mv,
                            local_frame_base, synth.line_sample_offsets,
                            field1_start, field1_end, active_window_start,
                            active_window_end, osd_levels, neutral_chroma_lines);
@@ -2133,7 +2267,7 @@ bool GenerationStage::GenerateFrameBatch(
       if (synth.active.half_picture_line == field2_end) {
         --field2_end;
       }
-      osd_renderer_.Render(section->osd, resolved_texts, out_y_mv, out_c_mv,
+      osd_renderer_.Render(section->osd, field_texts[1], out_y_mv, out_c_mv,
                            local_frame_base, synth.line_sample_offsets,
                            field2_start, field2_end, active_window_start,
                            active_window_end, osd_levels, neutral_chroma_lines);

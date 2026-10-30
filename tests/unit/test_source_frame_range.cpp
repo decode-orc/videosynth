@@ -211,5 +211,108 @@ TEST(SourceFrameRangeTest, KnownOutputCountIsUnknownForOpenEndedAll) {
   EXPECT_EQ(KnownSectionOutputFrameCount(section, 40), 80);
 }
 
+Section MakeFilmSection(CadencePhase phase, CadenceContinuity continuity) {
+  Section section = MakeVideoSection();
+  section.cadence.pattern = CadencePattern::kPulldown23;
+  section.cadence.phase = phase;
+  section.cadence.continuity = continuity;
+  return section;
+}
+
+// A closed range of `count` frames from frame 0.
+void SetClosedRange(Section* section, int count) {
+  section->end_frame = count - 1;
+  section->end_frame_specified = true;
+}
+
+TEST(SourceFrameRangeTest, PulldownAllDurationCountsFieldsOfFilmFrames) {
+  Section section =
+      MakeFilmSection(CadencePhase::kA, CadenceContinuity::kRestart);
+  SetClosedRange(&section, 8);
+  SourceFrameRange range;
+  ASSERT_TRUE(ResolveSourceFrameRange(section, 100, &range, nullptr));
+  EXPECT_EQ(SectionOutputFrameCount(section, range, 0), 10);
+  EXPECT_EQ(SectionOutputFrameCount(section, range, 2), 10);
+
+  SetClosedRange(&section, 2);
+  ASSERT_TRUE(ResolveSourceFrameRange(section, 100, &range, nullptr));
+  // A A B B B: five fields, the sixth repeats B.
+  EXPECT_EQ(SectionOutputFrameCount(section, range, 0), 3);
+  // D D D A A
+  EXPECT_EQ(SectionOutputFrameCount(section, range, 7), 3);
+}
+
+TEST(SourceFrameRangeTest, PulldownRepeatMultipliesFilmFramesNotFrames) {
+  Section section =
+      MakeFilmSection(CadencePhase::kA, CadenceContinuity::kRestart);
+  SetClosedRange(&section, 2);
+  section.duration_frames_repeat = 2;
+  EXPECT_EQ(KnownSectionOutputFrameCount(section, kUnknownSourceFrameCount, 0),
+            5);
+}
+
+TEST(SourceFrameRangeTest, PulldownFixedDurationIsUnchanged) {
+  Section section =
+      MakeFilmSection(CadencePhase::kB, CadenceContinuity::kRestart);
+  section.duration_frames_all = false;
+  section.duration_frames = 7;
+  EXPECT_EQ(KnownSectionOutputFrameCount(section, kUnknownSourceFrameCount,
+                                         kUnknownCadenceSlot),
+            7);
+}
+
+TEST(SourceFrameRangeTest, PulldownAllIsUnknownWithoutAStartSlot) {
+  Section section =
+      MakeFilmSection(CadencePhase::kA, CadenceContinuity::kContinue);
+  SetClosedRange(&section, 8);
+  EXPECT_EQ(KnownSectionOutputFrameCount(section, 100, kUnknownCadenceSlot),
+            -1);
+}
+
+TEST(SourceFrameRangeTest, ResolvesCadenceStartSlotsAcrossAMixedChain) {
+  std::vector<Section> sections;
+  sections.push_back(MakeVideoSection());  // 0: video, ignored
+  Section film = MakeFilmSection(CadencePhase::kA, CadenceContinuity::kRestart);
+  SetClosedRange(&film, 4);  // 1: A A B B B C C D D D -> 5 frames, ends at 0
+  sections.push_back(film);
+  Section fixed =
+      MakeFilmSection(CadencePhase::kD, CadenceContinuity::kContinue);
+  fixed.duration_frames_all = false;
+  fixed.duration_frames = 3;  // 2: starts at 0, 6 fields, ends at 6
+  sections.push_back(fixed);
+  Section orphan =
+      MakeFilmSection(CadencePhase::kA, CadenceContinuity::kContinue);
+  SetClosedRange(&orphan, 1);  // 3: starts at C2, one field padded to 2
+  sections.push_back(orphan);
+  sections.push_back(MakeVideoSection());  // 4: video breaks the chain
+  sections.push_back(
+      MakeFilmSection(CadencePhase::kC, CadenceContinuity::kContinue));  // 5
+
+  const std::vector<int> counts(sections.size(), 100);
+  const std::vector<int> slots = ResolveCadenceStartSlots(sections, counts);
+  EXPECT_EQ(slots, (std::vector<int>{0, 0, 0, 6, 0, 5}));
+}
+
+TEST(SourceFrameRangeTest, CadenceStartSlotIsUnknownAfterAnUnknownLength) {
+  std::vector<Section> sections;
+  sections.push_back(
+      MakeFilmSection(CadencePhase::kB, CadenceContinuity::kRestart));
+  sections.push_back(
+      MakeFilmSection(CadencePhase::kA, CadenceContinuity::kContinue));
+  Section fixed =
+      MakeFilmSection(CadencePhase::kA, CadenceContinuity::kContinue);
+  fixed.duration_frames_all = false;
+  fixed.duration_frames = 4;
+  sections.push_back(fixed);
+  sections.push_back(
+      MakeFilmSection(CadencePhase::kA, CadenceContinuity::kContinue));
+
+  const std::vector<int> counts(sections.size(), kUnknownSourceFrameCount);
+  const std::vector<int> slots = ResolveCadenceStartSlots(sections, counts);
+  EXPECT_EQ(slots,
+            (std::vector<int>{2, kUnknownCadenceSlot, kUnknownCadenceSlot,
+                              kUnknownCadenceSlot}));
+}
+
 }  // namespace
 }  // namespace videosynth

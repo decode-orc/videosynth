@@ -45,9 +45,10 @@ struct SourceProbeReport {
 };
 
 // Runs the probed profile through ProjectValidator (with a probe stub that
-// replays `profile`) for a minimal single-section project, so pass/fail is
-// decided by exactly the rules generation applies rather than a duplicate.
-// Returns the validator's error messages (empty = pass).
+// replays `profile`) for a minimal single-section project carrying the
+// section's cadence pattern (which decides the frame rate it needs), so
+// pass/fail is decided by exactly the rules generation applies rather than a
+// duplicate. Returns the validator's error messages (empty = pass).
 //
 // Thread-safety: thread-safe (pure function); safe on worker threads.
 QStringList EvaluateSourceProfile(const Section& section, Standard standard,
@@ -70,7 +71,8 @@ SourceProfileFindings EvaluateSourceProfileFindings(
 QString FormatColourConversionSummary(
     const ProgressiveFrameSourceProfile& profile, Standard standard);
 
-// One-line human-readable profile summary for the section editor.
+// One-line human-readable profile summary for the section editor. A
+// 24000/1001 source shows its rate as "Film 24000/1001".
 //
 // Thread-safety: thread-safe (pure function).
 QString FormatSourceProfileSummary(

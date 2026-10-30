@@ -52,6 +52,8 @@ A section may carry any number of overlays.
 | `{section_name}` | The section's `name:` field, verbatim |
 | `{timecode}` | CLV programme timecode `HH:MM:SS:FF` |
 | `{frame_number}` | 1-based position of this frame in the whole output, zero-padded to five digits |
+| `{film_frame}` | The 0-based source frame shown in the field being drawn |
+| `{cadence}` | The [2:3 pulldown](../reference/sections.md#cadence) letter and field within it for the field being drawn, such as `B2`; `-` under a video cadence |
 
 Tokens are resolved from the state the biphase encoder captured for that exact frame, so a burnt-in picture number and the VBI code it reports cannot disagree. That is the point of resolving them after injection rather than before.
 
@@ -60,6 +62,8 @@ Tokens are resolved from the state the biphase encoder captured for that exact f
 `{picture_number}` and `{biphase_hex}` come from the VBI codes, so they follow whatever the disc is doing — they restart or jump when a section re-anchors `start_value`, and they read all zeros on a project with no laserdisc codes.
 
 `{frame_number}` and `{timecode}` are **positional**. They count from the start of the generated output and are never re-anchored by a section. `{timecode}` runs continuously at the standard's CLV frame rate (25 fps PAL, 30 fps NTSC and PAL-M) on any CLV disc, regardless of which codes a particular section injects, and reads `00:00:00:00` on non-CLV projects.
+
+`{film_frame}` and `{cadence}` are resolved **separately for each field**. Under a `"2:3"` cadence the two fields of one frame can come from different film frames, so `{film_frame} {cadence}` reads, for example, `41 B3` in field 1 and `42 C1` in field 2. That makes the cadence visible on a field-by-field decode.
 
 Putting both on screen is the quickest way to see where a disc's addressing diverges from its physical position — exactly the situation a player skip or a replayed passage creates.
 

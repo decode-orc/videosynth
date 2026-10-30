@@ -10,6 +10,7 @@
 
 #include "preview_frame_service.h"
 
+#include <QStringList>
 #include <algorithm>
 #include <utility>
 
@@ -101,6 +102,23 @@ bool SynthesizeWithPipelineStages(
 }
 
 }  // namespace
+
+QString FormatFieldCadence(
+    const std::array<IGenerationStage::FieldPicture, 2>& fields) {
+  if (fields[0].cadence_letter == '\0') {
+    return QString();
+  }
+  QStringList parts;
+  for (std::size_t field = 0; field < fields.size(); ++field) {
+    const IGenerationStage::FieldPicture& picture = fields[field];
+    parts.append(QStringLiteral("F%1: film %2 (%3%4)")
+                     .arg(field + 1)
+                     .arg(picture.source_frame_index)
+                     .arg(QChar::fromLatin1(picture.cadence_letter))
+                     .arg(picture.cadence_field_in_letter));
+  }
+  return parts.join(QStringLiteral(" · "));
+}
 
 PreviewFrameService::PreviewFrameService(SynthesizeFrameFn synthesizer,
                                          int cache_capacity, QObject* parent)
@@ -244,6 +262,7 @@ void PreviewFrameService::StartWorker() {
     if (section != nullptr) {
       frame->section_name = QString::fromStdString(section->name);
     }
+    frame->fields = context->schedule[disc_frame].fields;
 
     SynthesisContext synthesis_context;
     synthesis_context.project = &context->project;

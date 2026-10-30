@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <memory>
 #include <unordered_map>
@@ -37,10 +38,13 @@ namespace videosynth {
 // per-key single-flight locking.
 class GenerationStage final : public IGenerationStage {
  public:
+  // A null progressive_source uses a default ProgressiveFrameSource (ffmpeg
+  // decode and probe); tests inject one built on fake decoders.
   explicit GenerationStage(
       ILogger* logger = nullptr,
       const IVitsDefinitionProvider* vits_definition_provider = nullptr,
-      const IVitsGenerator* vits_generator = nullptr);
+      const IVitsGenerator* vits_generator = nullptr,
+      std::unique_ptr<ProgressiveFrameSource> progressive_source = nullptr);
 
   ~GenerationStage() override;
 
@@ -127,24 +131,25 @@ class GenerationStage final : public IGenerationStage {
   // A clean synthesised frame (sync, burst, pilot, active picture, VITS —
   // everything except the per-frame VBI and OSD patches) and the bounded
   // cache that shares such frames between workers. For constant source
-  // content the clean frame is an exact function of (source, source frame,
-  // disc_frame_index mod P) with P the colour sequence period (4 frames for
-  // PAL/PAL-M, 2 for NTSC), so a still section contains only P distinct clean
-  // frames. Defined in generation_stage.cpp.
+  // content the clean frame is an exact function of (source, each field's
+  // source frame, disc_frame_index mod P) with P the colour sequence period (4
+  // frames for PAL/PAL-M, 2 for NTSC), so a still section contains only P
+  // distinct clean frames. Defined in generation_stage.cpp.
   struct FrameTemplate;
   class TemplateCache;
 
-  // Synthesises one clean frame into y_out/c_out (each frame_samples long).
+  // Synthesises one clean frame into y_out/c_out (each frame_samples long),
+  // drawing field 1's active lines from field_sources[0] and field 2's from
+  // field_sources[1] (the same image except across a 2:3 pulldown picture).
   // sequence_phase is disc_frame_index reduced modulo the colour sequence
   // period; the reduction is exact because every use of the disc frame index
   // in clean synthesis depends only on that residue. Fills the buffers
   // completely (blanking / zero) before writing, so callers need not clear
   // them. Uses (and mutates) the worker-private workspaces in resources.
-  static void SynthesiseTemplate(SynthesisResources& resources,
-                                 const Section& section,
-                                 const FrameSourceImage& source_frame,
-                                 std::size_t sequence_phase, SampleFixed* y_out,
-                                 SampleFixed* c_out);
+  static void SynthesiseTemplate(
+      SynthesisResources& resources, const Section& section,
+      const std::array<const FrameSourceImage*, 2>& field_sources,
+      std::size_t sequence_phase, SampleFixed* y_out, SampleFixed* c_out);
 
   ILogger* logger_;
   // Keyed by section: the schedule index where the next section's run starts.
@@ -160,7 +165,7 @@ class GenerationStage final : public IGenerationStage {
   std::unordered_map<const Section*, std::size_t> next_section_start_index_;
   std::unique_ptr<SynthesisResourceCache> resource_cache_;
   std::unique_ptr<TemplateCache> template_cache_;
-  ProgressiveFrameSource progressive_source_;
+  std::unique_ptr<ProgressiveFrameSource> progressive_source_;
   VitsDefinitionProvider default_vits_definition_provider_;
   VitsGenerator default_vits_generator_;
   const IVitsDefinitionProvider* vits_definition_provider_;

@@ -6,7 +6,7 @@ The repository ships a set of hand-authored projects under `projects/`, covering
 
 | Directory | Contents |
 |-----------|----------|
-| `projects/general/` | Feature examples — audio, EFM audio, VITS, progressive EXR and MKV sources, the PAL pilot burst |
+| `projects/general/` | Feature examples — audio, EFM audio, VITS, progressive EXR and MKV sources, the PAL pilot burst, NTSC film with 2:3 pulldown |
 | `projects/general-yc/` | PAL and NTSC audio examples with Y/C output |
 | `projects/stacking/` | Laserdisc disc simulation and multi-source stacking sets for PAL, PAL-M and NTSC |
 | `projects/long-form/` | Three-hour capture-sized PAL and NTSC examples, for testing against realistic file sizes |
@@ -16,7 +16,7 @@ The repository ships a set of hand-authored projects under `projects/`, covering
 !!! warning "The long-form projects are very large"
     They write hundreds of gigabytes each — roughly 383 GB for PAL and 309 GB for NTSC of composite samples, plus about 3.1 GB of audio. They are deliberately excluded from the automated suites; run them by hand with `--output-root` pointing at storage that can hold the result.
 
-Derived variants — the `stacking-captures` set, the impairment-free `stacking-clean` set and the Y/C `stacking-yc` set — are generated into `build/generated-projects/` at build time and are not committed. Add a variant by editing `variants.json`, not by copying YAML.
+Derived variants — the `stacking-captures` set, the impairment-free `stacking-clean` set, the Y/C `stacking-yc` set and the `film-clv` and `film-pal-m` film sets — are generated into `build/generated-projects/` at build time and are not committed. Add a variant by editing `variants.json`, not by copying YAML.
 
 ### Pressings and captures
 
@@ -51,6 +51,15 @@ The `stacking-captures` variant derives six captures of every pressing. Each has
 A `captures` entry in `projects/variants.json` may set `chroma_error` (a mapping that replaces the project's block, or `null` to remove it) and `timing_offset_samples` (written to `channel.timing_offset_samples`), alongside `capture_seed`, `remove_sections` and `repeat_sections`. The variant's `capture_seed_offsets` maps source filename globs to an integer added to the capture seeds of every matching source.
 
 `stacking-clean` derives an impairment-free truth for every capture (`_capN_clean`). It removes the noise and the dropouts, pressing defects included, but keeps the `channel:` block, because the timing offset, the beat and the smear are part of the pressing. The captures of one pressing then match each other on every picture number, apart from capture noise and the overrides of captures 5 and 6. Pressings A and B's truths differ by exactly one sample.
+
+### Film with 2:3 pulldown
+
+Two NTSC CAV discs play the bundled film clip, `FILM_COUNTER_24P.mkv`, with [2:3 pulldown](../user-manual/sources.md#film-and-pulldown). Their OSD prints each field's film frame, cadence position and picture number:
+
+- `ntsc_film_pulldown.yaml` plays all 240 film frames from phase A: 300 output frames, PNs 1–240.
+- `ntsc_film_mixed.yaml` mixes video and film sections: colour bars, film from phase A, film continuing that cadence, scrolling colour bars, film restarting at phase C and ending on a single field, and film continuing mid-letter over the first film range again. Its header lists each section's film frames and picture numbers.
+
+The `film-clv` variant moves both onto a CLV disc, swapping the CAV picture numbers for the CLV time codes, and `film-pal-m` renders the CAV and CLV discs on PAL-M. The variant rules `video_standard`, `disc_type` and `replace_codes` in `projects/variants.json` do this.
 
 ### Disc-simulation sets
 

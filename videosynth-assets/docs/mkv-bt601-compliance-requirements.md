@@ -67,6 +67,8 @@ This section contains the direct values a test script should use.
 | Frame rate | 30000/1001 | 25/1 | r_frame_rate and avg_frame_rate |
 | field_order | bt | tb | ffprobe field_order |
 
+Film for 2:3 pulldown is a progressive 525-line source: a 720x486 file at 24000/1001 frames/s must be tagged `field_order` progressive. All the other 525 requirements apply to it unchanged.
+
 Additional stream policy:
 
 - Audio stream: optional, if present should be PCM at 48 kHz.

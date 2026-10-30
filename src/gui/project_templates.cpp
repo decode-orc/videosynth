@@ -132,6 +132,27 @@ Section MakeProgressiveSectionTemplate(int ordinal, Standard standard) {
   return section;
 }
 
+std::string FilmBundledSource() {
+  return "{bundled}/mkv/" + BundledRaster(Standard::kNtsc) +
+         "/FILM_COUNTER_24P.mkv";
+}
+
+Section MakeFilmSectionTemplate(int ordinal, Standard standard) {
+  Section section;
+  section.name = "Film " + std::to_string(ordinal);
+  section.type = "progressive";
+  // 2:3 pulldown exists only on 525-line standards, so the film clip always
+  // uses the 525-line raster.
+  section.source = IsSystemM(standard) ? FilmBundledSource()
+                                       : DefaultBundledSource(standard);
+  section.duration_frames_all = true;
+  section.duration_frames_repeat = 1;
+  section.cadence.pattern = CadencePattern::kPulldown23;
+  section.cadence.phase = CadencePhase::kA;
+  section.cadence.phase_specified = true;
+  return section;
+}
+
 Section MakeLaserdiscLeadInSectionTemplate(Standard standard) {
   Section section = MakeLaserdiscSectionBase(standard, SectionType::kLeadIn,
                                              "LeadIn", kLeadInMinFrames);

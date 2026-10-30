@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -159,8 +160,10 @@ class BiphaseInjectionManager {
 
   // Sets the initial frame count used to derive colour_frame_index.
   // Call this after Reset() with (first_picture_number - 1) so that
-  // colour_frame_index == (PN - 1) % colour_period for every frame,
-  // matching the disc-accurate colour phase for a CAV disc.
+  // colour_frame_index == (PN - 1) % colour_period for every video-cadence
+  // frame, matching the disc-accurate colour phase for a CAV disc. 2:3
+  // pulldown frames always use the frame count, because their picture
+  // numbers count film pictures rather than disc frames.
   // Has no effect if called before Reset() (Reset() overwrites frame_count_).
   void SetInitialFrameCount(int initial_count);
 
@@ -183,7 +186,9 @@ class BiphaseInjectionManager {
   //
   // The resolved payload is later rendered by InjectResolvedVbiLines, which
   // is stateless and may run on any thread. out_enrichment->disc_frame_index
-  // and osd_texts are NOT populated here; the caller owns those fields.
+  // and field_osd_texts are NOT populated here; the caller owns those fields.
+  //
+  // The frame is one video-cadence picture: field 1 starts it.
   //
   // Args:
   //   section:                     The section rendered in this frame.
@@ -199,6 +204,19 @@ class BiphaseInjectionManager {
   // on any error.
   bool ResolveFrame(const Section& section, Standard standard,
                     double sample_rate_hz, int active_window_start_samples,
+                    FrameEnrichment* out_enrichment,
+                    std::vector<std::string>* errors);
+
+  // As above, with picture_starts[i] true when field i + 1 is the first field
+  // of a picture. In a 2:3 pulldown section the CAV picture_number and
+  // fm_picture_number advance once per picture start rather than once per
+  // frame. The picture-field codes, picture stop and white flag follow the
+  // fields that start pictures (see LinePlacementEngine). In every cadence
+  // the FM picture number changes on each picture's second field (IEC 60857
+  // §10.2.3).
+  bool ResolveFrame(const Section& section, Standard standard,
+                    double sample_rate_hz, int active_window_start_samples,
+                    const std::array<bool, 2>& picture_starts,
                     FrameEnrichment* out_enrichment,
                     std::vector<std::string>* errors);
 
@@ -286,13 +304,32 @@ class BiphaseInjectionManager {
   // colour_frame_index without needing access to the timing model here.
   int frame_count_ = 0;
 
+  // True when the last field resolved started a picture, so the next field
+  // carries its picture stop code (even across a frame or section boundary).
+  bool previous_field_started_picture_ = false;
+  // CAV picture number of the picture the last resolved field showed.
+  int last_picture_number_ = 0;
+  // FM picture number on the last resolved programme-area field, or -1
+  // before the first one; a picture's first field repeats it.
+  int fm_shown_value_ = -1;
+
   // (Re)initialises all generators for a new section.
   bool InitializeSection(const Section& section, Standard standard,
                          double sample_rate_hz,
                          std::vector<std::string>* errors);
 
-  // Advances all stateful code generators by one frame.
-  void AdvanceGenerators();
+  // Advances all stateful code generators by one frame, except
+  // fm_picture_number, which ResolveFmPictureNumber advances per picture
+  // start. When pictures_advanced is true the CAV picture_number is left
+  // alone too: a 2:3 pulldown frame advances it once per picture start.
+  void AdvanceGenerators(bool pictures_advanced);
+
+  // Resolves one field's FM picture number, advancing the generator when the
+  // field starts a picture. A picture's first field still carries the
+  // previous picture's number; the new number appears from its second field
+  // (IEC 60857 §10.2.3). The very first programme picture, with no previous
+  // number, carries its own number in its first field.
+  FmData ResolveFmPictureNumber(bool field_one, bool starts_picture);
 
   // Returns a pointer to the generator for code_type, or nullptr if absent.
   CodeGenerator* GetGenerator(const std::string& code_type) const;

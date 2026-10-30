@@ -43,6 +43,29 @@
       "remove_section_blocks": ["noise", "dropouts", "osd"]
     },
     {
+      "name": "film-clv",
+      "description": "The 2:3 pulldown film fixtures on a CLV disc: the CAV picture numbers become the CLV programme time code, CLV picture number and CLV code, and the 40-bit FM picture number becomes the FM programme time.",
+      "sources": [
+        "general/ntsc_film_*.yaml"
+      ],
+      "name_suffix": "_clv",
+      "disc_type": "CLV",
+      "replace_codes": {
+        "picture_number": ["programme_time_code", "clv_picture_number", "clv_code"],
+        "fm_picture_number": ["fm_programme_time"]
+      }
+    },
+    {
+      "name": "film-pal-m",
+      "description": "The 2:3 pulldown film fixtures, CAV and CLV, on PAL-M: the other 525-line standard that carries 2:3 pulldown, over the same 720x486 sources.",
+      "sources": [
+        "general/ntsc_film_*.yaml",
+        "film-clv/*.yaml"
+      ],
+      "name_suffix": "_pal_m",
+      "video_standard": "PAL_M"
+    },
+    {
       "name": "stacking-yc",
       "description": "Y/C (separate luma/chroma) renderings of every stacking project, composite and clean alike.",
       "sources": [

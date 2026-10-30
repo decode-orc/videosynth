@@ -12,6 +12,7 @@
 
 #include <QObject>
 #include <QString>
+#include <array>
 #include <cstddef>
 #include <functional>
 #include <list>
@@ -73,12 +74,24 @@ struct PreviewFrameData {
   std::size_t output_frame_index = 0;
   int section_index = -1;
   QString section_name;
+  // What each field shows (index 0 = field 1), from the frame schedule. In a
+  // 2:3 pulldown section the two fields may show different film frames.
+  std::array<IGenerationStage::FieldPicture, 2> fields{};
   PreviewOptions options;
   std::vector<SampleFixed> y_mv;
   std::vector<SampleFixed> c_mv;
   bool has_source_image = false;
   FrameSourceImage source_image;
 };
+
+// The cadence of a previewed frame for the frame info line, e.g.
+// "F1: film 37 (B3) · F2: film 38 (C1)": each field's 0-based source film
+// frame and its place in the 2:3 cycle (as the {cadence} OSD token shows it).
+// Empty for a video-cadence frame, whose fields show the same picture.
+//
+// Thread-safety: thread-safe (pure function).
+QString FormatFieldCadence(
+    const std::array<IGenerationStage::FieldPicture, 2>& fields);
 
 // Synthesises single preview frames on demand through the same deterministic
 // backend the pipeline uses: BuildFrameSchedule's enriched schedule plus the

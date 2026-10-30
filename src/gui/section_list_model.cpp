@@ -48,8 +48,13 @@ std::vector<SectionListRow> BuildSectionListRows(const Project& project) {
   std::vector<SectionListRow> rows;
   rows.reserve(project.sections.size());
 
+  // A 2:3 "all" section's output frames depend on where its cadence starts.
+  const std::vector<int> cadence_start_slots = ResolveCadenceStartSlots(
+      project.sections,
+      std::vector<int>(project.sections.size(), kUnknownSourceFrameCount));
   int next_start_frame = 0;
-  for (const Section& section : project.sections) {
+  for (std::size_t i = 0; i < project.sections.size(); ++i) {
+    const Section& section = project.sections[i];
     SectionListRow row;
     row.name = QString::fromStdString(section.name);
     row.type = QString::fromStdString(section.type);
@@ -58,8 +63,8 @@ std::vector<SectionListRow> BuildSectionListRows(const Project& project) {
     row.duration_frames = section.duration_frames;
     row.duration_all = section.duration_frames_all;
     row.duration_repeat = section.duration_frames_repeat;
-    row.output_frames =
-        KnownSectionOutputFrameCount(section, kUnknownSourceFrameCount);
+    row.output_frames = KnownSectionOutputFrameCount(
+        section, kUnknownSourceFrameCount, cadence_start_slots[i]);
     SourceFrameRange range;
     if (section.duration_frames_all && section.end_frame_specified &&
         ResolveSourceFrameRange(section, kUnknownSourceFrameCount, &range,
@@ -106,7 +111,12 @@ std::vector<int> BuildDiscFrameOffsets(const Project& project,
 
   // Running 0-based disc frame offset; -1 until the first programme_area
   // section starts the count (IEC 60856/60857: lead-in carries no picture
-  // numbers or timecodes, so its frames are never counted).
+  // numbers or timecodes, so its frames are never counted). CAV picture
+  // numbers count pictures, so a 2:3 pulldown section advances the count once
+  // per film frame rather than once per output frame.
+  const std::vector<int> cadence_start_slots = ResolveCadenceStartSlots(
+      project.sections,
+      std::vector<int>(project.sections.size(), kUnknownSourceFrameCount));
   int counter = -1;
   for (std::size_t i = 0; i < project.sections.size(); ++i) {
     const Section& section = project.sections[i];
@@ -133,10 +143,13 @@ std::vector<int> BuildDiscFrameOffsets(const Project& project,
     // Once started, the count runs across every later section (the engine's
     // timekeeping generators persist across boundaries); open-ended "all"
     // durations contribute nothing, as in BuildSectionListRows.
-    const int64_t output_frames =
-        KnownSectionOutputFrameCount(section, kUnknownSourceFrameCount);
-    if (counter >= 0 && output_frames > 0) {
-      counter += static_cast<int>(output_frames);
+    const int64_t positions =
+        (disc_type == DiscType::kCAV)
+            ? KnownSectionPictureCount(section, kUnknownSourceFrameCount,
+                                       cadence_start_slots[i])
+            : KnownSectionOutputFrameCount(section, kUnknownSourceFrameCount);
+    if (counter >= 0 && positions > 0) {
+      counter += static_cast<int>(positions);
     }
   }
   return offsets;

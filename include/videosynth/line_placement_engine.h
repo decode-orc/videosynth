@@ -36,6 +36,19 @@ struct LineCodeAssignment {
   bool uses_172h_offset = false;
 };
 
+// A field's place in the picture sequence, which decides the programme-area
+// codes it carries (IEC 60856/60857 clause 10). A video-cadence frame is one
+// picture: field 1 starts it and field 2 follows it. Under 2:3 pulldown a
+// picture lasts two or three fields, so a field may do either, both (a
+// one-field picture after another picture) or neither (the third field of a
+// three-field picture).
+struct PictureFieldRole {
+  // The field is the first field of a picture.
+  bool starts_picture = false;
+  // The field immediately follows the first field of a picture.
+  bool follows_picture_start = false;
+};
+
 // Determines which biphase or FM code type should be injected on each VBI line,
 // given a disc configuration and the set of code types present in the section.
 //
@@ -51,17 +64,21 @@ struct LineCodeAssignment {
 //
 // Placement rules per IEC 60856/60857 clause 10:
 //   1. lead_in / lead_out codes have absolute priority in their sections.
-//   2. Every output frame is one picture whose first field is field 1. That
-//      field carries picture_number (CAV) or programme_time_code and
-//      clv_picture_number (CLV); the other field carries picture_stop,
-//      chapter_number, clv_code and programme_status (CAV programme_status
-//      is written in both fields). A section with none of the first-field
-//      codes writes the other-field codes in both fields.
-//   3. picture_stop > programme_status on line 16/279/329 (CAV).
-//   4. picture_stop > chapter_number on line 17/280/330 (CAV).
-//   5. fm_picture_number / fm_programme_time occupy FM lines 10/273 (NTSC).
-//   6. fm_white_flag occupies line 11 in lead-in and the programme area, and
-//      lines 11 and 274 in lead-out (NTSC).
+//   2. A picture's first field carries picture_number (CAV) or
+//      programme_time_code and clv_picture_number (CLV). Every other field
+//      carries chapter_number, clv_code and programme_status (CAV
+//      programme_status is written in every field). A section with none of
+//      the first-field codes writes the other-field codes in every field.
+//   3. picture_stop goes in the field after a picture's first field (in
+//      every field when the section has no picture_number). It has priority
+//      over programme_status on line 16/279/329 and over chapter_number on
+//      line 17/280/330 (CAV). When that field starts a picture of its own,
+//      its picture_number keeps line 17/280 and the stop code is on line
+//      16/279 only.
+//   4. fm_picture_number / fm_programme_time occupy FM lines 10/273 (NTSC).
+//   5. fm_white_flag occupies line 11 in lead-in, lines 11 and 274 in
+//      lead-out, and in the programme area line 11 or 274 of each picture's
+//      first field (NTSC).
 //
 // Thread-safety: LinePlacementEngine is immutable after construction and may be
 // called concurrently from multiple threads once constructed.
@@ -83,13 +100,19 @@ class LinePlacementEngine {
   //   field_one:    true when line_number is in field 1.  Typically derived
   //                 from IsFieldOne(); accepted as a parameter so callers can
   //                 pass a precomputed value or override for testing.
-  //                 Decides which field carries the picture's first-field
-  //                 codes in the programme area.
+  //                 The field's role is that of a video-cadence frame:
+  //                 field 1 starts the picture and field 2 follows it.
   //
   // Returns an assignment with assigned=false if no biphase or FM code should
   // be injected on this line (line is outside reserved range, or the section
   // configuration does not call for any code here).
   LineCodeAssignment GetAssignment(int line_number, bool field_one) const;
+
+  // As above, for a line whose field has the given role in the picture
+  // sequence (used for 2:3 pulldown, where pictures span two or three
+  // fields).
+  LineCodeAssignment GetAssignment(int line_number,
+                                   const PictureFieldRole& role) const;
 
   // Returns true if line_number falls within the IEC-defined biphase VBI
   // reserved range for the given standard:
@@ -119,26 +142,32 @@ class LinePlacementEngine {
   static LineCodeAssignment None();
 
   // Per-standard dispatch.
-  LineCodeAssignment GetPalAssignment(int line, bool field_one) const;
-  LineCodeAssignment GetNtscAssignment(int line, bool field_one) const;
+  LineCodeAssignment GetPalAssignment(int line,
+                                      const PictureFieldRole& role) const;
+  LineCodeAssignment GetNtscAssignment(int line,
+                                       const PictureFieldRole& role) const;
 
   // Section-type and disc-type handlers.
   LineCodeAssignment GetPalLeadInOut(int line) const;
-  LineCodeAssignment GetNtscLeadInOut(int line, bool field_one) const;
-  LineCodeAssignment GetPalCavProgramme(int line, bool field_one) const;
-  LineCodeAssignment GetPalClvProgramme(int line, bool field_one) const;
-  LineCodeAssignment GetNtscCavProgramme(int line, bool field_one) const;
-  LineCodeAssignment GetNtscClvProgramme(int line, bool field_one) const;
+  LineCodeAssignment GetNtscLeadInOut(int line) const;
+  LineCodeAssignment GetNtscCavProgramme(int line,
+                                         const PictureFieldRole& role) const;
+  LineCodeAssignment GetNtscClvProgramme(int line,
+                                         const PictureFieldRole& role) const;
 
-  // True when field_one is the picture's first field and the section carries
+  // True when the section carries a code placed only in a picture's first
+  // field.
+  bool HasPictureFieldCodes() const;
+
+  // True when the field is a picture's first field and the section carries
   // a code placed only there.
-  bool IsPictureField(bool field_one) const;
+  bool IsPictureField(const PictureFieldRole& role) const;
 
   // Programme-area biphase for the field-1 line `canonical` (16-18).
   LineCodeAssignment GetCavProgrammeBiphase(int canonical,
-                                            bool field_one) const;
+                                            const PictureFieldRole& role) const;
   LineCodeAssignment GetClvProgrammeBiphase(int canonical,
-                                            bool field_one) const;
+                                            const PictureFieldRole& role) const;
 };
 
 }  // namespace videosynth

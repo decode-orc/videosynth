@@ -62,6 +62,8 @@ def nominal_tc_fps(expected_fps: Optional[Tuple[int, int]]) -> Optional[int]:
     n, d = expected_fps
     if (n, d) == (30000, 1001):
         return 30
+    if (n, d) == (24000, 1001):
+        return 24
     if (n, d) == (25, 1):
         return 25
     val = int(round(n / d))
@@ -452,6 +454,12 @@ def validate_one(
         expected_sar = (108, 119)
         expected_fps = (30000, 1001)
         expected_field_order = "bt"
+        # A 24000/1001 film clip for 2:3 pulldown is a progressive 525-line
+        # source: the film rate and a progressive field order replace the
+        # interlaced video ones.
+        if parse_rational(str(v.get("r_frame_rate", ""))) == (24000, 1001):
+            expected_fps = (24000, 1001)
+            expected_field_order = "progressive"
         expected_primaries = {"smpte170m"}
         expected_transfer = {"bt709", "smpte170m"}
     elif height == 576:

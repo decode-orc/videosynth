@@ -65,11 +65,14 @@ TEST(PreviewRenderTest, PictureRowLineMappingRoundTrips) {
 TEST(PreviewRenderTest, InterlacedLineOrderWeavesBothFieldsOnce) {
   const std::vector<int> pal = InterlacedLineOrder(Standard::kPal);
   ASSERT_EQ(pal.size(), 625U);
-  // Woven, field 1 first: line 1, then field 2's first line (313), line 2, ...
-  EXPECT_EQ(pal[0], 1);
-  EXPECT_EQ(pal[1], 313);
-  EXPECT_EQ(pal[2], 2);
-  EXPECT_EQ(pal[3], 314);
+  // Woven as the generation stage maps source rows: field 2 line L + 313
+  // above field 1 line L, with field 2's unpaired line 313 on top.
+  EXPECT_EQ(pal[0], 313);
+  EXPECT_EQ(pal[1], 314);
+  EXPECT_EQ(pal[2], 1);
+  EXPECT_EQ(pal[3], 315);
+  EXPECT_EQ(pal[4], 2);
+  EXPECT_EQ(pal[624], 312);
   // Every frame line appears exactly once.
   std::vector<int> sorted = pal;
   std::sort(sorted.begin(), sorted.end());
@@ -78,10 +81,31 @@ TEST(PreviewRenderTest, InterlacedLineOrderWeavesBothFieldsOnce) {
   EXPECT_EQ(sorted.front(), 1);
   EXPECT_EQ(sorted.back(), 625);
 
+  // NTSC pairs field 2 line L + 262 above field 1 line L, with field 2's
+  // unpaired line 525 at the bottom.
   const std::vector<int> ntsc = InterlacedLineOrder(Standard::kNtsc);
   ASSERT_EQ(ntsc.size(), 525U);
-  EXPECT_EQ(ntsc[0], 1);
-  EXPECT_EQ(ntsc[1], 263);
+  EXPECT_EQ(ntsc[0], 263);
+  EXPECT_EQ(ntsc[1], 1);
+  EXPECT_EQ(ntsc[2], 264);
+  EXPECT_EQ(ntsc[523], 262);
+  EXPECT_EQ(ntsc[524], 525);
+}
+
+TEST(PreviewRenderTest, InterlacedLineOrderFollowsSourceRows) {
+  // The first picture line of field 2 carries source row 0 and the first of
+  // field 1 row 1 (generation stage), so they must be woven in that order on
+  // adjacent rows.
+  const auto expect_adjacent = [](Standard standard, int upper, int lower) {
+    EXPECT_EQ(LineNumberToFrameRow(standard, lower),
+              LineNumberToFrameRow(standard, upper) + 1)
+        << upper << " above " << lower;
+  };
+  expect_adjacent(Standard::kPal, 336, 23);
+  expect_adjacent(Standard::kPal, 23, 337);
+  expect_adjacent(Standard::kNtsc, 284, 22);
+  expect_adjacent(Standard::kNtsc, 22, 285);
+  expect_adjacent(Standard::kPalM, 284, 22);
 }
 
 TEST(PreviewRenderTest, FrameRowLineMappingRoundTrips) {
@@ -91,8 +115,8 @@ TEST(PreviewRenderTest, FrameRowLineMappingRoundTrips) {
         << "line " << line;
   }
   // Out-of-range rows clamp to the frame edges rather than crashing.
-  EXPECT_EQ(FrameRowToLineNumber(Standard::kPal, -5), 1);
-  EXPECT_EQ(FrameRowToLineNumber(Standard::kPal, 100000), 625);
+  EXPECT_EQ(FrameRowToLineNumber(Standard::kPal, -5), 313);
+  EXPECT_EQ(FrameRowToLineNumber(Standard::kPal, 100000), 312);
 }
 
 TEST(PreviewRenderTest, EncodedFrameImageCoversWholeFrame) {

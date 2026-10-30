@@ -34,7 +34,7 @@ A Matroska (`.mkv`) or MP4 (`.mp4`) file, used when a section should show moving
 | Container | Matroska for `.mkv`, MP4 for `.mp4` (the extension must match the content) |
 | Video stream | The first video stream is used |
 | Raster | 720×576 (PAL/SECAM) or 720×486 (NTSC/PAL-M) |
-| Frame rate | Exactly 25 (PAL/SECAM) or 30000/1001 (NTSC/PAL-M), constant |
+| Frame rate | Exactly 25 (PAL/SECAM) or 30000/1001 (NTSC/PAL-M), constant; 24000/1001 film in a 2:3 pulldown section (see [Film and pulldown](#film-and-pulldown)) |
 | Crop metadata | Must not be present |
 
 Everything else is either converted or reported:
@@ -103,6 +103,7 @@ The layout is `{bundled}/<type>/<raster>/<file>`, where `<type>` is `exr` or `mk
 | `SMPTE_BARS.mkv` / `SMPTE_BARS_001.mkv` | Static SMPTE bars as a clip |
 | `MOVING_ZONE_2H.mkv` | Moving zone plate — motion and high-frequency content (luma only) |
 | `MOVING_BARS_75.mkv` | 75 % colour bars (EBU 100/0/75/0) scrolling left 4 pixels per frame — moving chroma, for 3D comb filters and field-phase decisions. 176 frames, looping seamlessly |
+| `FILM_COUNTER_24P.mkv` | 720×486 only: 24000/1001 progressive film for [2:3 pulldown](#film-and-pulldown). Each frame shows its 0-based frame number in large digits, over a white bar and a strip of colour bars that both move 8 pixels per frame, so a frame that weaves two film frames shows combing. 240 frames (10 s) |
 
 Always reference bundled assets through `{bundled}/…` rather than a bare relative path. A bare relative path resolves against the working directory in the CLI but against the project directory in the GUI, so it will work in one and not the other.
 
@@ -165,6 +166,60 @@ Progressive section 'Capture': colour conversion applied: full range -> studio s
 ```
 
 In the GUI the probe runs in the background whenever you change a section's source, and the **Source Profile** box in the section editor reports the result — *Source profile OK*, *Source profile incompatible*, or *Probing source…* while it works — with the codec, pixel format, frame count, the planned colour conversion and any warnings. The frame count it discovers caps the **Source frames** range fields and feeds the `duration_frames: "all"` totals shown beside the duration field.
+
+## Film and pulldown
+
+525-line television shows 24 fps film with **2:3 pulldown**: film frames alternately fill two and three 59.94 Hz fields, so four film frames make ten fields, or five video frames. A section does this when its [`cadence`](../reference/sections.md#cadence) block sets `pattern: "2:3"` and its source is a video at exactly 24000/1001 fps. It is available on NTSC and PAL-M only. 625-line film runs at 25 fps with one frame per two fields, which is the normal video cadence, so a PAL or SECAM project needs nothing extra.
+
+```yaml
+- name: Feature
+  type: progressive
+  source: "{bundled}/mkv/720x486/FILM_COUNTER_24P.mkv"
+  cadence:
+    pattern: "2:3"
+    phase: A
+```
+
+### The cadence
+
+The cycle runs over output fields in the order they are shown: `A A B B B C C D D D`. Each letter is one film frame, and a new film frame starts wherever the letter changes. `phase` picks the letter the section's first field takes. Each field is drawn from its own film frame, so the frames whose two fields carry different letters (`B3` with `C1`, and `C2` with `D1`, in a cycle from phase A) weave two film frames together, exactly as a real transfer does. Those are the frames a film-mode decoder has to detect and undo.
+
+`duration_frames` still counts output frames:
+
+- **`"all"`** shows every film frame of the selected range in full: 48 film frames from phase A fill 120 fields, or 60 frames. When the fields come to an odd number, the last frame's second field repeats the last film frame.
+- **A fixed count** plays that many output frames and loops the range if it runs out, cutting the last film frame short when the count ends part-way through it.
+
+The section editor's duration summary works these numbers out for you.
+
+### Mixing film and video
+
+Film and video sections can follow each other freely, and the same source can appear in several sections with different `start_frame`/`end_frame` ranges. At each film section's start, `continuity` decides what happens to the cycle:
+
+- **`restart`** (the default) starts at `phase`, so a boundary breaks the cadence as an edit between two separately transferred reels would.
+- **`continue`** carries on from where the previous section's fields stopped. The previous section must also be 2:3. When it stopped part-way through a letter, the new section's first film frame gets only the rest of that letter, which leaves the one- or two-field film frames a real edit leaves behind.
+
+A fixed duration that ends part-way through a letter leaves a short film frame at the end of the section in the same way. The fixture `projects/general/ntsc_film_mixed.yaml` mixes all of these, and its header lists the film frames and picture numbers each section produces.
+
+The OSD tokens [`{film_frame}` and `{cadence}`](osd.md#tokens) print each field's film frame and cycle position, such as `37 B3`, which is the quickest way to see the cadence in a capture.
+
+### Sound
+
+A film section's [video soundtrack](audio.md#video-soundtracks) plays in real time. Four film frames last exactly as long as five video frames, so the sound needs no resampling and runs on unbroken across the cadence.
+
+### On a laserdisc
+
+A CAV disc numbers pictures, not frames, so in a film section `picture_number` counts film frames: four pictures in every five frames. The picture number goes on the first field of each film frame, whichever field that is, and so does the white flag on NTSC and PAL-M, so one frame in five carries neither. This is how film is mastered to CAV, and it lets a player hold a still on a whole film frame. Picture numbers continue across film and video sections alike. The colour field sequence keeps following the video frames. On CLV the time codes still count video frames. [Laserdisc: Film sections](laserdisc.md#film-sections) has the placement details.
+
+### Converting 24p material
+
+The source must already be at 24000/1001 fps, at the 525-line raster, and progressive. Material at exactly 24 fps needs its timestamps slowed by 0.1 %; this keeps every frame and needs no frame-rate conversion:
+
+```bash
+ffmpeg -i film_24p.mov -vf "setpts=PTS*1001/1000,scale=704:486,pad=720:486:8:0,setsar=108/119" \
+  -r 24000/1001 -af "atempo=1000/1001" -c:v ffv1 -c:a flac film_23976.mkv
+```
+
+Material already at 23.976 fps needs only the scale and pad. Do not use the `fps` filter to make 24000/1001 from 29.97 fps video: that drops frames rather than recovering the film frames. Remove pulldown from telecined video first, with FFmpeg's `fieldmatch,decimate` filters for example.
 
 ## Memory use
 

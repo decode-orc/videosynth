@@ -29,6 +29,7 @@ sections:
 | `section_type` | string | No | `lead_in`, `programme_area`, `lead_out` | absent |
 | `start_frame` | int | No | ≥ 0, inside the video source | `0` |
 | `end_frame` | int | No | ≥ `start_frame`, inside the video source | last source frame |
+| `cadence` | map | No | [field cadence](#cadence) | video cadence |
 | `line_injections` | list | No | [section line injections](section-line-injections.md) | absent |
 | `luma_bandwidth` | map | No | [luma bandwidth limit](#luma_bandwidth) | absent |
 | `noise` | map | No | [noise](section-noise.md) | absent |
@@ -121,6 +122,40 @@ The last source frame of the selected range, 0-based and inclusive. Video source
 
 `end_frame` sets the section's length, so it cannot be combined with an integer `duration_frames`; leave `duration_frames` out (or set it to `"all"`), and use `duration_repeat` to play the range more than once. Emitted only when set.
 
+## `cadence`
+
+How the section's source frames map onto output fields. Optional — omit it for the native video cadence, where each source frame becomes one frame's two fields.
+
+```yaml
+- name: Feature
+  type: progressive
+  source: "{project}/film_23976.mkv"
+  cadence:
+    pattern: "2:3"
+    phase: A
+    continuity: restart
+```
+
+| Key | Type | Required | Values | Default |
+|-----|------|----------|--------|---------|
+| `pattern` | string | No | `video`, `"2:3"` | `video` |
+| `phase` | string | No | `A`, `B`, `C`, `D` | `A` |
+| `continuity` | string | No | `restart`, `continue` | `restart` |
+
+- **`pattern: "2:3"`** spreads 24000/1001 fps film frames over the 59.94 Hz fields in the 2:3 pulldown cycle `A A B B B C C D D D`, so four film frames fill ten fields (five frames). It needs NTSC or PAL-M and a video source at exactly 24000/1001 fps. Quote it: unquoted, `2:3` is a number to some YAML 1.1 readers.
+- **`phase`** is the cycle letter whose first field opens the section.
+- **`continuity: continue`** carries the cycle on from the previous section, which must also be `"2:3"`, instead of starting at `phase`. When the previous section ended part-way through a letter, the new section's first film frame gets only the rest of it — the short or orphan field a real edit leaves. `restart` starts at `phase`, so the cadence breaks at the boundary.
+
+`duration_frames` still counts output frames. With `"all"`, the section shows every film frame of the selected range (× `duration_repeat`) for its full number of fields; when that is an odd number of fields, the last frame's second field repeats the last film frame. A fixed `duration_frames` loops the range, as for a video cadence.
+
+Each field is drawn from its own film frame, so a frame whose fields fall in different letters (`B3` and `C1`, say) weaves two film frames together, as real pulldown does. The [OSD](section-osd.md#tokens) tokens `{film_frame}` and `{cadence}` show the mapping field by field.
+
+A [video soundtrack](section-audio.md#video_audio) plays in real time from the range's first film frame: four film frames last exactly as long as five output frames, so the sound needs no resampling and is not cut to the cadence.
+
+[Laserdisc codes](laserdisc-codes.md#film-pictures) follow the film pictures. CAV picture numbers count film frames, four in five output frames, and the picture-number codes, picture stop and white flag go on the fields where each film frame starts. The colour sequence still follows the output frames.
+
+Validation: `"2:3"` on PAL or SECAM, or on an EXR still, is an error; so is a source frame rate other than 24000/1001 under `"2:3"`, or 24000/1001 under `video`, and `continue` on the first section or after a section that is not `"2:3"`. `phase` together with `continue`, and `phase` or `continuity` under `video`, are ignored with a warning. An unknown value or key is a parse error. The emitter writes the block only when it differs from the video default.
+
 ## `luma_bandwidth`
 
 A low-pass on the section's picture luma, as from a player or transfer with a limited luma frequency response. Optional — omit it for the full 4fsc bandwidth.
@@ -168,11 +203,12 @@ All are optional, and only blocks that are explicitly set are written back out b
 ## Validation summary
 
 - `type` must be `progressive`.
-- `source` must exist and match a supported profile, at the standard's raster and constant frame rate; a video's container must match its extension and carry no crop metadata.
+- `source` must exist and match a supported profile, at the standard's raster and constant frame rate (24000/1001 for a `"2:3"` [cadence](#cadence)); a video's container must match its extension and carry no crop metadata.
 - `duration_frames` must be a positive integer or `"all"`.
 - `start_frame` ≥ 0 and `end_frame` ≥ `start_frame`, both inside the video source; `end_frame` never with an integer `duration_frames`.
 - An EXR still takes neither `start_frame` nor `end_frame`, and needs an integer `duration_frames`.
 - The disc-structure ordering rules above.
 - A section with a `laserdisc` injection must set `section_type`.
+- `cadence` rules (above).
 - `luma_bandwidth` within its ranges (above).
 - CAV lead-in and lead-out minimum durations (warnings).

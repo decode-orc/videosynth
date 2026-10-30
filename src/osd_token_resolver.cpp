@@ -65,6 +65,15 @@ std::string FormatBiphaseHex(const std::vector<uint32_t>& words) {
   return result;
 }
 
+// The 2:3 pulldown slot of the field, e.g. "B2"; "-" for a video cadence.
+std::string FormatCadence(const PerFrameContext& ctx) {
+  if (ctx.cadence_letter == '\0') {
+    return "-";
+  }
+  return std::string(1, ctx.cadence_letter) +
+         std::to_string(ctx.cadence_field_in_letter);
+}
+
 std::string FormatClvTimecode(const PerFrameContext& ctx) {
   if (!ctx.has_clv_timecode) {
     // Same HH:MM:SS:FF shape as a real value so overlay layout is unchanged
@@ -81,8 +90,8 @@ std::string FormatClvTimecode(const PerFrameContext& ctx) {
 
 const std::set<std::string>& KnownTokens() {
   static const std::set<std::string> kTokens = {
-      "picture_number", "biphase_hex", "phase_id",
-      "section_name",   "timecode",    "frame_number"};
+      "picture_number", "biphase_hex",  "phase_id",   "section_name",
+      "timecode",       "frame_number", "film_frame", "cadence"};
   return kTokens;
 }
 
@@ -119,6 +128,10 @@ std::string OsdTokenResolver::Resolve(const std::string& text,
       result += FormatClvTimecode(ctx);
     } else if (token == "frame_number") {
       result += FormatFrameNumber(ctx.frame_number);
+    } else if (token == "film_frame") {
+      result += std::to_string(ctx.film_frame);
+    } else if (token == "cadence") {
+      result += FormatCadence(ctx);
     } else {
       result += text.substr(i, close - i + 1);
     }

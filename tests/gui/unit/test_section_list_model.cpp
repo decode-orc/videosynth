@@ -197,6 +197,25 @@ TEST(SectionListModelTest, DiscFrameOffsetsHonourCavStartValueAnchor) {
   EXPECT_EQ(offsets[2], -1);
 }
 
+TEST(SectionListModelTest, CavDiscOffsetsCountFilmPictures) {
+  Project project = MakeProject();
+  project.cvbs_presets.video_standard_preset = Standard::kNtsc;
+  project.sections[0].section_type = SectionType::kProgrammeArea;
+  // 12 film frames (0-11) in 15 output frames from phase A.
+  project.sections[0].source = "film.mkv";
+  project.sections[0].cadence.pattern = CadencePattern::kPulldown23;
+  project.sections[0].duration_frames_all = true;
+  project.sections[0].start_frame = 0;
+  project.sections[0].end_frame = 11;
+  project.sections[0].end_frame_specified = true;
+  project.sections[1].section_type = SectionType::kProgrammeArea;
+
+  const std::vector<int> cav = BuildDiscFrameOffsets(project, DiscType::kCAV);
+  EXPECT_EQ(cav[1], 12);
+  const std::vector<int> clv = BuildDiscFrameOffsets(project, DiscType::kCLV);
+  EXPECT_EQ(clv[1], 15);
+}
+
 TEST(SectionListModelTest, DiscFrameOffsetsAllUnknownForNonLaserdisc) {
   Project project = MakeProject();
   project.sections[0].section_type = SectionType::kProgrammeArea;

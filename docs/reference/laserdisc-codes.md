@@ -34,13 +34,24 @@ SECAM projects.
 
 ## Fields
 
-Every output frame is one picture, and its first field is always field 1. IEC 60856/60857 clause 10 places some codes in the first field of a picture and the rest in the other field, so in the programme area:
+IEC 60856/60857 clause 10 places some codes in the first field of a picture and the rest in the other fields. In a video section every output frame is one picture, and its first field is always field 1, so in the programme area:
 
 - **Field 1** carries the addressing codes — `picture_number` on CAV, `programme_time_code` and `clv_picture_number` on CLV.
 - **Field 2** carries the other codes — `picture_stop`, `chapter_number`, `programme_status`, `clv_code`.
 - On CAV, `programme_status` is written on line 16 of field 1 as well.
 
 If a section carries none of the field 1 codes, the field 2 codes are written in both fields.
+
+### Film pictures
+
+In a [`"2:3"` section](sections.md#cadence) each film frame is one picture lasting two or three fields, and it can start in either field of a frame. The codes follow the pictures:
+
+- **The first field of each picture** carries the addressing codes, on lines 17/18 when it is field 1 and on 280/281 when it is field 2 (CLV: line 16 or 279 for `clv_picture_number`).
+- **`picture_stop`** goes in the field straight after that one, on lines 16/17 or 279/280, crossing into the next frame when the picture starts on field 2. When that field starts a picture of its own (a one-field picture left by `continuity: continue`), its picture number keeps line 17/280 and the stop code is on line 16/279 only.
+- **Every other field** carries `chapter_number` on lines 17/18 or 280/281, and `programme_status` on line 16 or 279.
+- **`fm_white_flag`** is on line 11 or 274 of the first field of each picture.
+
+One frame in five starts no picture, so it carries no picture number and no white flag.
 
 Lead-in and lead-out codes are written in both fields.
 
@@ -91,12 +102,16 @@ Fixed code marking the lead-out area. No parameters.
 | Range | 0–99 999 (PAL) / 0–79 999 (NTSC, PAL-M) |
 | Digits | X₁–X₅ each 0–9 |
 
-The frame address on a CAV disc, incrementing by 1 every frame.
+The picture address on a CAV disc, incrementing by 1 every picture: every frame in a video section, every film frame in a `"2:3"` section. A `"2:3"` section's numbers advance four times in five frames, and the count carries on across the boundary into the next section.
 
 `start_value` is optional:
 
 - **Omit it** to continue from the previous section. The counter runs continuously across every section; a disc-wide sequential numbering needs `start_value` on the *first* programme section only, or nowhere at all (numbering then begins at 1).
 - **Set it** to re-anchor the count for that section — a deliberate discontinuity, for a skip or replay.
+
+The colour sequence follows the disc's video frames, not its picture numbers. A video section's `start_value` also re-anchors the colour sequence to frame `start_value − 1`, but a `"2:3"` section's frames carry on from the frame position, as their picture numbers do not number frames.
+
+Past the maximum the number holds at it. Validation warns when a section would reach it, counting pictures.
 
 ```yaml
 - code_type: picture_number
@@ -112,7 +127,7 @@ The frame address on a CAV disc, incrementing by 1 every frame.
 | Lines (PAL) | 329, 330 (field 2) |
 | Lines (NTSC) | 279, 280 (field 2) |
 
-Tells the player to freeze on this frame. Written in field 2, after the picture-number field, where it takes priority over `programme_status` on line 329/279 and over `chapter_number` on line 330/280. Without a `picture_number` in the section it is written in both fields.
+Tells the player to freeze on this frame. Written in field 2, after the picture-number field, where it takes priority over `programme_status` on line 329/279 and over `chapter_number` on line 330/280. Without a `picture_number` in the section it is written in both fields. In a `"2:3"` section it follows each film picture's first field instead (see [Film pictures](#film-pictures)).
 
 ```yaml
 - code_type: picture_stop
@@ -268,7 +283,7 @@ A fixed marker identifying the disc as CLV, written in field 2. Without a `progr
 | X₄ | 0–2 |
 | X₅ | 0–9 |
 
-The frame position within the current second (X₄×10 + X₅ = frame 0–24 on PAL, 0–29 on NTSC and PAL-M) and the second offset within a 60-second block (X₁, X₃). Advances every frame, automatically.
+The frame position within the current second (X₄×10 + X₅ = frame 0–24 on PAL, 0–29 on NTSC and PAL-M) and the second offset within a 60-second block (X₁, X₃). Advances every frame, automatically. In a `"2:3"` section it is written only on each film picture's first field, with the number of the frame that field is in, so the frame with no picture start is skipped.
 
 On NTSC and PAL-M it includes colour time error correction (IEC 60857 Amendment 2 §10.1.10): the seconds count jumps forward at specific frame counts to keep colour timing accurate.
 
@@ -292,7 +307,7 @@ These are NTSC and PAL-M only, and are mandatory on a compliant NTSC disc alongs
 | Range | 0–79 999 |
 | Update | Second field of each new picture |
 
-Carries the CAV picture number in the 40-bit FM format, advancing with the 24-bit `picture_number`.
+Carries the CAV picture number in the 40-bit FM format, advancing with the 24-bit `picture_number`. The number changes on the second field of each new picture (IEC 60857 §10.2.3): a picture's first field still carries the previous picture's number. In a video section that is field 1 of each frame; in a `"2:3"` section it is the first field of each film picture. The first programme picture, with no number before it, carries its own number in both fields.
 
 `start_value` (0–79 999) is optional and seeds the counter, which otherwise starts at 1. Only the first section carrying `fm_picture_number` seeds it; in later sections the counter continues and `start_value` is not applied.
 
@@ -321,10 +336,10 @@ Carries CLV programme time in the 40-bit FM format. The X₅ mode indicator dist
 | Signal | 100 IRE constant level, 0.790H long, starting 0.160H from sync |
 | Section | `lead_in`, `programme_area`, `lead_out` |
 | Lines (lead-in) | 11 |
-| Lines (programme) | 11 |
+| Lines (programme) | 11 (`"2:3"`: 11 or 274) |
 | Lines (lead-out) | 11 and 274 |
 
-Marks the start of each new picture, which is how a player decides what a "frame" is when holding a still. Every output frame is a picture that opens on field 1, so in the lead-in and programme area the flag is on line 11 of every frame.
+Marks the start of each new picture, which is how a player decides what a "frame" is when holding a still. In a video section every output frame is a picture that opens on field 1, so in the lead-in and programme area the flag is on line 11 of every frame. In a `"2:3"` programme section the flag is on line 11 or 274 of each film picture's first field, and the frame with no picture start has none.
 
 ```yaml
 - code_type: fm_white_flag

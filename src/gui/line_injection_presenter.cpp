@@ -324,10 +324,15 @@ std::string FormatTargetLines(const std::vector<int>& lines) {
 }
 
 int TotalDiscFrames(const Project& project) {
+  const std::vector<int> cadence_start_slots = ResolveCadenceStartSlots(
+      project.sections,
+      std::vector<int>(project.sections.size(), kUnknownSourceFrameCount));
   int total = 0;
-  for (const Section& section : project.sections) {
+  for (std::size_t i = 0; i < project.sections.size(); ++i) {
     total += static_cast<int>(std::max<int64_t>(
-        0, KnownSectionOutputFrameCount(section, kUnknownSourceFrameCount)));
+        0, KnownSectionOutputFrameCount(project.sections[i],
+                                        kUnknownSourceFrameCount,
+                                        cadence_start_slots[i])));
   }
   return total;
 }

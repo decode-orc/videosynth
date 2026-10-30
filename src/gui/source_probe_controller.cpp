@@ -10,9 +10,11 @@
 
 #include "source_probe_controller.h"
 
+#include <cmath>
 #include <string>
 #include <utility>
 
+#include "videosynth/film_cadence.h"
 #include "videosynth/progressive_frame_source_probe.h"
 #include "videosynth/project_validator.h"
 #include "videosynth/source_colour_conversion.h"
@@ -22,6 +24,10 @@ namespace videosynth::gui {
 namespace {
 
 constexpr int kDefaultDebounceMsec = 300;
+
+// Matches the validator's frame-rate tolerance, so a source shown as film is
+// one a 2:3 section accepts.
+constexpr double kFilmRateTolerance = 1.0e-3;
 
 // Replays an already-resolved profile into ProjectValidator so the profile
 // rules run without touching the filesystem.
@@ -70,6 +76,10 @@ SourceProfileFindings EvaluateSourceProfileFindings(
   probe_section.type = section.type;
   probe_section.source = section.source;
   probe_section.duration_frames = 1;
+  // The frame rate a source needs follows the section's cadence pattern. The
+  // probe project has no previous section to continue from, so its cadence
+  // restarts.
+  probe_section.cadence.pattern = section.cadence.pattern;
   project.sections.push_back(std::move(probe_section));
 
   FixedProfileProbe fixed_probe(profile);
@@ -117,7 +127,10 @@ QString FormatSourceProfileSummary(
     parts.append(
         QStringLiteral("%1×%2").arg(profile.width).arg(profile.height));
   }
-  if (profile.frame_rate_hz > 0.0) {
+  if (std::abs(profile.frame_rate_hz - kFilmFrameRateHz) <=
+      kFilmRateTolerance) {
+    parts.append(QStringLiteral("Film 24000/1001"));
+  } else if (profile.frame_rate_hz > 0.0) {
     parts.append(
         QStringLiteral("%1 fps").arg(profile.frame_rate_hz, 0, 'f', 3));
   }

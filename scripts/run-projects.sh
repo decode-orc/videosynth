@@ -20,7 +20,7 @@ output_root="$build_dir/project-output"
 # suite name -> project directories, relative to the repo root or build dir.
 suite_dirs() {
   case "$1" in
-    general)  echo "projects/general projects/general-yc" ;;
+    general)  echo "projects/general projects/general-yc @generated-projects/film-clv @generated-projects/film-pal-m" ;;
     stacking) echo "projects/stacking @generated-projects/stacking-captures @generated-projects/stacking-clean @generated-projects/stacking-yc" ;;
     *)        return 1 ;;
   esac

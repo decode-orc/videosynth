@@ -283,6 +283,45 @@ void EmitNoise(YAML::Emitter& out, const NoiseParameters& noise) {
   out << YAML::EndMap;
 }
 
+// Writes `cadence:` unless it is the native video default. `pattern` is
+// always double-quoted: "2:3" unquoted is a sexagesimal integer to YAML 1.1
+// readers such as PyYAML.
+void EmitCadence(YAML::Emitter& out, const CadenceParameters& cadence) {
+  const bool emit_phase =
+      cadence.phase_specified || cadence.phase != CadencePhase::kA;
+  const bool emit_continuity =
+      cadence.continuity != CadenceContinuity::kRestart;
+  if (cadence.pattern == CadencePattern::kVideo && !emit_phase &&
+      !emit_continuity) {
+    return;
+  }
+  out << YAML::Key << "cadence" << YAML::Value << YAML::BeginMap;
+  out << YAML::Key << "pattern" << YAML::Value << YAML::DoubleQuoted
+      << (cadence.pattern == CadencePattern::kPulldown23 ? "2:3" : "video");
+  if (emit_phase) {
+    const char* phase = "A";
+    switch (cadence.phase) {
+      case CadencePhase::kA:
+        phase = "A";
+        break;
+      case CadencePhase::kB:
+        phase = "B";
+        break;
+      case CadencePhase::kC:
+        phase = "C";
+        break;
+      case CadencePhase::kD:
+        phase = "D";
+        break;
+    }
+    out << YAML::Key << "phase" << YAML::Value << phase;
+  }
+  if (emit_continuity) {
+    out << YAML::Key << "continuity" << YAML::Value << "continue";
+  }
+  out << YAML::EndMap;
+}
+
 void EmitLumaBandwidth(YAML::Emitter& out,
                        const LumaBandwidthParameters& luma_bandwidth) {
   if (!luma_bandwidth.enabled) {
@@ -476,6 +515,7 @@ void EmitSection(YAML::Emitter& out, const Section& section) {
   if (section.end_frame_specified) {
     out << YAML::Key << "end_frame" << YAML::Value << section.end_frame;
   }
+  EmitCadence(out, section.cadence);
   EmitLineInjections(out, section);
   EmitLumaBandwidth(out, section.luma_bandwidth);
   EmitNoise(out, section.noise);

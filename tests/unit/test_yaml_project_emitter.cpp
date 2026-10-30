@@ -62,6 +62,56 @@ TEST(YamlProjectEmitterTest, MinimalProjectRoundTripsToEqualProject) {
   ExpectRoundTrip(kMinimalPalYaml);
 }
 
+// An NTSC film section with `cadence_body` (indented cadence keys).
+std::string FilmSectionYaml(const std::string& cadence_body) {
+  return R"(
+cvbs_presets:
+  video_standard_preset: NTSC
+output:
+  video_path: out/video.cvbs
+sections:
+  - name: Film
+    type: progressive
+    source: assets/film.mkv
+    cadence:
+)" + cadence_body;
+}
+
+TEST(YamlProjectEmitterTest, CadenceRoundTripsForEveryForm) {
+  ExpectRoundTrip(FilmSectionYaml("      pattern: \"2:3\"\n"));
+  ExpectRoundTrip(FilmSectionYaml("      pattern: video\n"));
+  ExpectRoundTrip(FilmSectionYaml("      pattern: \"2:3\"\n      phase: A\n"));
+  ExpectRoundTrip(FilmSectionYaml("      pattern: \"2:3\"\n      phase: D\n"));
+  ExpectRoundTrip(
+      FilmSectionYaml("      pattern: \"2:3\"\n      continuity: continue\n"));
+  ExpectRoundTrip(FilmSectionYaml(
+      "      pattern: \"2:3\"\n      phase: B\n      continuity: restart\n"));
+  // Inert keys on a video cadence survive for the validator to warn about.
+  ExpectRoundTrip(FilmSectionYaml("      pattern: video\n      phase: C\n"));
+}
+
+TEST(YamlProjectEmitterTest, CadenceEmitsQuotedPatternAndOmitsDefaults) {
+  YamlProjectParser parser;
+  const ParseResult parsed =
+      parser.ParseString(FilmSectionYaml("      pattern: \"2:3\"\n"));
+  ASSERT_TRUE(parsed.ok);
+
+  const std::string emitted = YamlProjectEmitter().EmitString(parsed.project);
+  EXPECT_NE(emitted.find("pattern: \"2:3\""), std::string::npos) << emitted;
+  EXPECT_EQ(emitted.find("phase"), std::string::npos) << emitted;
+  EXPECT_EQ(emitted.find("continuity"), std::string::npos) << emitted;
+}
+
+TEST(YamlProjectEmitterTest, ExplicitVideoCadenceIsOmitted) {
+  YamlProjectParser parser;
+  const ParseResult parsed =
+      parser.ParseString(FilmSectionYaml("      pattern: video\n"));
+  ASSERT_TRUE(parsed.ok);
+
+  const std::string emitted = YamlProjectEmitter().EmitString(parsed.project);
+  EXPECT_EQ(emitted.find("cadence"), std::string::npos) << emitted;
+}
+
 TEST(YamlProjectEmitterTest, MinimalProjectOmitsUnsetOptionalBlocks) {
   YamlProjectParser parser;
   const ParseResult parsed = parser.ParseString(kMinimalPalYaml);
@@ -75,6 +125,7 @@ TEST(YamlProjectEmitterTest, MinimalProjectOmitsUnsetOptionalBlocks) {
   EXPECT_EQ(emitted.find("line_injections"), std::string::npos);
   EXPECT_EQ(emitted.find("signal_type"), std::string::npos);
   EXPECT_EQ(emitted.find("start_frame"), std::string::npos);
+  EXPECT_EQ(emitted.find("cadence"), std::string::npos);
   EXPECT_EQ(emitted.find("ntsc_black_setup_ire"), std::string::npos);
   EXPECT_EQ(emitted.find("secam_field_identification"), std::string::npos);
 }

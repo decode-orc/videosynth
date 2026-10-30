@@ -236,5 +236,61 @@ TEST(ValidationIssuesModelTest, ModelExposesTheFieldRole) {
       static_cast<int>(IssueField::kLumaBandwidth));
 }
 
+// Turns `section` into a 2:3 pulldown film section.
+void MakeFilm(Section* section) {
+  section->source = "film.mkv";
+  section->cadence.pattern = CadencePattern::kPulldown23;
+}
+
+TEST(ValidationIssuesModelTest, CadenceIssuesNavigateToTheCadenceGroup) {
+  // Every cadence finding the validator reports, errors and warnings alike.
+  struct Case {
+    const char* label;
+    Standard standard;
+    void (*breakage)(Project*);
+  };
+  const Case cases[] = {
+      {"film on a 625-line standard", Standard::kPal,
+       [](Project* p) { MakeFilm(&p->sections[1]); }},
+      {"film on a still", Standard::kNtsc,
+       [](Project* p) {
+         p->sections[1].cadence.pattern = CadencePattern::kPulldown23;
+       }},
+      {"continue without a film section before it", Standard::kNtsc,
+       [](Project* p) {
+         MakeFilm(&p->sections[1]);
+         p->sections[1].cadence.continuity = CadenceContinuity::kContinue;
+       }},
+      {"phase ignored under continue", Standard::kNtsc,
+       [](Project* p) {
+         MakeFilm(&p->sections[0]);
+         MakeFilm(&p->sections[1]);
+         p->sections[1].cadence.continuity = CadenceContinuity::kContinue;
+         p->sections[1].cadence.phase_specified = true;
+       }},
+      {"phase on a video section", Standard::kNtsc,
+       [](Project* p) { p->sections[1].cadence.phase_specified = true; }},
+  };
+  for (const Case& test_case : cases) {
+    SCOPED_TRACE(test_case.label);
+    Project project = MakeValidProject();
+    project.cvbs_presets.video_standard_preset = test_case.standard;
+    test_case.breakage(&project);
+    const ValidationResult result = ProjectValidator().Validate(project);
+    int cadence_issues = 0;
+    for (const ValidationIssue& issue :
+         BuildValidationIssues(project, result)) {
+      if (!issue.message.contains(QStringLiteral("cadence"))) {
+        continue;
+      }
+      ++cadence_issues;
+      EXPECT_EQ(issue.section_index, 1) << issue.message.toStdString();
+      EXPECT_EQ(issue.field, IssueField::kCadence)
+          << issue.message.toStdString();
+    }
+    EXPECT_EQ(cadence_issues, 1);
+  }
+}
+
 }  // namespace
 }  // namespace videosynth::gui

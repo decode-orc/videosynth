@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -212,18 +213,41 @@ class IProgressiveFrameProvider {
 class IGenerationStage {
  public:
   virtual ~IGenerationStage() = default;
+  // What one field of an output frame shows.
+  struct FieldPicture {
+    // Source frame drawn in this field.
+    int source_frame_index = 0;
+    // True when this field is the first field of its picture: field 1 of a
+    // video-cadence frame, or the first field of a film frame in a 2:3
+    // pulldown section.
+    bool starts_picture = false;
+    // 2:3 pulldown cycle letter ('A'-'D') and 1-based field within that
+    // letter; '\0' and 0 for a video cadence.
+    char cadence_letter = '\0';
+    int cadence_field_in_letter = 0;
+  };
+
+  // Where an output frame's time span starts in its source: the start of
+  // source frame `frame_index` plus `fields_after` output fields.
+  struct SourceTime {
+    int frame_index = 0;
+    std::int64_t fields_after = 0;
+  };
+
   struct FrameScheduleItem {
     const Section* section = nullptr;
-    // Source frame shown, within the section's selected range.
+    // Source frame shown, within the section's selected range. For a 2:3
+    // pulldown section this is field 1's film frame; fields[1] may differ.
     int source_frame_index = 0;
     // 0-based position of this frame within its section. Differs from
     // source_frame_index once start_frame, duration_repeat or a looping
     // duration is involved.
     int section_frame_index = 0;
-    // CAV picture number for this frame (> 0 when a picture_number injection
-    // code is present); 0 for sections without a picture_number code.
-    // Used to derive disc-accurate colour-subcarrier phase independent of file
-    // position.
+    // CAV picture number for this frame (> 0 when the section's
+    // picture_number code has a start_value); 0 otherwise, and always 0 in a
+    // 2:3 pulldown section, whose picture numbers count film pictures rather
+    // than disc frames. Used to derive disc-accurate colour-subcarrier phase
+    // independent of file position.
     int disc_picture_number = 0;
     // Fully-resolved per-frame VBI payload, colour context, and OSD token
     // strings, populated by the sequential enrichment pass inside
@@ -231,6 +255,17 @@ class IGenerationStage {
     // Null for hand-built schedules; such schedules can only be generated for
     // sections without laserdisc injections or OSD overlays.
     std::shared_ptr<const FrameEnrichment> enrichment;
+    // Per-field pictures (index 0 = field 1, 1 = field 2), filled by
+    // BuildFrameSchedule. Generation reads them only for 2:3 pulldown
+    // sections; a video-cadence frame shows source_frame_index in both
+    // fields, so hand-built schedules may leave them unset.
+    std::array<FieldPicture, 2> fields{};
+    // Where this frame's sound starts in its source, filled by
+    // BuildFrameSchedule for 2:3 pulldown sections. Film sound runs in real
+    // time rather than with the cadence, so it is measured from the first
+    // film frame of the current pass through the range. A video-cadence frame
+    // starts at source_frame_index and leaves this unset.
+    SourceTime source_time{};
   };
 
   // Ownership: out_schedule and errors are output parameters. The caller owns

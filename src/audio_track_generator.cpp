@@ -15,6 +15,7 @@
 #include <utility>
 
 #include "videosynth/audio_sample_conversion.h"
+#include "videosynth/film_cadence.h"
 #include "videosynth/progressive_frame_source_probe.h"
 #include "videosynth/timing_constants.h"
 
@@ -37,6 +38,22 @@ const AudioChannelPair* FindPair(const Section* section, int pair) {
 }
 
 }  // namespace
+
+std::vector<AudioOutputFrame> AudioOutputFramesForSchedule(
+    const std::vector<IGenerationStage::FrameScheduleItem>& schedule) {
+  std::vector<AudioOutputFrame> frames;
+  frames.reserve(schedule.size());
+  for (const IGenerationStage::FrameScheduleItem& item : schedule) {
+    if (item.section != nullptr &&
+        item.section->cadence.pattern == CadencePattern::kPulldown23) {
+      frames.push_back({item.section, item.source_time.frame_index,
+                        item.source_time.fields_after});
+    } else {
+      frames.push_back({item.section, item.source_frame_index});
+    }
+  }
+  return frames;
+}
 
 AudioTrackGenerator::AudioTrackGenerator(
     ILogger* logger, std::shared_ptr<IProgressiveFrameSourceProbe> probe,
@@ -81,6 +98,7 @@ bool AudioTrackGenerator::Begin(
   pair_numbers_.clear();
   frame_sections_.clear();
   frame_source_indices_.clear();
+  frame_source_fields_.clear();
   frame_sample_counts_.clear();
   is_run_start_.clear();
   run_total_samples_.clear();
@@ -104,9 +122,11 @@ bool AudioTrackGenerator::Begin(
   const std::size_t frame_count = output_frames.size();
   frame_sections_.reserve(frame_count);
   frame_source_indices_.reserve(frame_count);
+  frame_source_fields_.reserve(frame_count);
   for (const AudioOutputFrame& frame : output_frames) {
     frame_sections_.push_back(frame.section);
     frame_source_indices_.push_back(frame.source_frame_index);
+    frame_source_fields_.push_back(frame.fields_after);
   }
 
   // Per-frame sample counts follow output position (SMPTE 272M §14.3).
@@ -263,9 +283,14 @@ bool AudioTrackGenerator::BeginRun(std::size_t output_index,
                           std::to_string(stream) + ".");
         return false;
       }
-      // The validator holds the source to the standard's exact frame rate.
+      // The validator holds the source to the standard's exact frame rate,
+      // or to 24000/1001 film for a 2:3 pulldown section.
       VideoAudioTiming timing;
-      timing.frame_rate_hz = GetTimingConstants(standard_).frame_rate_hz;
+      timing.output_frame_rate_hz = GetTimingConstants(standard_).frame_rate_hz;
+      timing.frame_rate_hz =
+          section->cadence.pattern == CadencePattern::kPulldown23
+              ? kFilmFrameRateHz
+              : timing.output_frame_rate_hz;
       timing.video_start_offset_seconds = profile.video_start_time_seconds -
                                           profile.container_start_time_seconds;
       timing.audio_start_offset_seconds =
@@ -303,7 +328,8 @@ bool AudioTrackGenerator::ReadMediaFrame(AudioMediaReader* reader,
                                          std::vector<std::string>* errors) {
   std::string error;
   if (!reader->ReadFrame(sample_count, frame_source_indices_[output_index],
-                         left, right, &error)) {
+                         frame_source_fields_[output_index], left, right,
+                         &error)) {
     const Section* section = frame_sections_[output_index];
     errors->push_back("Audio: section '" +
                       (section != nullptr ? section->name : std::string()) +

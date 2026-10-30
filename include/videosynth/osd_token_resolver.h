@@ -29,6 +29,9 @@ namespace videosynth {
 //                      position; "00:00:00:00" on non-CLV discs.
 //   {frame_number}   — 1-based sequential frame position in the whole output,
 //                      zero-padded to 5 digits.
+//   {film_frame}     — 0-based source frame shown in the field being drawn.
+//   {cadence}        — 2:3 pulldown cycle letter and field within it for the
+//                      field being drawn (e.g. "B2"); "-" for a video cadence.
 //
 // Unavailable values render as all-zero fields of the same width as a real
 // value so overlay layout never shifts between preview and disc variants.

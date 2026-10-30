@@ -4,7 +4,8 @@
  * Purpose:     Validates the multi-pair AudioTrackGenerator: per-pair file
  *              emission, output-position sample counts, per-section silence
  *              for undeclared pairs / channels, and file / video-soundtrack
- *              content read through a fake sample source.
+ *              content (including 2:3 pulldown film time) read through a
+ *              fake sample source.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -538,6 +539,55 @@ TEST(AudioTrackGeneratorTest, VideoPairFollowsTheScheduledSourceFrames) {
   ASSERT_EQ(library.opens.size(), 2U);
   EXPECT_DOUBLE_EQ(library.opens[0].start_seconds, 0.4);
   EXPECT_DOUBLE_EQ(library.opens[1].start_seconds, 0.4);
+  std::filesystem::remove(audio0);
+}
+
+TEST(AudioTrackGeneratorTest, PulldownVideoPairPlaysFilmInRealTime) {
+  const std::filesystem::path video_path =
+      TempPath("videosynth_atg_video_film.cvbs");
+  const std::filesystem::path audio0 =
+      TempPath("videosynth_atg_video_film_audio_0.wav");
+  testing::FakeAudioLibrary library;
+  library.media["film.mkv"] = {0.0, 60.0};
+
+  Project project = MakeProject(video_path);
+  project.cvbs_presets.video_standard_preset = Standard::kNtsc;
+  Section section;
+  section.name = "Film";
+  section.source = "film.mkv";
+  section.cadence.pattern = CadencePattern::kPulldown23;
+  section.audio_channel_pairs = {MakeMediaPair(0, AudioPairContent::kVideo)};
+  project.sections = {section};
+  // Five output frames from film frame 24, two fields apart.
+  const Section* film = &project.sections[0];
+  const std::vector<AudioOutputFrame> frames = {{film, 24, 0},
+                                                {film, 24, 2},
+                                                {film, 24, 4},
+                                                {film, 24, 6},
+                                                {film, 24, 8}};
+
+  AudioTrackGenerator generator(nullptr, MakeVideoProbeWithAudio(),
+                                testing::MakeFakeAudioFactory(&library));
+  std::vector<std::string> errors;
+  ASSERT_TRUE(generator.Begin(project, frames, &errors));
+  for (std::size_t k = 0; k < frames.size(); ++k) {
+    ASSERT_TRUE(generator.EmitFrame(k, &errors)) << errors.back();
+  }
+  ASSERT_TRUE(generator.Finalize(&errors));
+
+  // Film frame 24 starts 1.001 s in; the five frames read 8008 samples
+  // (SMPTE 272M-1994 §14.3) from there without a break.
+  std::vector<std::int32_t> left;
+  std::vector<std::int32_t> right;
+  ReadWavSamples(audio0, &left, &right);
+  ASSERT_EQ(left.size(), 8008U);
+  for (std::size_t i = 0; i < left.size(); ++i) {
+    ASSERT_EQ(left[i],
+              testing::FakeSampleAt(1.001, 48000, static_cast<std::int64_t>(i)))
+        << "sample " << i;
+  }
+  ASSERT_EQ(library.opens.size(), 1U);
+  EXPECT_DOUBLE_EQ(library.opens[0].start_seconds, 1.001);
   std::filesystem::remove(audio0);
 }
 

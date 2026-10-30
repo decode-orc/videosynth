@@ -1,0 +1,190 @@
+# NTSC video and 2:3 pulldown film mixed on one CAV disc.
+#
+# The film sections play ranges of the bundled 24000/1001 film clip; the
+# cadence breaks and carries on across section boundaries as real edits do:
+#
+#   Bars        video, 10 frames of still colour bars          PNs   1-10
+#   FilmA       2:3 from phase A, film frames 0-47 (60 frames)   PNs  11-58
+#   FilmB       2:3 continuing FilmA's cycle, film frames 48-97:
+#               125 fields, so the last frame's second field
+#               repeats film frame 97 (63 frames)                PNs  59-108
+#   MovingBars  video, 30 frames of scrolling colour bars        PNs 109-138
+#   FilmC       2:3 restarting at phase C, 14 frames from film
+#               frame 120: 28 fields, ending on a single B field
+#               (an orphan field), film frames 120-131           PNs 139-150
+#   FilmD       2:3 continuing FilmC's cycle mid-letter (B2), so
+#               its first film frame gets two fields; replays
+#               FilmA's range, film frames 0-47                  PNs 151-198
+#
+# CAV picture numbers count pictures: one per video frame in the video
+# sections and one per film frame in the 2:3 sections. The OSD names the film
+# frame and cadence slot of every field ("-" in the video sections).
+
+project:
+  name: NtscFilmMixed
+  version: "1.0"
+  description: NTSC video and 2:3 pulldown sections mixed on a CAV disc
+
+cvbs_presets:
+  video_standard_preset: NTSC
+  sample_encoding_preset: CVBS_U10_4FSC
+  signal_state_preset: STANDARD_STABLE_LOCKED
+
+output:
+  video_path: "{output}/videosynth_ntsc_film_mixed.cvbs"
+
+line_injections:
+  disc_type: CAV
+  vits:
+    - vits_type: virs
+      target_lines: [19, 282]
+
+sections:
+  - name: Bars
+    type: progressive
+    source: "{bundled}/exr/720x486/75_BARS.exr"
+    duration_frames: 10
+    section_type: programme_area
+    line_injections:
+      - type: laserdisc
+        codes:
+          - code_type: picture_number
+            start_value: 1
+          - code_type: chapter_number
+            chapter: 1
+          - code_type: fm_picture_number
+          - code_type: fm_white_flag
+    osd:
+      overlays:
+        - text: "FILM:{film_frame} {cadence} PN:{picture_number}"
+          x: 16
+          y: 280
+          scale: 2
+          fg_luma: white
+          bg_luma: black
+
+  - name: FilmA
+    type: progressive
+    source: "{bundled}/mkv/720x486/FILM_COUNTER_24P.mkv"
+    start_frame: 0
+    end_frame: 47
+    duration_frames: all
+    cadence:
+      pattern: "2:3"
+      phase: A
+    section_type: programme_area
+    line_injections:
+      - type: laserdisc
+        codes:
+          - code_type: picture_number
+          - code_type: chapter_number
+          - code_type: fm_picture_number
+          - code_type: fm_white_flag
+    osd:
+      overlays:
+        - text: "FILM:{film_frame} {cadence} PN:{picture_number}"
+          x: 16
+          y: 280
+          scale: 2
+          fg_luma: white
+          bg_luma: black
+
+  - name: FilmB
+    type: progressive
+    source: "{bundled}/mkv/720x486/FILM_COUNTER_24P.mkv"
+    start_frame: 48
+    end_frame: 97
+    duration_frames: all
+    cadence:
+      pattern: "2:3"
+      continuity: continue
+    section_type: programme_area
+    line_injections:
+      - type: laserdisc
+        codes:
+          - code_type: picture_number
+          - code_type: chapter_number
+          - code_type: fm_picture_number
+          - code_type: fm_white_flag
+    osd:
+      overlays:
+        - text: "FILM:{film_frame} {cadence} PN:{picture_number}"
+          x: 16
+          y: 280
+          scale: 2
+          fg_luma: white
+          bg_luma: black
+
+  - name: MovingBars
+    type: progressive
+    source: "{bundled}/mkv/720x486/MOVING_BARS_75.mkv"
+    start_frame: 0
+    end_frame: 29
+    duration_frames: all
+    section_type: programme_area
+    line_injections:
+      - type: laserdisc
+        codes:
+          - code_type: picture_number
+          - code_type: chapter_number
+          - code_type: fm_picture_number
+          - code_type: fm_white_flag
+    osd:
+      overlays:
+        - text: "FILM:{film_frame} {cadence} PN:{picture_number}"
+          x: 16
+          y: 280
+          scale: 2
+          fg_luma: white
+          bg_luma: black
+
+  - name: FilmC
+    type: progressive
+    source: "{bundled}/mkv/720x486/FILM_COUNTER_24P.mkv"
+    start_frame: 120
+    duration_frames: 14
+    cadence:
+      pattern: "2:3"
+      phase: C
+    section_type: programme_area
+    line_injections:
+      - type: laserdisc
+        codes:
+          - code_type: picture_number
+          - code_type: chapter_number
+          - code_type: fm_picture_number
+          - code_type: fm_white_flag
+    osd:
+      overlays:
+        - text: "FILM:{film_frame} {cadence} PN:{picture_number}"
+          x: 16
+          y: 280
+          scale: 2
+          fg_luma: white
+          bg_luma: black
+
+  - name: FilmD
+    type: progressive
+    source: "{bundled}/mkv/720x486/FILM_COUNTER_24P.mkv"
+    start_frame: 0
+    end_frame: 47
+    duration_frames: all
+    cadence:
+      pattern: "2:3"
+      continuity: continue
+    section_type: programme_area
+    line_injections:
+      - type: laserdisc
+        codes:
+          - code_type: picture_number
+          - code_type: chapter_number
+          - code_type: fm_picture_number
+          - code_type: fm_white_flag
+    osd:
+      overlays:
+        - text: "FILM:{film_frame} {cadence} PN:{picture_number}"
+          x: 16
+          y: 280
+          scale: 2
+          fg_luma: white
+          bg_luma: black

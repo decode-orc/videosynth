@@ -12,6 +12,8 @@
 
 #include "project_templates.h"
 #include "videosynth/model.h"
+#include "videosynth/project_validator.h"
+#include "videosynth/results.h"
 
 namespace videosynth::gui {
 namespace {
@@ -77,6 +79,28 @@ TEST(ProjectTemplatesTest, RemapHandlesMultipleSectionsAndNullProject) {
   }
 
   EXPECT_EQ(RemapBundledDefaultSources(nullptr, Standard::kPal), 0);
+}
+
+TEST(ProjectTemplatesTest, FilmTemplateValidatesOn525LineProjects) {
+  for (const Standard standard : {Standard::kNtsc, Standard::kPalM}) {
+    Project project = MakeDefaultProject(standard);
+    project.sections.push_back(MakeFilmSectionTemplate(2, standard));
+    const ValidationResult result = ProjectValidator().Validate(project);
+    EXPECT_TRUE(result.is_valid)
+        << (result.errors.empty() ? "" : result.errors.front());
+    EXPECT_TRUE(result.warnings.empty())
+        << (result.warnings.empty() ? "" : result.warnings.front());
+  }
+}
+
+TEST(ProjectTemplatesTest, FilmTemplatePlaysTheFilmClipWith23Pulldown) {
+  const Section section = MakeFilmSectionTemplate(3, Standard::kNtsc);
+  EXPECT_EQ(section.name, "Film 3");
+  EXPECT_EQ(section.source, FilmBundledSource());
+  EXPECT_TRUE(section.duration_frames_all);
+  EXPECT_EQ(section.cadence.pattern, CadencePattern::kPulldown23);
+  EXPECT_EQ(section.cadence.phase, CadencePhase::kA);
+  EXPECT_EQ(section.cadence.continuity, CadenceContinuity::kRestart);
 }
 
 }  // namespace

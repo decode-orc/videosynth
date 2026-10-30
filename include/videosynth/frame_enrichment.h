@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -23,8 +24,9 @@ namespace videosynth {
 // Per-frame snapshot captured after code resolution and before generator
 // advance. Used for token-based OSD rendering.
 struct PerFrameContext {
-  // Decoded CAV picture number for this frame (0 if no picture_number
-  // generator is active).
+  // Decoded CAV picture number of the picture shown (0 if no picture_number
+  // generator is active). Per field: the fields of a 2:3 pulldown frame can
+  // show different pictures.
   int picture_number = 0;
   // Raw 24-bit biphase code values produced by all active generators.
   std::vector<uint32_t> biphase_words;
@@ -46,6 +48,13 @@ struct PerFrameContext {
   int clv_minutes = 0;
   int clv_seconds = 0;
   int clv_frames = 0;
+  // Source frame of the field being drawn (0-based). Set per field by
+  // GenerationStage; across a 2:3 pulldown picture the two fields differ.
+  int film_frame = 0;
+  // 2:3 pulldown cycle letter ('A'-'D') and 1-based field within it for the
+  // field being drawn; '\0' and 0 for a video cadence.
+  char cadence_letter = '\0';
+  int cadence_field_in_letter = 0;
 };
 
 // One fully-resolved VBI code injection for a single line of one frame.
@@ -76,17 +85,23 @@ struct VbiLineInjection {
 // synthesis is a pure function of (Project, enriched FrameScheduleItem):
 // frames may be synthesised out of order and on concurrent worker threads.
 struct FrameEnrichment {
-  // Disc frame index, i.e. (picture number - 1) when the frame is anchored to
-  // a CAV picture_number code, otherwise the schedule position plus the
-  // project's first-picture-number offset. Drives colour-subcarrier phase,
-  // PAL burst blanking parity, and pilot-burst phase.
+  // Disc frame index, i.e. (picture number - 1) when a video-cadence frame is
+  // anchored to a CAV picture_number start_value, otherwise the schedule
+  // position plus the project's first-picture-number offset. Drives
+  // colour-subcarrier phase, PAL burst blanking parity, and pilot-burst phase.
   std::size_t disc_frame_index = 0;
   // Context snapshot for OSD token resolution.
   PerFrameContext context;
+  // CAV picture number of the picture each field shows (index 0 = field 1),
+  // 0 without a picture_number generator. Both fields of a video-cadence
+  // frame show one picture; a 2:3 pulldown frame's fields can differ.
+  std::array<int, 2> field_picture_numbers{};
   // Resolved VBI code injections for this frame, in ascending line order.
   std::vector<VbiLineInjection> vbi_lines;
-  // Token-resolved OSD overlay strings, one per section OSD overlay.
-  std::vector<std::string> osd_texts;
+  // Token-resolved OSD overlay strings, one per section OSD overlay, for
+  // field 1 (index 0) and field 2 (index 1): per-field tokens such as
+  // {film_frame} can differ between the fields of one frame.
+  std::array<std::vector<std::string>, 2> field_osd_texts;
 };
 
 }  // namespace videosynth

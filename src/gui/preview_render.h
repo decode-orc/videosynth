@@ -48,7 +48,10 @@ int LineNumberToField(Standard standard, int line_1based);
 // Spatial (interlaced) display order of the frame's lines: element `row`
 // holds the 1-based frame line drawn at display row `row`. Field 1 and field
 // 2 lines are woven so the raster reads as the broadcast picture rather than
-// the two fields stacked. Length equals the standard's lines_per_frame.
+// the two fields stacked: each field 2 picture line sits directly above the
+// field 1 line that carries the next progressive source row, matching the
+// generation stage's row mapping. Length equals the standard's
+// lines_per_frame.
 std::vector<int> InterlacedLineOrder(Standard standard);
 
 // Maps a woven full-frame picture row (0-based) to its frame line number and

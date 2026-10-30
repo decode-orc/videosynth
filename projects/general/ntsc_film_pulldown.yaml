@@ -1,0 +1,53 @@
+# NTSC film with 2:3 pulldown on a CAV disc.
+#
+# One programme section plays every frame of the bundled 24000/1001 film clip
+# (240 film frames) in the 2:3 cycle from phase A: 600 fields, 300 output
+# frames. CAV picture numbers count film frames (PNs 1-240), so one output
+# frame in five carries no picture number and no white flag. The OSD names
+# the film frame and cadence slot of every field.
+
+project:
+  name: NtscFilmPulldown
+  version: "1.0"
+  description: NTSC 2:3 pulldown of a 24000/1001 film clip on a CAV disc
+
+cvbs_presets:
+  video_standard_preset: NTSC
+  sample_encoding_preset: CVBS_U10_4FSC
+  signal_state_preset: STANDARD_STABLE_LOCKED
+
+output:
+  video_path: "{output}/videosynth_ntsc_film_pulldown.cvbs"
+
+line_injections:
+  disc_type: CAV
+  vits:
+    - vits_type: virs
+      target_lines: [19, 282]
+
+sections:
+  - name: Film
+    type: progressive
+    source: "{bundled}/mkv/720x486/FILM_COUNTER_24P.mkv"
+    duration_frames: all
+    section_type: programme_area
+    cadence:
+      pattern: "2:3"
+      phase: A
+    line_injections:
+      - type: laserdisc
+        codes:
+          - code_type: picture_number
+            start_value: 1
+          - code_type: chapter_number
+            chapter: 1
+          - code_type: fm_picture_number
+          - code_type: fm_white_flag
+    osd:
+      overlays:
+        - text: "FILM:{film_frame} {cadence} PN:{picture_number}"
+          x: 16
+          y: 280
+          scale: 2
+          fg_luma: white
+          bg_luma: black

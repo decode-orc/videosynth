@@ -185,6 +185,31 @@ TEST(OsdTokenResolverTest, UnknownTokenFails) {
   EXPECT_EQ(unknown, "bad_token");
 }
 
+TEST(OsdTokenResolverTest, FilmFrameIsTheFieldSourceFrame) {
+  OsdTokenResolver resolver;
+  PerFrameContext ctx;
+  ctx.film_frame = 137;
+  EXPECT_EQ(resolver.Resolve("F:{film_frame}", ctx, "S"), "F:137");
+}
+
+TEST(OsdTokenResolverTest, CadenceIsLetterAndFieldWithinIt) {
+  OsdTokenResolver resolver;
+  PerFrameContext ctx;
+  ctx.cadence_letter = 'B';
+  ctx.cadence_field_in_letter = 2;
+  EXPECT_EQ(resolver.Resolve("{cadence}", ctx, "S"), "B2");
+}
+
+TEST(OsdTokenResolverTest, CadenceIsDashForVideoCadence) {
+  OsdTokenResolver resolver;
+  const PerFrameContext ctx;
+  EXPECT_EQ(resolver.Resolve("[{cadence}]", ctx, "S"), "[-]");
+}
+
+TEST(OsdTokenResolverTest, FieldTokensAreKnown) {
+  EXPECT_TRUE(OsdTokenResolver::HasOnlyKnownTokens("{film_frame} {cadence}"));
+}
+
 TEST(OsdTokenResolverTest, UnclosedBraceIgnored) {
   EXPECT_TRUE(OsdTokenResolver::HasOnlyKnownTokens("{unclosed"));
 }

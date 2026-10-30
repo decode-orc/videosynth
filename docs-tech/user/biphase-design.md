@@ -389,6 +389,8 @@ Encodes the frame position within the current second (X₄×10 + X₅ = frame 0�
 
 **NTSC/PAL-M note**: Includes colour time error correction (IEC 60857 Amendment 2 §10.1.10) — the seconds count periodically jumps forward at specific frame counts to maintain accurate colour timing.
 
+**2:3 pulldown sections**: the CLV picture number and the programme time code go on the first field of each film picture. Their values stay video-frame time: each carries the number of the frame its field is in. The frame with no picture start is skipped, so numbers skip one frame in five. See [Film Pictures](#film-pictures-23-pulldown) for the reasoning.
+
 ```yaml
 - code_type: clv_picture_number
 ```
@@ -410,7 +412,7 @@ These code types are System M only (NTSC and PAL-M) and must not be used with PA
 | Value range | 0–79,999 |
 | Update timing | Second field of each new picture |
 
-Carries the CAV picture number in the 40-bit FM format on lines 10/273. Starts at 1 and auto-increments with the 24-bit `picture_number`.
+Carries the CAV picture number in the 40-bit FM format on lines 10/273. Starts at 1 and auto-increments with the 24-bit `picture_number`. The number changes on the second field of each new picture (§10.2.3), so a picture's first field repeats the previous number: field 1 of each video frame, or the first field of each film picture in a 2:3 pulldown section. The first programme picture, with no number before it, carries its own in both fields.
 
 ```yaml
 - code_type: fm_picture_number
@@ -445,7 +447,7 @@ Carries CLV programme time in the 40-bit FM format. X₅ mode indicator: A = lea
 | Lines (programme) | Line 11 (field 1) |
 | Lines (lead-out) | Lines 11 and 274 |
 
-The white flag is a constant 100 IRE signal that marks the start of each new picture. Every output frame is one picture opened by field 1, so in the programme area the flag is always on line 11.
+The white flag is a constant 100 IRE signal that marks the start of each new picture. In a video section every output frame is one picture opened by field 1, so in the programme area the flag is always on line 11. In a 2:3 pulldown section it is on line 11 or 274 of each film picture's first field.
 
 ```yaml
 - code_type: fm_white_flag
@@ -460,7 +462,7 @@ The white flag is a constant 100 IRE signal that marks the start of each new pic
 IEC 60856/60857 §10.1.5 requires that timecodes run **continuously** from the first frame of the programme area to the last, without resetting for any reason.
 
 The affected code types are:
-- `picture_number` (CAV): increments every frame and continues across sections (anchored by `start_value` on the first section, or re-anchored where a section sets it explicitly)
+- `picture_number` (CAV): increments every picture (every frame, or every film frame in a 2:3 pulldown section) and continues across sections (anchored by `start_value` on the first section, or re-anchored where a section sets it explicitly)
 - `programme_time_code` (CLV): counts from `0:00`, increments minutes every 1500 (PAL) or 1800 (NTSC, PAL-M) frames
 - `clv_picture_number` (CLV): counts seconds and frames from `0:00`, increments every frame
 
@@ -563,7 +565,23 @@ The encoder manages this automatically — you only need to specify the chapter 
 
 LaserDisc uses sequential line numbering across the full frame (both fields). PAL line 1 maps to the first line of field 1; line 313 maps to the first line of field 2. NTSC line 1 maps to field 1; line 263 maps to field 2.
 
-Every output frame is one picture whose **first field is field 1**. Codes that IEC 60856/60857 clause 10 place in "the first field of the picture" go in field 1; codes for the remaining fields go in field 2. If a programme-area section carries none of the first-field codes (`picture_number` on CAV; `programme_time_code` or `clv_picture_number` on CLV), the field-2 assignments are written in **both** fields.
+In a video-cadence section every output frame is one picture whose **first field is field 1**. Codes that IEC 60856/60857 clause 10 place in "the first field of the picture" go in field 1; codes for the remaining fields go in field 2. If a programme-area section carries none of the first-field codes (`picture_number` on CAV; `programme_time_code` or `clv_picture_number` on CLV), the field-2 assignments are written in **both** fields.
+
+### Film Pictures (2:3 Pulldown)
+
+In a `"2:3"` section a picture is one film frame shown for two or three fields, and it can start on either field. `LinePlacementEngine` takes each field's role (`PictureFieldRole`: whether it starts a picture, and whether it follows a picture's first field) instead of its field number. A video-cadence frame is the case where field 1 starts and field 2 follows.
+
+- **First field of a picture**: `picture_number` on lines 17/18 or 280/281 (§10.1.3); on CLV, `clv_picture_number` on 16/279 and `programme_time_code` on 17/18 or 280/281 (§10.1.6, §10.1.10). The white flag goes on line 11 or 274 (§10.2.4).
+- **The field immediately after it** (§10.1.4): `picture_stop` on lines 16/17 or 279/280. The previous field may be in the previous frame, or in the previous section. If this field also starts a picture (a one-field picture left by `continuity: continue`), its picture number keeps line 17/280 and the stop code is on line 16/279 only.
+- **The other fields** (§10.1.5, §10.1.7, §10.1.8): `chapter_number` on lines 17/18 or 280/281, with `programme_status` on 16/279; on CLV, `clv_code`, `programme_status` and `chapter_number` as for field 2 of a video frame.
+
+`BiphaseInjectionManager` advances the CAV `picture_number` and `fm_picture_number` once per picture start in these sections, and every other generator once per frame. Counts therefore carry across cadence changes in pictures. As in a video-cadence section, `fm_picture_number` changes on the second field of each picture (§10.2.3), so a picture's first field repeats the previous number.
+
+The colour-frame index and the disc frame counter that anchors subcarrier phase keep counting video frames in these sections, because their picture numbers no longer number frames. A `start_value` in a 2:3 section re-anchors the numbers but not the colour sequence.
+
+The fixtures `projects/general/ntsc_film_pulldown.yaml` and `ntsc_film_mixed.yaml` (with the `film-clv` and `film-pal-m` variants) exercise this placement. `test_film_fixture_projects.cpp` checks each field's picture number, white flag and line-18/281 code against the cadence. decode-orc's Daphne VBI sink reads the CAV picture numbers of the NTSC and PAL-M renders, and the NTSC white flags, on the expected fields. Its white-flag observer handles NTSC only, so it reports no flags for PAL-M.
+
+**CLV decision.** IEC 60857 Amendment 2 §10.1.10 says the CLV picture number "identifies pictures" (the 1986 text said "each video frame"), inserted "depending on which field is the first field of the picture". Its colour time error rule counts accumulated *video frames*, and X₄X₅ number up to 29 within a second. So the CLV codes follow film pictures in *placement*: they are written only on picture-start fields, and every other field carries `clv_code`, `programme_status` and `chapter_number`. Their *values* stay video-frame time: a picture carries the number of the frame its first field is in. This keeps every number unique, keeps the running time true to real time, and leaves the colour time error correction valid. The alternative, counting film pictures within each second (0–23), would break that correction and stop the time code matching the running time. The 40-bit `fm_programme_time` is unchanged: it is on lines 10/273 of every field.
 
 ### Reserved VBI Ranges
 
@@ -676,7 +694,7 @@ All transitions are S-curve shaped with a 135 ns ± 15 ns 10 %–90 % time.
 The white flag is a **100 IRE constant-level signal** (not modulated) on line 11 (field 1) and, in lead-out, also line 274 (field 2). It marks the start of each complete picture and is placed automatically:
 
 - **Lead-in**: line 11 only (field 1 line; line 274 is not used)
-- **Programme area**: line 11 only — every output frame is one picture opened by field 1
+- **Programme area**: line 11 only in a video section, where every output frame is one picture opened by field 1; in a 2:3 pulldown section, line 11 or 274 of each film picture's first field, and none on the frame with no picture start
 - **Lead-out**: both lines 11 and 274 for the full lead-out duration
 
 ### Coexistence with 24-bit Biphase

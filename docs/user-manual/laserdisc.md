@@ -223,13 +223,13 @@ or, on a CLV disc, `fm_programme_time` in place of `fm_picture_number`.
 
 ### The white flag
 
-`fm_white_flag` is a constant 100 IRE signal marking the start of each new picture — the player uses it to decide what a "frame" is when holding a still. Every output frame is one picture starting on field 1, so the flag is on line 11 in the lead-in and the programme area, and on lines 11 and 274 in the lead-out. Nothing about this needs configuring.
+`fm_white_flag` is a constant 100 IRE signal marking the start of each new picture — the player uses it to decide what a "frame" is when holding a still. In a video section every output frame is one picture starting on field 1, so the flag is on line 11 in the lead-in and the programme area, and on lines 11 and 274 in the lead-out. In a `"2:3"` programme section it marks each film picture instead (see [Film sections](#film-sections)). Nothing about this needs configuring.
 
 ## Line placement
 
 For reference, this is where each code type actually lands. You do not configure any of it.
 
-Placement is field-aware, per IEC 60856/60857 clause 10. Every output frame is one picture whose first field is field 1, so the codes the standards place in "the first field of the picture" go in field 1 and the remaining codes go in field 2. Lines are given as frame lines; field 2 lines are PAL 329–331 and NTSC/PAL-M 279–281.
+Placement is field-aware, per IEC 60856/60857 clause 10. In a video section every output frame is one picture whose first field is field 1, so the codes the standards place in "the first field of the picture" go in field 1 and the remaining codes go in field 2. The tables below show that case; [Film sections](#film-sections) covers `"2:3"` sections. Lines are given as frame lines; field 2 lines are PAL 329–331 and NTSC/PAL-M 279–281.
 
 ### CAV programme area
 
@@ -261,6 +261,19 @@ In both fields, line 16 (329 PAL, 279 NTSC) carries `users_code` when the sectio
 | `fm_white_flag` | 11 | 11 | 11, 274 |
 
 `programme_status` (both standards) and `clv_code` (NTSC and PAL-M only) start 0.172H into the active line rather than at its start, per IEC 60856 Figure 14 / IEC 60857 Figure 11. This offset is applied automatically.
+
+### Film sections
+
+A [`"2:3"` section](../reference/sections.md#cadence) ([Film and pulldown](sources.md#film-and-pulldown)) shows each film frame for two or three fields, so a picture can start in either field and one frame in five starts none. The codes follow the film pictures, as a film transfer to disc places them:
+
+- **CAV picture numbers count film frames.** `picture_number` and `fm_picture_number` advance once per film frame, four times in five output frames, and the count carries on into the next section either way.
+- **The first field of each picture** carries `picture_number` (lines 17/18 or 280/281), or on CLV `clv_picture_number` and `programme_time_code`, and the white flag on line 11 or 274.
+- **The field after it** carries `picture_stop`, even when that field is in the next frame. If it starts a picture of its own, its picture number keeps line 17/280 and the stop code is on line 16/279 only.
+- **The remaining fields** carry `chapter_number`, `programme_status` and, on CLV, `clv_code`.
+- **`fm_picture_number` changes on each picture's second field**, as in a video section, so a film picture's first field still carries the previous number (IEC 60857 §10.2.3).
+- **CLV numbers stay video-frame time.** `clv_picture_number` is written only on picture-start fields, but its value is the number of the frame that field is in. Numbers skip the frame with no picture start, and the colour time error correction still counts video frames.
+
+The colour field sequence follows the disc's video frames throughout, so it stays continuous through a film section even though the picture numbers there no longer number frames.
 
 ## What else a disc needs
 

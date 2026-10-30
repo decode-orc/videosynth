@@ -487,6 +487,10 @@ void PreviewPane::UpdateFrameInfoLabel() {
   if (!current_frame_->section_name.isEmpty()) {
     text += tr(" · section \"%1\"").arg(current_frame_->section_name);
   }
+  const QString cadence = FormatFieldCadence(current_frame_->fields);
+  if (!cadence.isEmpty()) {
+    text += QStringLiteral(" · ") + cadence;
+  }
   frame_info_label_->setText(text);
 }
 

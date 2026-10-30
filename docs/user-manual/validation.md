@@ -42,7 +42,7 @@ Unknown keys are rejected outright, at every level, naming the offending key and
 - An EXR must match the still profile — single-frame scanline, `R/G/B` `FLOAT`, uncompressed, with standard-matching metadata.
 - A video must have a video stream, and its container must match its extension (Matroska for `.mkv`, MP4 for `.mp4`).
 - Its raster must be exactly 720×576 (PAL/SECAM) or 720×486 (NTSC/PAL-M). No scaling path exists.
-- Its frame rate must match the output standard and be constant — an average rate more than 0.2 % from the base rate is rejected as variable.
+- Its frame rate must match the output standard — or be 24000/1001 in a section with a `"2:3"` [cadence](../reference/sections.md#cadence) — and be constant; an average rate more than 0.2 % from the base rate is rejected as variable.
 - A video must not carry stream crop metadata.
 - **Warning:** a video field-order tag opposite to the output's dominance (PAL/SECAM top field first, NTSC/PAL-M bottom field first).
 - **Warning:** a video sample aspect ratio other than the standard's BT.601 ratio (128:117 or 108:119); the picture is used unscaled.
@@ -55,6 +55,8 @@ Unknown keys are rejected outright, at every level, naming the offending key and
 - `start_frame` must be ≥ 0 and `end_frame` ≥ `start_frame`; both must lie inside the video source.
 - `end_frame` must not be combined with an integer `duration_frames`.
 - An EXR still takes neither `start_frame` nor `end_frame`, and needs an integer `duration_frames`.
+- A `"2:3"` [cadence](../reference/sections.md#cadence) needs NTSC or PAL-M and a video source; `continuity: continue` needs the previous section to be `"2:3"` too. See [Film and pulldown](sources.md#film-and-pulldown).
+- *Warning*: a cadence `phase` with `continuity: continue`, or a `phase` or `continuity` under `pattern: video` — both are ignored.
 - Once any section is a `lead_in` or `lead_out`, the sequence must be `[lead_in] programme_area… [lead_out]` — at most one of each, in that order, with nothing outside them.
 - *Warning*: on a CAV disc, a section carrying laserdisc codes that is a lead-in shorter than 938 frames or a lead-out shorter than 1250 frames.
 
@@ -71,7 +73,8 @@ Unknown keys are rejected outright, at every level, naming the offending key and
 
 - The code type must be valid for the disc format, and for the section type it appears in.
 - A section declaring laserdisc codes needs `line_injections.disc_type` and a `section_type`.
-- `picture_number` `start_value` must be 0–99,999 (PAL) or 0–79,999 (NTSC/PAL-M); `fm_picture_number` `start_value` 0–79,999. Only the start value is checked.
+- `picture_number` `start_value` must be 0–99,999 (PAL) or 0–79,999 (NTSC/PAL-M); `fm_picture_number` `start_value` 0–79,999.
+- *Warning*: a CAV section whose picture numbers would pass that maximum, where the number holds at the maximum. The count follows the numbering from section to section and counts pictures, so a `"2:3"` section counts its film frames. It stops at the first section whose length depends on an unknown source length.
 - Chapter numbers are 0–79.
 - `users_code` must be a hex value of at most 24 bits, with X₁ 0–7 and the D digit (bits 15–12) equal to `D`.
 - NTSC and PAL-M discs (any project with `disc_type` set) must carry a `virs` VITS entry.

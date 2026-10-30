@@ -179,6 +179,7 @@ add_library(videosynth_core
     src/pipeline.cpp
     src/progressive_frame_source_probe.cpp
     src/source_colour_conversion.cpp
+    src/film_cadence.cpp
     src/source_frame_range.cpp
     src/video_frame_decoder.cpp
     src/project_validator.cpp

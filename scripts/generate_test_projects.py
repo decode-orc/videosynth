@@ -14,6 +14,14 @@ authored comments survive into the derived project:
                           entry of the top-level `sections:` list
   signal_type             set output.signal_type and switch the video_path
                           suffix between .cvbs and .cvbsy accordingly
+  video_standard          set cvbs_presets.video_standard_preset (a standard
+                          sharing the source's raster, such as NTSC -> PAL_M)
+  disc_type               set line_injections.disc_type
+  replace_codes           a mapping of laserdisc code_type to a list of code
+                          types: every code entry of that type, with its
+                          options, becomes bare entries of the listed types
+                          (an empty list removes it). Used with disc_type to
+                          turn CAV addressing into CLV addressing
   name_suffix             append a suffix to both the generated filename and
                           the video_path stem
   captures                derive one project per entry instead of one per
@@ -324,6 +332,56 @@ def set_signal_type(text: str, signal_type: str) -> str:
     raise ValueError('project declares no output block to set signal_type in')
 
 
+def set_nested_scalar(text: str, block: str, key: str, value: str) -> str:
+    """Set `key` directly inside the top-level `block`, keeping its comment."""
+    lines = text.split('\n')
+    span = top_level_block_span(lines, block)
+    if span is None:
+        raise ValueError(f'project declares no {block} block')
+    start, end = span
+    for index in range(start + 1, end):
+        match = KEY_RE.match(lines[index])
+        if match is not None and match.group('key') == key:
+            rest = match.group('rest')
+            comment = ('  ' + rest[rest.index('#'):].strip()
+                       if '#' in rest else '')
+            lines[index] = f"{match.group('lead')}{key}: {value}{comment}"
+            return '\n'.join(lines)
+    raise ValueError(f'project declares no {block}.{key}')
+
+
+CODE_TYPE_RE = re.compile(r'^(?P<lead>\s*-\s+)code_type:\s*(?P<value>\S+)')
+
+
+def replace_codes(text: str, replacements: dict) -> str:
+    """Replace laserdisc code entries by type, dropping their options."""
+    for code_types in replacements.values():
+        if not isinstance(code_types, list):
+            raise ValueError('replace_codes values must be lists of code types')
+    lines = text.split('\n')
+    result: list[str] = []
+    skip_indent: int | None = None
+    replaced = 0
+    for line in lines:
+        # The options of a replaced entry sit deeper than its dash.
+        if skip_indent is not None:
+            if line.strip() and indent_of(line) > skip_indent:
+                continue
+            skip_indent = None
+        match = CODE_TYPE_RE.match(line)
+        if match is not None and match.group('value') in replacements:
+            lead = match.group('lead')
+            result.extend(f'{lead}code_type: {code_type}'
+                          for code_type in replacements[match.group('value')])
+            skip_indent = indent_of(line)
+            replaced += 1
+            continue
+        result.append(line)
+    if replaced == 0:
+        raise ValueError('replace_codes: project declares none of the codes')
+    return '\n'.join(result)
+
+
 def top_level_block_span(lines: list[str], key: str) -> tuple[int, int] | None:
     """Line range [start, end) of a top-level `key:` block and its children."""
     start = next((i for i, line in enumerate(lines)
@@ -439,6 +497,17 @@ def derive(text: str, variant: dict) -> str:
 
     if 'timing_offset_samples' in variant:
         text = set_timing_offset(text, variant['timing_offset_samples'])
+
+    if 'video_standard' in variant:
+        text = set_nested_scalar(text, 'cvbs_presets', 'video_standard_preset',
+                                 str(variant['video_standard']))
+
+    if 'disc_type' in variant:
+        text = set_nested_scalar(text, 'line_injections', 'disc_type',
+                                 str(variant['disc_type']))
+
+    if 'replace_codes' in variant:
+        text = replace_codes(text, variant['replace_codes'])
 
     signal_type = variant.get('signal_type', 'composite')
     if signal_type not in SIGNAL_TYPE_SUFFIX:

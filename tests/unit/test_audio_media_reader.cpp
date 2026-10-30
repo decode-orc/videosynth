@@ -2,8 +2,8 @@
  * File:        test_audio_media_reader.cpp
  * Module:      audio_media_reader_tests
  * Purpose:     Unit tests for file and video-soundtrack audio reading: end of
- *              file, repeat, following source frames, loop reopen and stream
- *              offsets, against a fake sample source.
+ *              file, repeat, following source frames and film time, loop
+ *              reopen and stream offsets, against a fake sample source.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -34,11 +34,11 @@ struct Frame {
 };
 
 Frame Read(AudioMediaReader* reader, int source_frame_index,
-           int samples = kPalFrameSamples) {
+           int samples = kPalFrameSamples, std::int64_t fields_after = 0) {
   Frame frame;
   std::string error;
-  EXPECT_TRUE(reader->ReadFrame(samples, source_frame_index, &frame.left,
-                                &frame.right, &error))
+  EXPECT_TRUE(reader->ReadFrame(samples, source_frame_index, fields_after,
+                                &frame.left, &frame.right, &error))
       << error;
   EXPECT_EQ(frame.left.size(), static_cast<std::size_t>(samples));
   EXPECT_EQ(frame.right.size(), static_cast<std::size_t>(samples));
@@ -57,8 +57,20 @@ bool AllZero(const std::vector<std::int32_t>& samples, std::size_t from = 0) {
 VideoAudioTiming PalTiming() {
   VideoAudioTiming timing;
   timing.frame_rate_hz = 25.0;
+  timing.output_frame_rate_hz = 25.0;
   return timing;
 }
+
+// 24000/1001 film shown with 2:3 pulldown at 30000/1001.
+VideoAudioTiming FilmTiming() {
+  VideoAudioTiming timing;
+  timing.frame_rate_hz = 24000.0 / 1001.0;
+  timing.output_frame_rate_hz = 30000.0 / 1001.0;
+  return timing;
+}
+
+// SMPTE 272M-1994 §14.3: the five-frame NTSC 48 kHz sample sequence.
+constexpr int kNtscFrameSamples[] = {1602, 1601, 1602, 1601, 1602};
 
 TEST(AudioMediaReaderTest, FilePlaysFromItsStartThenFallsSilent) {
   FakeAudioLibrary library;
@@ -148,6 +160,55 @@ TEST(AudioMediaReaderTest, VideoLoopReopensAtTheLoopedFrame) {
   EXPECT_DOUBLE_EQ(library.opens[1].start_seconds, 0.2);
 }
 
+TEST(AudioMediaReaderTest, FilmPlaysInRealTimeAcrossTheCadence) {
+  FakeAudioLibrary library;
+  library.media["film.mkv"] = {0.0, 60.0};
+  AudioMediaReader reader(MakeFakeAudioFactory(&library), kRate);
+  reader.BeginVideoRun("film.mkv", 0, FilmTiming());
+
+  // Five output frames from film frame 48 (2.002 s) cover four film frames
+  // and read one unbroken stretch of sound.
+  const double start = 48.0 * 1001.0 / 24000.0;
+  std::int64_t played = 0;
+  for (int k = 0; k < 5; ++k) {
+    const Frame frame = Read(&reader, 48, kNtscFrameSamples[k],
+                             static_cast<std::int64_t>(k) * 2);
+    EXPECT_EQ(frame.left.front(), FakeSampleAt(start, kRate, played))
+        << "output frame " << k;
+    played += kNtscFrameSamples[k];
+  }
+  ASSERT_EQ(library.opens.size(), 1U);
+  EXPECT_DOUBLE_EQ(library.opens[0].start_seconds, start);
+}
+
+TEST(AudioMediaReaderTest, FilmPositionPastAFrameStartsMidFrame) {
+  FakeAudioLibrary library;
+  library.media["film.mkv"] = {0.0, 60.0};
+  AudioMediaReader reader(MakeFakeAudioFactory(&library), kRate);
+  reader.BeginVideoRun("film.mkv", 0, FilmTiming());
+
+  // Three fields (1.5 output frames) after film frame 24.
+  const double start = (24.0 * 1001.0 / 24000.0) + (1.5 * 1001.0 / 30000.0);
+  EXPECT_EQ(Read(&reader, 24, kNtscFrameSamples[0], 3).left.front(),
+            FakeSampleAt(start, kRate));
+  EXPECT_DOUBLE_EQ(library.opens[0].start_seconds, start);
+}
+
+TEST(AudioMediaReaderTest, FilmLoopReopensAtThePassStart) {
+  FakeAudioLibrary library;
+  library.media["film.mkv"] = {0.0, 60.0};
+  AudioMediaReader reader(MakeFakeAudioFactory(&library), kRate);
+  reader.BeginVideoRun("film.mkv", 0, FilmTiming());
+
+  Read(&reader, 10, kNtscFrameSamples[0], 0);
+  Read(&reader, 10, kNtscFrameSamples[1], 2);
+  // The range loops: the next pass starts again at film frame 10.
+  EXPECT_EQ(Read(&reader, 10, kNtscFrameSamples[2], 0).left.front(),
+            FakeSampleAt(10.0 * 1001.0 / 24000.0, kRate));
+  ASSERT_EQ(library.opens.size(), 2U);
+  EXPECT_DOUBLE_EQ(library.opens[1].start_seconds, 10.0 * 1001.0 / 24000.0);
+}
+
 TEST(AudioMediaReaderTest, VideoStartOffsetMovesTheSeek) {
   FakeAudioLibrary library;
   library.media["clip.mkv"] = {0.0, 60.0};
@@ -207,14 +268,14 @@ TEST(AudioMediaReaderTest, ReportsOpenAndReadFailures) {
   std::vector<std::int32_t> left;
   std::vector<std::int32_t> right;
   std::string error;
-  EXPECT_FALSE(reader.ReadFrame(kPalFrameSamples, 0, &left, &right, &error));
+  EXPECT_FALSE(reader.ReadFrame(kPalFrameSamples, 0, 0, &left, &right, &error));
   EXPECT_NE(error.find("missing.wav"), std::string::npos) << error;
 
   library.media["a.wav"] = {0.0, 1.0};
   library.read_error = "decode failed";
   reader.BeginFileRun({"a.wav", false});
   error.clear();
-  EXPECT_FALSE(reader.ReadFrame(kPalFrameSamples, 0, &left, &right, &error));
+  EXPECT_FALSE(reader.ReadFrame(kPalFrameSamples, 0, 0, &left, &right, &error));
   EXPECT_EQ(error, "decode failed");
 }
 

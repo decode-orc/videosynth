@@ -31,6 +31,7 @@ enum class IssueField {
   kLumaBandwidth,
   kChannel,
   kChromaError,
+  kCadence,
 };
 
 // One validation finding presented in the issues dock.

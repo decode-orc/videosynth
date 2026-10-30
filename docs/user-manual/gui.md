@@ -87,7 +87,7 @@ A new project starts with one progressive section sourced from the bundled colou
 
 The section list shows the sections in output order, with buttons for **Add**, **Remove**, **Duplicate**, **Up** and **Down**.
 
-- **Add** appends a plain progressive section using the bundled colour bars for the project's raster.
+- **Add** appends a plain progressive section using the bundled colour bars for the project's raster. Its arrow opens the section templates: **Section** (the same plain section) and, for NTSC and PAL-M projects, **Film (2:3 pulldown)** — a section that plays every frame of the bundled 24000/1001 film clip, `FILM_COUNTER_24P.mkv`, with a `"2:3"` [cadence](../reference/sections.md#cadence) from phase A.
 - **Duplicate** copies the selection, naming the copies *"<name> (copy)"*, and inserts them as a contiguous block after the last selected row.
 - Multi-selection (++ctrl++ / ++shift++ click) puts the editor into **batch mode**: an edit made to the current section is mirrored onto every selected section. The editor says so explicitly, and the laserdisc code checklist narrows to codes valid for *all* the selected section types.
 
@@ -100,16 +100,25 @@ The centre pane is a set of collapsible groups covering everything a section hol
 **Section** — name, disc section type (`(none)`, `lead_in`, `programme_area`, `lead_out`), source frames, duration and frame range.
 
 - **Source frames** selects the run of a video's frames the section plays: a start frame, and an end frame or **To end of source**. The fields are enabled for video sources only, and the probed frame count caps them. Moving the start past a set end moves the end with it.
-- **Duration** is shown in frames with the equivalent time at the project's frame rate beside it. **All source frames** plays the selected range, with a **repeat** count and a summary such as *10 frames x 3 = 30 total*. A fixed duration longer than the range loops it, and the summary says so. A still has no length of its own, so **All source frames** is unavailable for it.
+- **Duration** is shown in frames with the equivalent time at the project's frame rate beside it. **All source frames** plays the selected range, with a **repeat** count and a summary such as *10 frames x 3 = 30 total*. A fixed duration longer than the range loops it, and the summary says so.
+- In a 2:3 pulldown section the summary counts film frames and the output frames they fill from where the cadence starts, such as *48 film frames x 1 = 48 → 60 frames (2:3 from A1)*. A fixed duration shows the film frames it plays. For a section that continues the previous cadence after a section of unknown length, the summary says the output frames depend on where that cadence ends. A still has no length of its own, so **All source frames** is unavailable for it.
 - Choosing a different video sets the duration to **All source frames** and resets the range to the whole clip. Choosing a still clears the range and replaces an **All source frames** duration with a frame count. Opening a project never rewrites a duration.
 - **Frame range** is the section's span in the output, counted across the preceding sections.
+
+**Cadence** — how the section's frames map onto output fields (see [`cadence`](../reference/sections.md#cadence)):
+
+- **Pattern** — *Video* (one frame per two fields) or *2:3 pulldown* (24000/1001 film spread over 59.94 Hz fields). The group is unavailable for PAL and SECAM projects, unless a section already uses 2:3 and needs switching back.
+- **Phase** — the letter (A–D) of the 2:3 cycle the section's first field takes.
+- **Continue cadence from previous section** — carries on from where the previous 2:3 section's cycle stopped. Phase is disabled while this is ticked, because the previous section decides it.
+
+Choosing *Video* removes the `cadence` block from the project file. Choosing an EXR still returns the pattern to *Video*, since a still has no film frames.
 
 **Section Source** — a two-way choice:
 
 - **Built-in asset** — pick an asset type (*Still image (EXR)* or *Video*) and a file name from a dropdown of the shipped assets. The raster is derived from the project standard and is not a field you set, so changing the standard self-heals the path.
 - **Local file** — a browsed `.mkv`, `.mp4` or `.exr` file, stored relative to the project when **Relative to project** is ticked, absolute otherwise.
 
-**Source Profile** — the result of probing the chosen file: whether it matches a supported profile, its raster, rate, codec, pixel format and frame count, the colour conversion a video will receive (or that it is used unconverted), and any warnings such as an opposite field order. Probing runs in the background; the editor shows *Probing source…* until it completes.
+**Source Profile** — the result of probing the chosen file: whether it matches a supported profile, its raster, rate (a 24000/1001 source shows as *Film 24000/1001*), codec, pixel format and frame count, the colour conversion a video will receive (or that it is used unconverted), and any warnings such as an opposite field order. The frame rate is checked against the section's cadence: a film source fits only a 2:3 pulldown section, and changing the pattern probes the source again. Probing runs in the background; the editor shows *Probing source…* until it completes.
 
 **Line injections** — the laserdisc code checklist for this section. See [Laserdisc discs](laserdisc.md).
 
@@ -147,7 +156,7 @@ Every editor is a view onto the project document, so every change is undoable an
 
 The preview synthesises frames on demand through the same generation code the pipeline uses, so what you see is what will be written.
 
-**Navigator** — a frame spinner over the whole output, showing which section the current frame belongs to. Sections that contribute no output frames say so rather than showing a stale picture.
+**Navigator** — a frame spinner over the whole output, showing which section the current frame belongs to. In a 2:3 pulldown section it also shows each field's film frame and its place in the cycle, such as *F1: film 37 (B3) · F2: film 38 (C1)*; the Encoded view shows both fields as written, and the Source tab shows field 1's film frame. Sections that contribute no output frames say so rather than showing a stale picture.
 
 **Source** and **Encoded** tabs:
 
@@ -173,7 +182,7 @@ Frames are cached, so scrubbing back and forth is cheap. When a project edit inv
 
 Validation runs continuously in the background, debounced so typing does not trigger a run per keystroke. The Issues dock lists every error and warning; the status bar summarises as *Project valid* or *n error(s), m warning(s)*.
 
-Double-clicking an issue selects the section it relates to and scrolls to the group the issue names: luma bandwidth, the capture or shared noise layer, or random or scratch dropouts. For a project-level issue it opens **Edit Project…**, scrolled to the **Channel** or **Chroma error** group when the issue is about one of them.
+Double-clicking an issue selects the section it relates to and scrolls to the group the issue names: cadence, luma bandwidth, the capture or shared noise layer, or random or scratch dropouts. For a project-level issue it opens **Edit Project…**, scrolled to the **Channel** or **Chroma error** group when the issue is about one of them.
 
 Errors block generation. Warnings do not — they flag things that are legal but probably not what you meant, such as a scratch whose lifespan is longer than the section it lives in.
 

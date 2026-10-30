@@ -53,6 +53,14 @@ double BiphaseBaselineMv(Standard standard) {
                                       : kNtscBiphaseBaselineMv;
 }
 
+// Decodes the five picture-number digits X1-X5 of a CAV FX1X2X3X4X5 code.
+int DecodePictureNumber(uint32_t code) {
+  return static_cast<int>(((code >> 16U) & 0xFU) * 10000U +
+                          ((code >> 12U) & 0xFU) * 1000U +
+                          ((code >> 8U) & 0xFU) * 100U +
+                          ((code >> 4U) & 0xFU) * 10U + (code & 0xFU));
+}
+
 std::string Lowercase(std::string value) {
   std::transform(
       value.begin(), value.end(), value.begin(),
@@ -253,6 +261,9 @@ void BiphaseInjectionManager::Reset() {
   section_type_ = SectionType::kUnknown;
   last_context_ = {};
   frame_count_ = 0;
+  previous_field_started_picture_ = false;
+  last_picture_number_ = 0;
+  fm_shown_value_ = -1;
 }
 
 void BiphaseInjectionManager::SetInitialFrameCount(int initial_count) {
@@ -273,11 +284,21 @@ bool BiphaseInjectionManager::ResolveFrame(const Section& section,
                                            int active_window_start_samples,
                                            FrameEnrichment* out_enrichment,
                                            std::vector<std::string>* errors) {
+  return ResolveFrame(section, standard, sample_rate_hz,
+                      active_window_start_samples, {true, false},
+                      out_enrichment, errors);
+}
+
+bool BiphaseInjectionManager::ResolveFrame(
+    const Section& section, Standard standard, double sample_rate_hz,
+    int active_window_start_samples, const std::array<bool, 2>& picture_starts,
+    FrameEnrichment* out_enrichment, std::vector<std::string>* errors) {
   if (out_enrichment == nullptr || errors == nullptr) {
     return false;
   }
 
   out_enrichment->vbi_lines.clear();
+  out_enrichment->field_picture_numbers = {};
 
   // Initialize section generators first so the picture_number generator already
   // reflects the new section's start_value when deriving colour_frame_index.
@@ -288,12 +309,23 @@ bool BiphaseInjectionManager::ResolveFrame(const Section& section,
     current_section_ = &section;
   }
 
+  const bool pulldown = section.cadence.pattern == CadencePattern::kPulldown23;
+  const std::array<PictureFieldRole, 2> roles = {
+      PictureFieldRole{
+          .starts_picture = picture_starts[0],
+          .follows_picture_start = previous_field_started_picture_},
+      PictureFieldRole{.starts_picture = picture_starts[1],
+                       .follows_picture_start = picture_starts[0]}};
+  previous_field_started_picture_ = picture_starts[1];
+
   // Derive colour_frame_index from the disc picture number when a CAV
   // picture_number generator is active. This produces disc-accurate phase
   // even after section transitions with non-contiguous picture numbers
   // (backward-skip replay sections or post-gap forward-skip sections).
   // Fall back to the monotonic frame_count_ for sections without a PN
-  // generator (lead-in, lead-out, or sections with no laserdisc injection).
+  // generator (lead-in, lead-out, or sections with no laserdisc injection),
+  // and for 2:3 pulldown sections, whose picture numbers count film pictures
+  // rather than disc frames.
   constexpr int kPalColourPeriod = 4;
   constexpr int kNtscColourPeriod = 2;
   const int colour_period =
@@ -301,13 +333,10 @@ bool BiphaseInjectionManager::ResolveFrame(const Section& section,
           ? kPalColourPeriod
           : kNtscColourPeriod;
   last_context_ = {};
-  if (const CodeGenerator* pn_gen = GetGenerator("picture_number")) {
-    const uint32_t code = pn_gen->CurrentCode();
-    const int pn = static_cast<int>(
-        ((code >> 16U) & 0xFU) * 10000U + ((code >> 12U) & 0xFU) * 1000U +
-        ((code >> 8U) & 0xFU) * 100U + ((code >> 4U) & 0xFU) * 10U +
-        (code & 0xFU));
-    last_context_.colour_frame_index = (pn - 1) % colour_period;
+  CodeGenerator* pn_gen = GetGenerator("picture_number");
+  if (pn_gen != nullptr && !pulldown) {
+    last_context_.colour_frame_index =
+        (DecodePictureNumber(pn_gen->CurrentCode()) - 1) % colour_period;
   } else {
     last_context_.colour_frame_index = frame_count_ % colour_period;
   }
@@ -323,6 +352,35 @@ bool BiphaseInjectionManager::ResolveFrame(const Section& section,
     return true;
   }
 
+  // Capture current code values before advancing so OSD token resolver can
+  // read the biphase words that were written this frame.
+  for (const auto& [ct, gen] : generators_) {
+    last_context_.biphase_words.push_back(gen->CurrentCode());
+  }
+
+  // Each field's CAV picture number code and FM picture number. A video
+  // frame shows one picture in both fields; a 2:3 pulldown frame numbers
+  // each picture as its first field arrives.
+  std::array<uint32_t, 2> picture_number_codes{};
+  std::array<FmData, 2> fm_picture_data{};
+  for (std::size_t field = 0; field < roles.size(); ++field) {
+    const bool field_one = field == 0;
+    if (pn_gen != nullptr) {
+      if (!pulldown || roles[field].starts_picture) {
+        picture_number_codes[field] = pn_gen->CurrentCode();
+        last_picture_number_ = DecodePictureNumber(picture_number_codes[field]);
+        if (pulldown) {
+          pn_gen->Advance();
+        }
+      }
+      out_enrichment->field_picture_numbers[field] = last_picture_number_;
+    }
+    if (fm_picture_number_generator_) {
+      fm_picture_data[field] =
+          ResolveFmPictureNumber(field_one, roles[field].starts_picture);
+    }
+  }
+
   // Horizontal offsets are pure functions of the standard's line length and
   // are resolved once per section in InitializeSection.
   const int offset_160h_samples = line_offsets_.white_flag_start_samples;
@@ -336,9 +394,10 @@ bool BiphaseInjectionManager::ResolveFrame(const Section& section,
       continue;
     }
 
-    const bool field_one = LinePlacementEngine::IsFieldOne(standard, line_num);
+    const std::size_t field =
+        LinePlacementEngine::IsFieldOne(standard, line_num) ? 0 : 1;
     const LineCodeAssignment assignment =
-        placement_engine_->GetAssignment(line_num, field_one);
+        placement_engine_->GetAssignment(line_num, roles[field]);
 
     if (!assignment.assigned) {
       continue;
@@ -363,12 +422,11 @@ bool BiphaseInjectionManager::ResolveFrame(const Section& section,
       }
       if (assignment.code_type == "fm_picture_number" &&
           fm_picture_number_generator_) {
-        injection.fm_data =
-            fm_picture_number_generator_->CurrentData(field_one, section_type_);
+        injection.fm_data = fm_picture_data[field];
       } else if (assignment.code_type == "fm_programme_time" &&
                  fm_programme_time_generator_) {
-        injection.fm_data =
-            fm_programme_time_generator_->CurrentData(field_one, section_type_);
+        injection.fm_data = fm_programme_time_generator_->CurrentData(
+            field == 0, section_type_);
       } else {
         continue;
       }
@@ -379,28 +437,42 @@ bool BiphaseInjectionManager::ResolveFrame(const Section& section,
         continue;
       }
       injection.kind = VbiLineInjection::Kind::kBiphase24;
-      injection.biphase_code = gen->CurrentCode();
+      injection.biphase_code = (assignment.code_type == "picture_number")
+                                   ? picture_number_codes[field]
+                                   : gen->CurrentCode();
     }
 
     out_enrichment->vbi_lines.push_back(injection);
   }
 
-  // Capture current code values before advancing so OSD token resolver can
-  // read the biphase words and picture number that were written this frame.
-  if (const CodeGenerator* pn_gen = GetGenerator("picture_number")) {
-    const uint32_t code = pn_gen->CurrentCode();
-    last_context_.picture_number = static_cast<int>(
-        ((code >> 16U) & 0xFU) * 10000U + ((code >> 12U) & 0xFU) * 1000U +
-        ((code >> 8U) & 0xFU) * 100U + ((code >> 4U) & 0xFU) * 10U +
-        (code & 0xFU));
-  }
-  for (const auto& [ct, gen] : generators_) {
-    last_context_.biphase_words.push_back(gen->CurrentCode());
-  }
+  // The OSD picture number is the one field 1 shows.
+  last_context_.picture_number = out_enrichment->field_picture_numbers[0];
   out_enrichment->context = last_context_;
 
-  AdvanceGenerators();
+  AdvanceGenerators(pulldown);
   return true;
+}
+
+FmData BiphaseInjectionManager::ResolveFmPictureNumber(bool field_one,
+                                                       bool starts_picture) {
+  FmPictureNumberGenerator& generator = *fm_picture_number_generator_;
+  if (section_type_ != SectionType::kProgrammeArea) {
+    // Lead-in and lead-out hold their frozen values; Advance is a no-op.
+    return generator.CurrentData(field_one, section_type_);
+  }
+  if (starts_picture) {
+    const int shown = (fm_shown_value_ >= 0)
+                          ? fm_shown_value_
+                          : generator.current_programme_value();
+    const int new_picture = generator.current_programme_value();
+    generator.Advance(section_type_);
+    fm_shown_value_ = new_picture;
+    return FmPictureNumberGenerator::DataForValue(shown, field_one);
+  }
+  if (fm_shown_value_ < 0) {
+    fm_shown_value_ = generator.current_programme_value();
+  }
+  return FmPictureNumberGenerator::DataForValue(fm_shown_value_, field_one);
 }
 
 bool BiphaseInjectionManager::ProcessFrame(
@@ -643,12 +715,12 @@ bool BiphaseInjectionManager::InitializeSection(
   return true;
 }
 
-void BiphaseInjectionManager::AdvanceGenerators() {
+void BiphaseInjectionManager::AdvanceGenerators(bool pictures_advanced) {
   for (auto& [code_type, gen] : generators_) {
+    if (pictures_advanced && code_type == "picture_number") {
+      continue;
+    }
     gen->Advance();
-  }
-  if (fm_picture_number_generator_) {
-    fm_picture_number_generator_->Advance(section_type_);
   }
   if (fm_programme_time_generator_) {
     fm_programme_time_generator_->Advance(section_type_);

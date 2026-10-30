@@ -1,9 +1,9 @@
 /*
  * File:        section_editor.cpp
  * Module:      gui
- * Purpose:     Per-section form editor: source and span, optional audio,
- *              luma bandwidth, noise, dropout, OSD blocks, and line
- *              injections
+ * Purpose:     Per-section form editor: source and span, field cadence,
+ *              optional audio, luma bandwidth, noise, dropout, OSD blocks,
+ *              and line injections
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -129,6 +129,7 @@ void SectionEditor::BuildUi() {
   layout->addWidget(multi_edit_hint_);
 
   layout->addWidget(BuildGeneralGroup());
+  layout->addWidget(BuildCadenceGroup());
   layout->addWidget(BuildProbeGroup());
   layout->addWidget(BuildAudioGroup());
   layout->addWidget(BuildLumaBandwidthGroup());
@@ -397,6 +398,74 @@ QWidget* SectionEditor::BuildGeneralGroup() {
     }
   });
   return group;
+}
+
+QWidget* SectionEditor::BuildCadenceGroup() {
+  cadence_group_ = new QGroupBox(tr("Cadence"), content_);
+  cadence_group_->setToolTip(
+      tr("How source frames map onto output fields. 2:3 pulldown spreads "
+         "24000/1001 film over 59.94 Hz fields and needs NTSC or PAL-M."));
+  auto* form = new QFormLayout(cadence_group_);
+
+  cadence_pattern_combo_ = new QComboBox(cadence_group_);
+  cadence_pattern_combo_->setObjectName(QStringLiteral("cadencePatternCombo"));
+  cadence_pattern_combo_->addItem(tr("Video"),
+                                  static_cast<int>(CadencePattern::kVideo));
+  cadence_pattern_combo_->addItem(
+      tr("2:3 pulldown"), static_cast<int>(CadencePattern::kPulldown23));
+  CapFieldWidthAtSizeHint(cadence_pattern_combo_);
+  form->addRow(tr("Pattern:"), cadence_pattern_combo_);
+
+  cadence_phase_combo_ = new QComboBox(cadence_group_);
+  cadence_phase_combo_->setObjectName(QStringLiteral("cadencePhaseCombo"));
+  cadence_phase_combo_->addItem(QStringLiteral("A"),
+                                static_cast<int>(CadencePhase::kA));
+  cadence_phase_combo_->addItem(QStringLiteral("B"),
+                                static_cast<int>(CadencePhase::kB));
+  cadence_phase_combo_->addItem(QStringLiteral("C"),
+                                static_cast<int>(CadencePhase::kC));
+  cadence_phase_combo_->addItem(QStringLiteral("D"),
+                                static_cast<int>(CadencePhase::kD));
+  cadence_phase_combo_->setToolTip(
+      tr("The letter of the 2:3 cycle A A B B B C C D D D that the section's "
+         "first field takes."));
+  CapFieldWidthAtSizeHint(cadence_phase_combo_);
+  form->addRow(tr("Phase:"), cadence_phase_combo_);
+
+  cadence_continue_check_ = new QCheckBox(
+      tr("Continue cadence from previous section"), cadence_group_);
+  cadence_continue_check_->setObjectName(
+      QStringLiteral("cadenceContinueCheck"));
+  cadence_continue_check_->setToolTip(
+      tr("Carry on from where the previous 2:3 section's cycle stopped "
+         "instead of restarting at the phase."));
+  form->addRow(QString(), cadence_continue_check_);
+
+  connect(cadence_pattern_combo_, &QComboBox::activated, this, [this](int) {
+    const auto pattern = static_cast<CadencePattern>(
+        cadence_pattern_combo_->currentData().toInt());
+    CommitCadenceEdit(
+        [pattern](Section* section) { SetCadencePattern(section, pattern); });
+  });
+  connect(cadence_phase_combo_, &QComboBox::activated, this, [this](int) {
+    const auto phase =
+        static_cast<CadencePhase>(cadence_phase_combo_->currentData().toInt());
+    CommitCadenceEdit(
+        [phase](Section* section) { SetCadencePhase(section, phase); });
+  });
+  connect(cadence_continue_check_, &QCheckBox::toggled, this,
+          [this](bool continue_cadence) {
+            if (updating_) {
+              return;
+            }
+            const CadenceContinuity continuity =
+                continue_cadence ? CadenceContinuity::kContinue
+                                 : CadenceContinuity::kRestart;
+            CommitCadenceEdit([continuity](Section* section) {
+              SetCadenceContinuity(section, continuity);
+            });
+          });
+  return cadence_group_;
 }
 
 QWidget* SectionEditor::BuildProbeGroup() {
@@ -938,6 +1007,15 @@ void SectionEditor::LoadFromDocument() {
 
   UpdateFrameRangeDisplay();
 
+  // Cadence.
+  cadence_pattern_combo_->setCurrentIndex(cadence_pattern_combo_->findData(
+      static_cast<int>(section.cadence.pattern)));
+  cadence_phase_combo_->setCurrentIndex(
+      cadence_phase_combo_->findData(static_cast<int>(section.cadence.phase)));
+  cadence_continue_check_->setChecked(section.cadence.continuity ==
+                                      CadenceContinuity::kContinue);
+  UpdateCadenceWidgets(section);
+
   // Audio (block present exactly when it carries channel pairs).
   audio_group_->setChecked(!section.audio_channel_pairs.empty());
   audio_editor_->SetProjectBaseDir(ProjectBaseDir());
@@ -1292,6 +1370,38 @@ void SectionEditor::UpdateLumaCutoffRange() {
   luma_cutoff_spin_->setMaximum(maximum);
 }
 
+void SectionEditor::CommitCadenceEdit(
+    const std::function<void(Section*)>& apply) {
+  if (updating_ || section_index_ < 0) {
+    return;
+  }
+  Section section = SectionFromWidgets();
+  apply(&section);
+  UpdateCadenceWidgets(section);
+  CommitEditedSection(section);
+  // The pattern decides the source frame rate the profile check accepts.
+  RequestProbe();
+}
+
+void SectionEditor::UpdateCadenceWidgets(const Section& section) {
+  const CadenceEditorState state = CadenceEditorStateFor(
+      section, document_->project().cvbs_presets.video_standard_preset);
+  cadence_pattern_combo_->setEnabled(state.pattern_enabled);
+  cadence_continue_check_->setEnabled(state.continue_enabled);
+  cadence_phase_combo_->setEnabled(state.phase_enabled);
+}
+
+int SectionEditor::CurrentCadenceStartSlot() const {
+  const Project& project = document_->project();
+  std::vector<int> source_frame_counts(project.sections.size(),
+                                       kUnknownSourceFrameCount);
+  source_frame_counts[static_cast<std::size_t>(section_index_)] =
+      ProbedSourceFrameCount();
+  return ResolveCadenceStartSlots(
+      project.sections,
+      source_frame_counts)[static_cast<std::size_t>(section_index_)];
+}
+
 void SectionEditor::RevealField(IssueField field) {
   QWidget* group = nullptr;
   QWidget* focus = nullptr;
@@ -1316,6 +1426,10 @@ void SectionEditor::RevealField(IssueField field) {
       group = luma_bandwidth_group_;
       focus = luma_cutoff_spin_;
       break;
+    case IssueField::kCadence:
+      group = cadence_group_;
+      focus = cadence_pattern_combo_;
+      break;
     case IssueField::kNone:
     case IssueField::kChannel:
     case IssueField::kChromaError:
@@ -1326,7 +1440,7 @@ void SectionEditor::RevealField(IssueField field) {
     return;
   }
   scroll_->ensureWidgetVisible(group);
-  if (focus->isVisible()) {
+  if (focus->isVisible() && focus->isEnabled()) {
     focus->setFocus(Qt::OtherFocusReason);
   } else {
     group->setFocus(Qt::OtherFocusReason);
@@ -1434,45 +1548,15 @@ void SectionEditor::UpdateDurationSummary() {
     duration_summary_label_->clear();
     return;
   }
-  const Section& section =
+  // The duration widgets may run ahead of the stored section while a toggle
+  // is being committed, so the hint reads them.
+  Section section =
       document_->project().sections[static_cast<std::size_t>(section_index_)];
-  SourceFrameRange range;
-  std::string range_error;
-  const bool range_known = ResolveSourceFrameRange(
-      section, ProbedSourceFrameCount(), &range, &range_error);
-
-  // A fixed duration already shows in the spinbox; only a video range it
-  // overruns needs a note.
-  if (!duration_all_check_->isChecked()) {
-    if (IsProgressiveVideoSource(section.source) && range_known &&
-        duration_spin_->value() > range.count) {
-      duration_summary_label_->setText(
-          tr("Loops the %1-frame source range").arg(range.count));
-    } else {
-      duration_summary_label_->clear();
-    }
-    return;
-  }
-
-  const int repeat = std::max(1, duration_repeat_spin_->value());
-  if (!range_known) {
-    if (ProbedSourceFrameCount() != kUnknownSourceFrameCount) {
-      // The probe answered, so the range itself is invalid.
-      duration_summary_label_->setText(QString::fromStdString(range_error));
-      return;
-    }
-    // Probe pending or unavailable: still convey the multiplier.
-    duration_summary_label_->setText(
-        repeat > 1 ? tr("Source frame count x %1 (probing source…)").arg(repeat)
-                   : tr("Using source frame count (probing source…)"));
-    return;
-  }
-
-  const int64_t total = static_cast<int64_t>(range.count) * repeat;
-  duration_summary_label_->setText(tr("%1 frames x %2 = %3 total")
-                                       .arg(range.count)
-                                       .arg(repeat)
-                                       .arg(static_cast<qlonglong>(total)));
+  section.duration_frames_all = duration_all_check_->isChecked();
+  section.duration_frames = duration_spin_->value();
+  section.duration_frames_repeat = std::max(1, duration_repeat_spin_->value());
+  duration_summary_label_->setText(QString::fromStdString(DurationSummaryFor(
+      section, ProbedSourceFrameCount(), CurrentCadenceStartSlot())));
 }
 
 void SectionEditor::UpdateSourceRangeWidgets() {
@@ -1518,8 +1602,9 @@ void SectionEditor::UpdateFrameRangeDisplay() {
   // Duration: fixed durations and closed ranges are known immediately; an
   // open-ended "all source frames" duration resolves from the probed source
   // length, so it stays unknown until a successful probe report arrives.
-  const int64_t duration =
-      KnownSectionOutputFrameCount(section, ProbedSourceFrameCount());
+  const int cadence_start_slot = CurrentCadenceStartSlot();
+  const int64_t duration = KnownSectionOutputFrameCount(
+      section, ProbedSourceFrameCount(), cadence_start_slot);
   // An end below the start renders as "?" (unknown duration).
   const int end_frame = duration > 0
                             ? static_cast<int>(start_frame + duration - 1)
@@ -1538,8 +1623,15 @@ void SectionEditor::UpdateFrameRangeDisplay() {
   const bool show_disc_range = disc_start >= 0;
   general_form_->setRowVisible(disc_range_label_, show_disc_range);
   if (show_disc_range) {
-    const int disc_end = duration > 0
-                             ? static_cast<int>(disc_start + duration - 1)
+    // CAV picture numbers count pictures: a 2:3 pulldown section shows one
+    // per film frame.
+    const int64_t positions =
+        (disc_type == DiscType::kCAV)
+            ? KnownSectionPictureCount(section, ProbedSourceFrameCount(),
+                                       cadence_start_slot)
+            : duration;
+    const int disc_end = positions > 0
+                             ? static_cast<int>(disc_start + positions - 1)
                              : disc_start - 1;
     disc_range_title_->setText(DiscRangeTitle(disc_type));
     disc_range_label_->setText(

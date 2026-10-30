@@ -78,9 +78,33 @@ A `.mkv` file must really be Matroska and a `.mp4` really MP4. Rename the file t
 
 PAL and SECAM require exactly 720×576, NTSC and PAL-M exactly 720×486. There is no scaling path — resize the source before ingesting it (see [Converting your own material](../user-manual/sources.md#converting-your-own-material)).
 
-### `source frame rate must match selected video standard`
+### `source frame rate must be …`
 
-25 fps for PAL and SECAM, 30000/1001 for NTSC and PAL-M. Frame rate conversion is not performed; convert with FFmpeg's `fps` filter first.
+25 fps for PAL and SECAM, 30000/1001 for NTSC and PAL-M, and 24000/1001 film for a section with a `"2:3"` [cadence](../reference/sections.md#cadence). Frame rate conversion is not performed; convert with FFmpeg's `fps` filter first. A film clip in a video-cadence section, or a 29.97 fps clip in a `"2:3"` section, also lands here: set the section's `cadence` to match the clip.
+
+### `cadence pattern "2:3" needs a 525-line standard`
+
+2:3 pulldown converts 24 fps film to 59.94 Hz fields. 625-line film runs at 25 fps with one frame per two fields, which is the default video cadence, so remove the `cadence` block.
+
+### `cadence pattern "2:3" needs a video source`
+
+An EXR still has no film frames to spread over fields. Use the video cadence for stills.
+
+### `cadence continuity 'continue' needs the previous section to use pattern "2:3"`
+
+There is no cadence to carry on from. Use `continuity: restart` with a `phase`.
+
+### `cadence phase is ignored with continuity 'continue'` / `cadence phase and continuity apply only to pattern "2:3"`
+
+These warnings mean a key has no effect. A continuing section takes its position in the cycle from the previous section, and a video-cadence section has no cycle at all. Remove the key, or switch to `continuity: restart` or `pattern: "2:3"` if that was the intent.
+
+### A film section shows combed or repeated frames
+
+That is 2:3 pulldown working as intended: in every five output frames, two weave fields from two film frames, and B and D film frames each fill three fields, so one of their fields repeats. Use the `{film_frame}` and `{cadence}` [OSD tokens](../user-manual/osd.md#tokens) to see which film frame each field shows. See [Film and pulldown](../user-manual/sources.md#film-and-pulldown).
+
+### A 2:3 section's picture numbers skip frames
+
+On a CAV disc the picture number counts film frames and goes on the first field of each one, so one output frame in five carries no picture number and no white flag. That is how film is mastered to CAV; see [Laserdisc: Film sections](../user-manual/laserdisc.md#film-sections).
 
 ### `source has a variable frame rate; convert it to a constant frame rate first`
 

@@ -57,6 +57,11 @@ FmData FmPictureNumberGenerator::CurrentData(bool field_one,
       break;
   }
 
+  return DataForValue(value, field_one);
+}
+
+// static
+FmData FmPictureNumberGenerator::DataForValue(int value, bool field_one) {
   FmData data;
   data.field_one = field_one;
   EncodeValue(value, data.x1, data.x2, data.x3, data.x4, data.x5);

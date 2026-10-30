@@ -27,11 +27,21 @@
 namespace videosynth {
 
 // One stored output frame as the audio tracks see it: the section it belongs
-// to and the source frame it shows (FrameScheduleItem::source_frame_index).
+// to and where its time span starts in the source, the start of
+// `source_frame_index` plus `fields_after` output fields.
 struct AudioOutputFrame {
   const Section* section = nullptr;
   int source_frame_index = 0;
+  std::int64_t fields_after = 0;
 };
+
+// The audio view of `schedule`, index for index: a video-cadence frame starts
+// at the source frame it shows, a 2:3 pulldown frame at its source time
+// (FrameScheduleItem::source_time).
+//
+// Thread-safety: thread-safe (pure function).
+std::vector<AudioOutputFrame> AudioOutputFramesForSchedule(
+    const std::vector<IGenerationStage::FrameScheduleItem>& schedule);
 
 // Generates every audio channel pair declared by a project and streams each as
 // a separate stereo 24-bit RIFF/WAVE file (`_audio_<pair>.wav`) frame-locked to
@@ -53,8 +63,8 @@ struct AudioOutputFrame {
 // (SMPTE 272M §14.3) whatever its content. Each contiguous run of output frames
 // sharing one section starts afresh: tone oscillators reset their phase, an
 // audio-file pair plays its file from the start, and a video-soundtrack pair
-// follows the source frames shown (AudioMediaReader). The caller emits output
-// frames strictly in output order.
+// follows the source time of each frame (AudioMediaReader). The caller emits
+// output frames strictly in output order.
 //
 // Usage: Begin(project, output_frames) opens the writers and computes
 // the per-frame plan; EmitFrame(k) must then be called for k = 0, 1, ... in
@@ -74,7 +84,7 @@ class AudioTrackGenerator {
       AudioSampleSourceFactory sample_source_factory = nullptr);
 
   // Prepares the plan and opens one WAV writer per declared channel pair.
-  // output_frames lists, in output order, the section and source frame of
+  // output_frames lists, in output order, the section and source time of
   // each stored output frame (its size is the total output frame count).
   // Returns false and appends messages to errors on any failure; on failure
   // any opened writers are aborted. When the project declares no audio,
@@ -183,6 +193,7 @@ class AudioTrackGenerator {
   // Per-output-frame plan (indexed by output frame).
   std::vector<const Section*> frame_sections_;
   std::vector<int> frame_source_indices_;
+  std::vector<std::int64_t> frame_source_fields_;
   std::vector<int> frame_sample_counts_;
   std::vector<char> is_run_start_;
   std::vector<std::int64_t> run_total_samples_;

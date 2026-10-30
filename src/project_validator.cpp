@@ -24,6 +24,7 @@
 #include "videosynth/biphase_types.h"
 #include "videosynth/cav_code_generator.h"
 #include "videosynth/dropout_scale.h"
+#include "videosynth/film_cadence.h"
 #include "videosynth/osd_token_resolver.h"
 #include "videosynth/path_resolution.h"
 #include "videosynth/progressive_frame_source.h"
@@ -138,21 +139,41 @@ bool ValidateProgressiveSourceFamily(const videosynth::Section& section,
   return false;
 }
 
-bool FrameRateMatchesStandard(double frame_rate_hz,
-                              videosynth::Standard standard) {
+// The source frame rate a section needs: the standard's frame rate for a
+// video cadence, 24000/1001 film for 2:3 pulldown (525-line standards only;
+// ValidateCadence rejects it elsewhere). A non-positive rate (unknown) passes.
+bool FrameRateMatchesSection(double frame_rate_hz,
+                             videosynth::Standard standard,
+                             videosynth::CadencePattern pattern) {
   if (frame_rate_hz <= 0.0) {
     return true;
   }
 
   if (videosynth::Is625LineStandard(standard)) {
-    return std::abs(frame_rate_hz - 25.0) <= 1.0e-3;
+    return pattern == videosynth::CadencePattern::kVideo &&
+           std::abs(frame_rate_hz - 25.0) <= 1.0e-3;
   }
   if (standard == videosynth::Standard::kNtsc ||
       standard == videosynth::Standard::kPalM) {
-    const double ntsc_rate = 30000.0 / 1001.0;
-    return std::abs(frame_rate_hz - ntsc_rate) <= 1.0e-3;
+    // SMPTE 170M-2004 Section 11.3 frame rate; film runs 1000/1001 slow so
+    // four film frames fill exactly five frames.
+    const double required_rate =
+        pattern == videosynth::CadencePattern::kPulldown23
+            ? videosynth::kFilmFrameRateHz
+            : 30000.0 / 1001.0;
+    return std::abs(frame_rate_hz - required_rate) <= 1.0e-3;
   }
   return false;
+}
+
+std::string FrameRateRequirement(videosynth::Standard standard,
+                                 videosynth::CadencePattern pattern) {
+  if (videosynth::Is625LineStandard(standard)) {
+    return "25 fps";
+  }
+  return pattern == videosynth::CadencePattern::kPulldown23
+             ? "24000/1001 fps (film) for a 2:3 pulldown section"
+             : "30000/1001 fps";
 }
 
 bool RasterMatchesStandard(int width, int height,
@@ -1449,6 +1470,66 @@ constexpr double kLumaBandwidthCutoffMinMhz = 0.5;
 constexpr double kLumaBandwidthTransitionMinMhz = 0.1;
 constexpr double kLumaBandwidthTransitionMaxMhz = 2.0;
 
+// Checks a section's cadence block: 2:3 pulldown needs a 525-line standard
+// and a video source, and continuity needs a preceding 2:3 section. Phase or
+// continuity that cannot take effect only warns.
+void ValidateCadence(const videosynth::Project& project,
+                     std::size_t section_index,
+                     videosynth::ValidationResult* result) {
+  const videosynth::Section& section = project.sections[section_index];
+  const videosynth::CadenceParameters& cadence = section.cadence;
+  const auto fail = [result, &section](const std::string& message) {
+    result->is_valid = false;
+    result->errors.push_back(
+        "Progressive section validation error in section '" + section.name +
+        "': " + message);
+  };
+  const std::string context = "Progressive section '" + section.name + "'";
+
+  if (cadence.pattern == videosynth::CadencePattern::kVideo) {
+    if (cadence.phase_specified ||
+        cadence.continuity == videosynth::CadenceContinuity::kContinue) {
+      result->warnings.push_back(
+          context +
+          ": cadence phase and continuity apply only to pattern \"2:3\"; "
+          "they are ignored for a video cadence.");
+    }
+    return;
+  }
+
+  const videosynth::Standard standard =
+      project.cvbs_presets.video_standard_preset;
+  if (standard != videosynth::Standard::kNtsc &&
+      standard != videosynth::Standard::kPalM) {
+    fail(
+        "cadence pattern \"2:3\" needs a 525-line standard (NTSC or PAL-M); "
+        "625-line film is already 2:2, the native video cadence.");
+    return;
+  }
+  if (videosynth::IsProgressiveStillSource(section.source)) {
+    fail(
+        "cadence pattern \"2:3\" needs a video source; an EXR still has no "
+        "film frames to spread over fields.");
+    return;
+  }
+  if (cadence.continuity == videosynth::CadenceContinuity::kContinue) {
+    if (section_index == 0 ||
+        project.sections[section_index - 1].cadence.pattern !=
+            videosynth::CadencePattern::kPulldown23) {
+      fail(
+          "cadence continuity 'continue' needs the previous section to use "
+          "pattern \"2:3\"; use 'restart' to start a new cadence.");
+      return;
+    }
+    if (cadence.phase_specified) {
+      result->warnings.push_back(
+          context +
+          ": cadence phase is ignored with continuity 'continue'; the "
+          "cadence carries on from the previous section.");
+    }
+  }
+}
+
 void ValidateLumaBandwidth(const videosynth::Section& section,
                            const videosynth::Project& project,
                            videosynth::ValidationResult* result) {
@@ -1623,7 +1704,8 @@ void ValidateOsdConfig(const videosynth::Section& section,
           "OSD validation error in section '" + section.name +
           "': overlay text contains unknown token '{" + unknown_token +
           "}'. Supported tokens: {picture_number}, {biphase_hex}, {phase_id}, "
-          "{section_name}, {timecode}, {frame_number}.");
+          "{section_name}, {timecode}, {frame_number}, {film_frame}, "
+          "{cadence}.");
       return;
     }
   }
@@ -1825,12 +1907,15 @@ void ValidateVideoAudioContent(const videosynth::Section& section,
 // Probe-backed rules for every file and video-soundtrack pair of a section.
 // `video_profile` is the probed section source, or null when the source was
 // not probed (or is a still); `source_frame_count` is its frame count or
-// kUnknownSourceFrameCount. File checks run only with an audio file probe.
+// kUnknownSourceFrameCount, and `cadence_start_slot` the section's resolved
+// 2:3 start slot (see ResolveCadenceStartSlots). File checks run only with an
+// audio file probe.
 void ValidateMediaAudioSources(
     const videosynth::Section& section, videosynth::Standard standard,
     const videosynth::ProgressiveFrameSourceProfile* video_profile,
-    int source_frame_count, videosynth::IAudioFileProbe* audio_file_probe,
-    videosynth::ILogger* logger, videosynth::ValidationResult* result) {
+    int source_frame_count, int cadence_start_slot,
+    videosynth::IAudioFileProbe* audio_file_probe, videosynth::ILogger* logger,
+    videosynth::ValidationResult* result) {
   const double target_rate_hz = videosynth::AudioSampleRateHz(standard);
   for (const videosynth::AudioChannelPair& channel_pair :
        section.audio_channel_pairs) {
@@ -1898,8 +1983,8 @@ void ValidateMediaAudioSources(
                    std::to_string(static_cast<int>(target_rate_hz)) + " Hz.");
     }
 
-    const std::int64_t run_frames =
-        videosynth::KnownSectionOutputFrameCount(section, source_frame_count);
+    const std::int64_t run_frames = videosynth::KnownSectionOutputFrameCount(
+        section, source_frame_count, cadence_start_slot);
     if (!channel_pair.file.repeat && run_frames > 0 &&
         profile.duration_seconds > 0.0) {
       const double run_seconds =
@@ -2165,6 +2250,78 @@ void ValidateChapterLengths(const videosynth::Project& project,
   finish_run();
 }
 
+// IEC 60856/60857 §10.1.3 (NTSC: Amendment 2 §10.2.3): the CAV picture
+// number should stay within the standard's maximum; past it the generators
+// hold the maximum, so later pictures repeat it. Mirrors
+// BiphaseInjectionManager: the count starts at the first picture_number code
+// (its start_value, or 1), runs on through every later section with laserdisc
+// codes, and restarts at each start_value. It advances once per picture: one
+// per frame for a video cadence, one per film frame for 2:3 pulldown. The
+// check stops at the first section whose length is not known.
+void ValidatePictureNumberRange(const videosynth::Project& project,
+                                const std::vector<int>& source_frame_counts,
+                                videosynth::ValidationResult* result) {
+  if (result == nullptr ||
+      videosynth::DiscTypeFromString(project.line_injections.disc_type) !=
+          videosynth::DiscType::kCAV) {
+    return;
+  }
+
+  const videosynth::Standard standard =
+      project.cvbs_presets.video_standard_preset;
+  const int max_pn = (standard == videosynth::Standard::kNtsc ||
+                      standard == videosynth::Standard::kPalM)
+                         ? kNtscMaxPictureNumber
+                         : kPalMaxPictureNumber;
+  const std::vector<int> start_slots = videosynth::ResolveCadenceStartSlots(
+      project.sections, source_frame_counts);
+
+  // Next picture number to be shown; 0 until the first picture_number code.
+  std::int64_t next_pn = 0;
+  for (std::size_t index = 0; index < project.sections.size(); ++index) {
+    const videosynth::Section& section = project.sections[index];
+    bool has_laserdisc = false;
+    for (const videosynth::Section::LineInjection& injection :
+         section.line_injections) {
+      if (Lowercase(injection.type) != "laserdisc") {
+        continue;
+      }
+      has_laserdisc = true;
+      for (const videosynth::Section::LineInjectionCode& code :
+           injection.codes) {
+        if (code.code_type != "picture_number") {
+          continue;
+        }
+        if (code.start_value_specified) {
+          next_pn = code.start_value;
+        } else if (next_pn == 0) {
+          next_pn = 1;
+        }
+      }
+    }
+    if (!has_laserdisc || next_pn == 0) {
+      continue;
+    }
+
+    const std::int64_t pictures = videosynth::KnownSectionPictureCount(
+        section, source_frame_counts[index], start_slots[index]);
+    if (pictures < 0) {
+      return;
+    }
+    const std::int64_t last_pn = next_pn + pictures - 1;
+    if (pictures > 0 && last_pn > max_pn) {
+      result->warnings.push_back(
+          "Laserdisc injection warning: section '" + section.name +
+          "' would reach CAV picture number " + std::to_string(last_pn) +
+          "; the maximum for " + videosynth::StandardToString(standard) +
+          " is " + std::to_string(max_pn) +
+          ", so its later pictures repeat it.");
+      return;
+    }
+    next_pn += pictures;
+  }
+}
+
 void ValidateSectionOrdering(const videosynth::Project& project,
                              videosynth::ValidationResult* result) {
   if (result == nullptr) {
@@ -2408,7 +2565,14 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
     }
   }
 
+  // Probed source frame counts of the sections validated so far, for the
+  // cadence start slots of 2:3 sections that continue a previous cadence.
+  std::vector<int> probed_source_frame_counts(project.sections.size(),
+                                              kUnknownSourceFrameCount);
+
   for (const Section& section : project.sections) {
+    const std::size_t section_index =
+        static_cast<std::size_t>(&section - project.sections.data());
     if (logger_ != nullptr) {
       logger_->Trace("Validating section '" + section.name + "' of type '" +
                      section.type + "'.");
@@ -2458,6 +2622,11 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
 
       ValidateAudioParameters(
           section, project.cvbs_presets.video_standard_preset, &result);
+      if (!result.is_valid) {
+        break;
+      }
+
+      ValidateCadence(project, section_index, &result);
       if (!result.is_valid) {
         break;
       }
@@ -2537,13 +2706,16 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
           break;
         }
 
-        if (!FrameRateMatchesStandard(
-                profile.frame_rate_hz,
-                project.cvbs_presets.video_standard_preset)) {
+        if (!FrameRateMatchesSection(profile.frame_rate_hz,
+                                     project.cvbs_presets.video_standard_preset,
+                                     section.cadence.pattern)) {
           result.is_valid = false;
           result.errors.push_back(
               "Progressive section validation error: source frame rate must "
-              "match selected video standard.");
+              "be " +
+              FrameRateRequirement(project.cvbs_presets.video_standard_preset,
+                                   section.cadence.pattern) +
+              ".");
           break;
         }
 
@@ -2560,6 +2732,7 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
           }
           video_profile = profile;
           source_frame_count = profile.frame_count;
+          probed_source_frame_counts[section_index] = source_frame_count;
         } else {
           std::string profile_error;
           if (!ValidateProfileBySourceFamily(
@@ -2575,10 +2748,13 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
         }
       }
 
+      const int cadence_start_slot = ResolveCadenceStartSlots(
+          project.sections, probed_source_frame_counts)[section_index];
       ValidateMediaAudioSources(
           section, project.cvbs_presets.video_standard_preset,
           video_profile.has_value() ? &*video_profile : nullptr,
-          source_frame_count, audio_file_probe_, logger_, &result);
+          source_frame_count, cadence_start_slot, audio_file_probe_, logger_,
+          &result);
       if (!result.is_valid) {
         break;
       }
@@ -2590,6 +2766,10 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
     result.errors.push_back(
         "Section validation error: section type must be 'progressive'.");
     break;
+  }
+
+  if (result.is_valid) {
+    ValidatePictureNumberRange(project, probed_source_frame_counts, &result);
   }
 
   if (logger_ != nullptr && result.is_valid) {

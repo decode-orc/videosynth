@@ -190,9 +190,10 @@ int DurationSecondsToFrames(double seconds, double frame_rate_hz,
 // already holds the new source and `previous_source` is the one it replaces.
 // A video then plays all of its frames from the first (duration "all", no
 // start_frame/end_frame). A still has neither a frame range nor a length of
-// its own, so the range is cleared and an "all" duration becomes
-// `still_duration_frames`. An unchanged source is left alone, so loading or
-// re-committing a section never rewrites its duration.
+// its own, so the range is cleared, an "all" duration becomes
+// `still_duration_frames`, and a 2:3 cadence returns to video (a still has no
+// film frames to spread over fields). An unchanged source is left alone, so
+// loading or re-committing a section never rewrites its duration.
 void ApplySourceSelectionDefaults(const std::string& previous_source,
                                   int still_duration_frames, Section* section);
 
@@ -210,6 +211,49 @@ SourceRangeEditorState SourceRangeEditorStateFor(const Section& section,
                                                  int probed_frame_count,
                                                  int unbounded_maximum);
 
+// Whether `standard` can show film with 2:3 pulldown: the 525-line standards
+// (NTSC, PAL-M). 625-line film is already 2:2, the native video cadence.
+bool SupportsFilmPulldown(Standard standard);
+
+// How the editor's Cadence group presents for a section.
+struct CadenceEditorState {
+  // The pattern combo: enabled for 525-line projects, and for a section that
+  // already uses 2:3 elsewhere so the user can switch it back to video.
+  bool pattern_enabled = false;
+  // The "continue cadence from previous section" checkbox: 2:3 only.
+  bool continue_enabled = false;
+  // The phase combo: 2:3 sections that restart the cadence only, since a
+  // continuing section takes its phase from the previous section.
+  bool phase_enabled = false;
+};
+CadenceEditorState CadenceEditorStateFor(const Section& section,
+                                         Standard standard);
+
+// Cadence edits. Choosing the video pattern resets the whole block to its
+// defaults so the emitter drops it; choosing 2:3 keeps the stored phase and
+// continuity. Choosing a phase marks it as specified so it is written out.
+// Continuing the previous cadence clears the phase (it would be ignored, and
+// validation warns about an ignored phase); restarting starts at phase A
+// until one is chosen.
+void SetCadencePattern(Section* section, CadencePattern pattern);
+void SetCadencePhase(Section* section, CadencePhase phase);
+void SetCadenceContinuity(Section* section, CadenceContinuity continuity);
+
+// The duration hint under the duration row. `probed_frame_count` is the
+// source length (or kUnknownSourceFrameCount while unprobed), and
+// `cadence_start_slot` the section's 2:3 start slot (see
+// ResolveCadenceStartSlots; kUnknownCadenceSlot when a continuing section
+// follows one of unknown length).
+//
+// For "all source frames" the hint shows the frames played: "N frames x R =
+// T total" for a video cadence, and for 2:3 the film frames and the output
+// frames they fill from the start slot, e.g. "48 film frames x 1 = 48 → 60
+// frames (2:3 from A1)". A fixed duration shows nothing for a video cadence
+// unless it loops the source range; for 2:3 it shows the film frames it
+// plays. Returns empty when there is nothing to add.
+std::string DurationSummaryFor(const Section& section, int probed_frame_count,
+                               int cadence_start_slot);
+
 // Multi-select batch editing: mirrors onto `target` exactly the editor-visible
 // fields that differ between `before` and `after` (an edit applied to the
 // primary selected section), leaving everything else in `target` untouched.
@@ -218,7 +262,8 @@ SourceRangeEditorState SourceRangeEditorStateFor(const Section& section,
 // mirror independently, as each is a separate block in the editor. The three
 // duration fields propagate as a unit because the editor's widgets couple
 // them (frames vs "all frames" x repeat), as do the three source frame range
-// fields (start_frame, end_frame and whether the end is set). Line injections
+// fields (start_frame, end_frame and whether the end is set), and the cadence
+// block (pattern, phase and continuity). Line injections
 // mirror per code via ApplyLineInjectionEditDelta, never wholesale. Returns the
 // updated target.
 Section ApplySectionEditDelta(const Section& before, const Section& after,

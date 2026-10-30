@@ -114,6 +114,8 @@ A section whose source is a video can pass its soundtrack through:
 
 The sound follows the picture: each output frame carries the soundtrack from the moment its source frame was shown. Starting at `start_frame` starts the sound there too. When a fixed duration loops the range, or `duration_repeat` replays it, the sound jumps back with the picture. Where the soundtrack starts after the first picture or ends before the last, those frames are silent.
 
+Film shown with [2:3 pulldown](../reference/sections.md#cadence) keeps its sound in real time: four film frames last exactly as long as five output frames, so the soundtrack plays on unbroken from the range's first film frame rather than following the repeated fields.
+
 `stream` counts the video's audio streams from 0; the section editor lists them once the source has been probed. Mono soundtracks play on both channels, and soundtracks with more than two channels (5.1, for example) are downmixed to stereo. Both, and any resampling, are noted in the log.
 
 ## Output files
