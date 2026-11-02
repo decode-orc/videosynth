@@ -215,10 +215,11 @@ TEST(PictureTruthOutputTest, StressBarsAlternateWithTheVSwitch) {
   const std::vector<char> truth =
       ReadFileBytes(DerivePictureTruthPath(project.output.video_path));
   const std::size_t plane = layout.PlaneSamples();
-  // Frame 0: Y, U, V planes. The left bar spans source x 48-143 and rows
-  // 96-239 (V follows the switch); the right bar x 576-671 (U follows it).
-  const int left = (96 * layout.samples_per_line) / 720;
-  const int right = (624 * layout.samples_per_line) / 720;
+  // Frame 0: Y, U, V planes. The left strip spans source x 26-63 and rows
+  // 16-559 (V follows the switch); the right strip x 656-693 (U follows it).
+  // Rows 100-139 lie between two crosshatch lines.
+  const int left = (45 * layout.samples_per_line) / 720;
+  const int right = (675 * layout.samples_per_line) / 720;
   auto at = [&](int plane_index, int row, int x) {
     return ReadFloat(
         truth, (static_cast<std::size_t>(plane_index) * plane) +
@@ -226,18 +227,34 @@ TEST(PictureTruthOutputTest, StressBarsAlternateWithTheVSwitch) {
                    static_cast<std::size_t>(x));
   };
   // Consecutive lines of one field (rows two apart) carry opposite signs.
-  for (int row = 100; row < 230; row += 2) {
+  // The strips are 38 pixels wide, so the filter tails from their edges reach
+  // the centre with a ripple that moves with each line's sample grid; the
+  // magnitudes agree to well under 0.1 mV.
+  constexpr float kRippleMv = 0.1F;
+  for (int row = 100; row < 138; row += 2) {
     const float v = at(2, row, left);
     const float v_next = at(2, row + 2, left);
     ASSERT_GT(std::abs(v), 100.0F) << row;
-    ASSERT_FLOAT_EQ(v, -v_next) << row;
+    ASSERT_NEAR(v, -v_next, kRippleMv) << row;
     const float u = at(1, row, right);
     ASSERT_GT(std::abs(u), 50.0F) << row;
-    ASSERT_FLOAT_EQ(u, -at(1, row + 2, right)) << row;
+    ASSERT_NEAR(u, -at(1, row + 2, right), kRippleMv) << row;
   }
-  // The steady +(R-Y) field below keeps one sign.
-  for (int row = 250; row < 280; row += 2) {
-    ASSERT_GT(at(2, row, left), 100.0F) << row;
+  // The burst-gate castellation (source x 0-23, rows 100-139) carries the
+  // same alternating V on black: its R'G'B' has G' below zero, which must
+  // survive ingestion with the luma left at black.
+  const int burst_gate = (10 * layout.samples_per_line) / 720;
+  for (int row = 100; row < 138; row += 2) {
+    ASSERT_NEAR(at(0, row, burst_gate), 0.0F, 2.0F) << row;
+    ASSERT_GT(std::abs(at(2, row, burst_gate)), 100.0F) << row;
+    ASSERT_NEAR(at(2, row, burst_gate), -at(2, row + 2, burst_gate), kRippleMv)
+        << row;
+  }
+  // The steady +(R-Y) bar beside the strip (source x 66-102, lower half)
+  // keeps one sign.
+  const int steady = (85 * layout.samples_per_line) / 720;
+  for (int row = 300; row < 340; row += 2) {
+    ASSERT_GT(at(2, row, steady), 100.0F) << row;
   }
 }
 

@@ -8,13 +8,22 @@ order (G, B, R), one file per pattern and raster; generate_test_patterns.sh
 wraps the frames as EXR files.
 
 Patterns:
-  PAL_STRESS      720x576 only. A PAL decoder-stress card built from published
-                  element parameters: line-alternating +/-(R-Y) and +/-(B-Y)
-                  bars (the alternation itself comes from the project's
-                  chroma_line_sign regions), steady +/-(R-Y), +/-(B-Y) and
-                  +/-(G-Y) fields, 0.8-4.8 MHz definition gratings, a 75%
-                  red square on 75% yellow, 75% colour bars, a grey scale and
-                  a 3-pixel (about 230 ns) white grid.
+  PAL_STRESS      720x576 only. A PAL decoder-stress card laid out after the
+                  Philips PM5544 (F. Hendil, "Combined colour/monochrome
+                  pattern generator PM 5544", Philips Electronic Measuring and
+                  Microwave Notes 1970/2) and the public-domain (CC0)
+                  Wikimedia Commons recreation of it, with no text or marks:
+                  black/white border castellations (one carrying
+                  line-alternating R-Y on black, the burst-gate check), a
+                  white crosshatch on
+                  grey, line-alternating +/-(R-Y) and +/-(B-Y) strips (the
+                  alternation itself comes from the project's
+                  chroma_line_sign regions), steady -/+(R-Y) and -/+(B-Y)
+                  bars, G-Y = 0 rectangles at 326 and 146 degrees, and a
+                  circle holding a black rectangle on white, white/black
+                  steps with 230 ns needle pulses, a 250 kHz square wave,
+                  75% colour bars, the centre cross, 0.8-4.8 MHz definition
+                  lines, a six-step grey scale and a red square on yellow.
   LUMA_ZONE_PLATE   Static circular luma zone plate reaching the source
                     Nyquist frequency at the raster edges, chroma neutral.
   CHROMA_ZONE_PLATE Static circular zone plate on (B-Y, R-Y) in quadrature at
@@ -34,37 +43,76 @@ KR = 0.299
 KG = 0.587
 KB = 0.114
 
-# BT.601 13.5 MHz luma sampling rate: source pixels per microsecond.
-PIXEL_RATE_MHZ = 13.5
+# ITU-R BT.1700 Annex 1 Part B: U = 0.493 (B'-Y'), V = 0.877 (R'-Y').
+U_WEIGHT = 0.493
+V_WEIGHT = 0.877
 
-# PAL_STRESS geometry, in source pixels (x) and raster rows (y). The bar
-# positions are mirrored in docs and in projects/general/pal_stress.yaml,
-# whose chroma_line_sign regions must cover the alternating bars exactly.
-GRID_PITCH = 48
-GRID_LINE_WIDTH = 3  # about 230 ns at 13.5 MHz
-GRID_LINE_ROWS = 2  # one row in each field
-LEFT_PANEL_X = (48, 144)
-RIGHT_PANEL_X = (576, 672)
-# (y0, y1, kind) for the side panels; "alt" is the line-alternating bar.
-PANEL_ROWS = [
-    (96, 240, "alt"),
-    (240, 288, "plus"),
-    (288, 336, "minus"),
-    (336, 384, "g_plus"),
-    (384, 432, "g_minus"),
-]
-CIRCLE_CENTRE = (360.0, 288.0)
-CIRCLE_RADIUS_ROWS = 216.0
-# ITU-R BT.601-5 Part A: 625-line pixel aspect ratio 128/117.
-PAL_PIXEL_ASPECT = 128.0 / 117.0
-INNER_X = (200, 520)
+# PAL_STRESS is laid out in card units: 768 across the 52 us active line
+# (square pixels on a 4:3 picture) by the 576 frame rows. videosynth maps the
+# 720 source pixels onto the same 52 us window, so card unit u covers source
+# pixels u * 720 / 768.
+CARD_WIDTH = 768
+CARD_HEIGHT = 576
+ACTIVE_LINE_US = 52.0
+US_PER_UNIT = ACTIVE_LINE_US / CARD_WIDTH
+SUBSAMPLES = 8  # horizontal anti-aliasing per source pixel
+
+# Crosshatch: 18 vertical lines every 42 units, centred on the card, and 14
+# horizontal lines of two rows each (one row in each field).
+GRID_PITCH = 42
+GRID_FIRST_COLUMN = 27.0  # centre of the leftmost vertical line
+GRID_COLUMNS = 18
+GRID_FIRST_ROW = 14
+GRID_ROWS = 14
+GRID_LINE_ROWS = 2
+# Hendil 1970: 230 ns lines give the fewest components at the subcarrier.
+LINE_WIDTH = 0.230 / US_PER_UNIT
+NEEDLE_WIDTH = LINE_WIDTH
+
+BACKGROUND_LUMA = 0.48
+# Every colour-difference field carries the same subcarrier amplitude, so the
+# R-Y and B-Y strips match on a vectorscope.
+CHROMA_AMPLITUDE = 0.233
+
+CIRCLE_CENTRE = (CARD_WIDTH / 2.0, CARD_HEIGHT / 2.0)
+CIRCLE_RADIUS = 252.0
+
+# Circle interior, top to bottom (Hendil 1970 "Composition of the pattern").
+BOX_ROWS = (56, 98)
+BOX_X = (300.0, 468.0)  # black rectangle, about 11 us
+STEP_TOP_ROWS = (98, 140)  # black/white step with needle pulse
+SQUARE_WAVE_ROWS = (140, 182)  # 250 kHz at 75 % contrast
+SQUARE_WAVE_PERIOD_US = 4.0
+BARS_ROWS = (182, 268)  # 75 % colour bars
+CENTRE_BAND_ROWS = (268, 308)  # crossed lines on black
+CENTRE_LINE_ROWS = (287, 289)  # one row in each field
+GRATING_ROWS = (308, 392)
+GREY_SCALE_ROWS = (392, 434)
+STEP_BOTTOM_ROWS = (434, 476)  # white/black step with needle pulse
+COLOUR_STEP_FIRST_ROW = 476  # red square on yellow to the circle's foot
+STEP_X = (258.0, 510.0)
+NEEDLE_X = 277.0
+CROSS_ROWS = (224, 350)
+CROSS_BAR_X = (365.0, 403.0)
+BAND_X0 = 132.0  # bars and grey scale: six 84-unit bands centred on the card
+BAND_WIDTH = 84.0
+GRATING_X = (174.0, 594.0)
 GRATING_FREQUENCIES_MHZ = [0.8, 1.8, 2.8, 3.8, 4.8]
+RED_SQUARE_X = (364.0, 404.0)  # about 3 us
 
-# Colour-difference amplitudes of the side-panel fields, on a 50% grey.
-PANEL_LUMA = 0.5
-PANEL_COLOUR_DIFFERENCE = 0.25
-# R-Y = B-Y = -a gives G-Y = +a (KR + KB) / KG; choose a for |G-Y| = 0.25.
-PANEL_G_DRIVE = PANEL_COLOUR_DIFFERENCE * KG / (KR + KB)
+# Side columns (left side; the right side is the mirror image). The outer
+# strip fills grid cell 0 down the whole crosshatch; beside it a block from
+# grid line 1 to grid line 3, split at line 2, holds the tall -/+ bar and the
+# two G-Y = 0 rectangles.
+SIDE_BLOCK_ROWS = (58, 518)
+SIDE_SPLIT_ROW = 288
+SIDE_SMALL_TOP_ROWS = (58, 140)
+SIDE_SMALL_BOTTOM_ROWS = (436, 518)
+# Burst-gate check (Hendil 1970): a far left-hand castellation carries
+# line-alternating (R-Y) on black, which a mistimed burst gate passes to the
+# reference generator. As with the strips, the image holds the + field and the
+# project's chroma_line_sign region makes it alternate.
+BURST_GATE_CELL_ROW = 2
 
 
 def rgb_from_components(y, r_minus_y, b_minus_y):
@@ -75,97 +123,214 @@ def rgb_from_components(y, r_minus_y, b_minus_y):
     return (r, g, b)
 
 
-GREY = rgb_from_components(PANEL_LUMA, 0.0, 0.0)
+def chroma_at(angle_deg):
+    """(R-Y, B-Y) of a CHROMA_AMPLITUDE vector at angle_deg from +U."""
+    angle = math.radians(angle_deg)
+    return (CHROMA_AMPLITUDE * math.sin(angle) / V_WEIGHT,
+            CHROMA_AMPLITUDE * math.cos(angle) / U_WEIGHT)
+
+
+def background_colour(r_minus_y, b_minus_y):
+    return rgb_from_components(BACKGROUND_LUMA, r_minus_y, b_minus_y)
+
+
+def g_minus_y_zero_angle():
+    """The U/V angle (degrees, 0-180) at which G-Y vanishes:
+    KR (R-Y) + KB (B-Y) = 0."""
+    return math.degrees(math.atan2(-V_WEIGHT * KB / KR, U_WEIGHT)) % 180.0
+
+
+GREY = background_colour(0.0, 0.0)
 WHITE = (1.0, 1.0, 1.0)
 BLACK = (0.0, 0.0, 0.0)
+PLUS_R = background_colour(*chroma_at(90.0))
+MINUS_R = background_colour(*chroma_at(270.0))
+PLUS_B = background_colour(*chroma_at(0.0))
+MINUS_B = background_colour(*chroma_at(180.0))
+G_ZERO_LOW = background_colour(*chroma_at(g_minus_y_zero_angle()))  # ~146
+G_ZERO_HIGH = background_colour(
+    *chroma_at(g_minus_y_zero_angle() + 180.0))  # ~326
+# On black, so G' goes below zero; EXR float carries it and the source
+# conversion keeps the sub-black excursion.
+BURST_GATE = rgb_from_components(0.0, *chroma_at(90.0))
+BAR_COLOURS = [
+    (0.75, 0.75, 0.0),  # yellow
+    (0.0, 0.75, 0.75),  # cyan
+    (0.0, 0.75, 0.0),  # green
+    (0.75, 0.0, 0.75),  # magenta
+    (0.75, 0.0, 0.0),  # red
+    (0.0, 0.0, 0.75),  # blue
+]
 
 
-def bars_75(position):
-    """75% colour bars (white, yellow, cyan, green, magenta, red, blue,
-    black) across position in [0, 1)."""
-    index = min(7, int(position * 8.0))
-    r = 0.75 if index in (0, 1, 4, 5) else 0.0
-    g = 0.75 if index in (0, 1, 2, 3) else 0.0
-    b = 0.75 if index in (0, 2, 4, 6) else 0.0
-    return (r, g, b)
+def grid_column_centre(index):
+    return GRID_FIRST_COLUMN + index * GRID_PITCH
 
 
-def panel_colour(kind, axis):
-    """Side-panel field colour; axis is 'r' (left) or 'b' (right)."""
-    a = PANEL_COLOUR_DIFFERENCE
-    if kind in ("alt", "plus"):
-        d = a
-    elif kind == "minus":
-        d = -a
-    elif kind == "g_plus":
-        return rgb_from_components(PANEL_LUMA, -PANEL_G_DRIVE, -PANEL_G_DRIVE)
-    else:  # g_minus
-        return rgb_from_components(PANEL_LUMA, PANEL_G_DRIVE, PANEL_G_DRIVE)
-    if axis == "r":
-        return rgb_from_components(PANEL_LUMA, d, 0.0)
-    return rgb_from_components(PANEL_LUMA, 0.0, d)
+def on_vertical_line(u):
+    index = round((u - GRID_FIRST_COLUMN) / GRID_PITCH)
+    if not 0 <= index < GRID_COLUMNS:
+        return False
+    return abs(u - grid_column_centre(index)) < LINE_WIDTH / 2.0
 
 
-def in_circle(x, y):
-    dx = (x + 0.5 - CIRCLE_CENTRE[0]) * PAL_PIXEL_ASPECT
+def on_horizontal_line(y):
+    offset = y - GRID_FIRST_ROW
+    return (0 <= offset < GRID_PITCH * (GRID_ROWS - 1) + GRID_LINE_ROWS
+            and offset % GRID_PITCH < GRID_LINE_ROWS)
+
+
+def grid_cell(u):
+    """Index of the grid cell (between vertical lines index and index+1)."""
+    return math.floor((u - GRID_FIRST_COLUMN) / GRID_PITCH)
+
+
+def grid_cell_row(y):
+    return (y - GRID_FIRST_ROW) // GRID_PITCH
+
+
+def in_circle(u, y):
+    du = u - CIRCLE_CENTRE[0]
     dy = y + 0.5 - CIRCLE_CENTRE[1]
-    return dx * dx + dy * dy <= CIRCLE_RADIUS_ROWS * CIRCLE_RADIUS_ROWS
+    return du * du + dy * dy <= CIRCLE_RADIUS * CIRCLE_RADIUS
 
 
-def on_grid(x, y):
-    half = GRID_LINE_WIDTH // 2
-    on_column = (x + half) % GRID_PITCH < GRID_LINE_WIDTH and x > half
-    on_row = (y + 1) % GRID_PITCH < GRID_LINE_ROWS and y > 1
-    return on_column or on_row
+def within(value, span):
+    return span[0] <= value < span[1]
 
 
-def circle_interior(x, y):
-    """The picture inside the circle, by horizontal band."""
-    x0, x1 = INNER_X
-    inside = x0 <= x < x1
-    if 96 <= y < 144:
-        return bars_75((x - x0) / (x1 - x0)) if inside else GREY
-    if 144 <= y < 192:
-        if not inside:
-            return GREY
-        level = min(5, int((x - x0) * 6 / (x1 - x0))) / 5.0
+def step_band(u, inside, outside):
+    """The black/white step bands: `inside` between the steps with a
+    needle pulse of `outside` just after the first step."""
+    if within(u, STEP_X):
+        if within(u, (NEEDLE_X, NEEDLE_X + NEEDLE_WIDTH)):
+            return outside
+        return inside
+    return outside
+
+
+def band_index(u):
+    return min(5, max(0, math.floor((u - BAND_X0) / BAND_WIDTH)))
+
+
+def grating(u_centre):
+    """Sinusoidal definition lines, evaluated at the pixel centre so the
+    anti-aliasing does not attenuate them."""
+    width = (GRATING_X[1] - GRATING_X[0]) / len(GRATING_FREQUENCIES_MHZ)
+    index = min(len(GRATING_FREQUENCIES_MHZ) - 1,
+                int((u_centre - GRATING_X[0]) // width))
+    start = GRATING_X[0] + index * width
+    t_us = (u_centre - start) * US_PER_UNIT
+    level = 0.5 + 0.5 * math.sin(
+        2.0 * math.pi * GRATING_FREQUENCIES_MHZ[index] * t_us)
+    return (level, level, level)
+
+
+def circle_interior(u, y, u_centre):
+    on_cross = within(y, CROSS_ROWS) and within(u, CROSS_BAR_X)
+    if on_cross:
+        on_centre_line = (within(y, CENTRE_LINE_ROWS)
+                          or abs(u - CIRCLE_CENTRE[0]) < LINE_WIDTH / 2.0)
+        return WHITE if on_centre_line else BLACK
+    if y < BOX_ROWS[0]:
+        return WHITE
+    if y < BOX_ROWS[1]:
+        return BLACK if within(u, BOX_X) else WHITE
+    if y < STEP_TOP_ROWS[1]:
+        return step_band(u, WHITE, BLACK)
+    if y < SQUARE_WAVE_ROWS[1]:
+        half_period = SQUARE_WAVE_PERIOD_US / 2.0 / US_PER_UNIT
+        phase = math.floor((u - CIRCLE_CENTRE[0]) / half_period)
+        return BLACK if phase % 2 == 0 else (0.75, 0.75, 0.75)
+    if y < BARS_ROWS[1]:
+        return BAR_COLOURS[band_index(u)]
+    if y < CENTRE_BAND_ROWS[1]:
+        if within(y, CENTRE_LINE_ROWS) or on_vertical_line(u):
+            return WHITE
+        return BLACK
+    if y < GRATING_ROWS[1]:
+        return grating(u_centre) if within(u, GRATING_X) else BLACK
+    if y < GREY_SCALE_ROWS[1]:
+        level = band_index(u) / 5.0
         return (level, level, level)
-    if 192 <= y < 240:
-        return WHITE if 300 <= x < 420 else BLACK
-    if 240 <= y < 336:
-        if not inside:
-            return GREY
-        width = (x1 - x0) // len(GRATING_FREQUENCIES_MHZ)
-        frequency = GRATING_FREQUENCIES_MHZ[min(
-            len(GRATING_FREQUENCIES_MHZ) - 1, (x - x0) // width)]
-        cycles_per_pixel = frequency / PIXEL_RATE_MHZ
-        level = 0.5 + 0.4 * math.sin(
-            2.0 * math.pi * cycles_per_pixel * (x - x0 + 0.5))
-        return (level, level, level)
-    if 336 <= y < 384:
-        if not inside:
-            return GREY
-        # 75% amplitude: 100% yellow plus its chroma overshoots the 10-bit
-        # composite code range.
-        if 336 <= x < 384:
-            return (0.75, 0.0, 0.0)
-        return (0.75, 0.75, 0.0)
-    if 384 <= y < 432:
-        if not inside:
-            return GREY
-        return WHITE if x < 360 else BLACK
+    if y < STEP_BOTTOM_ROWS[1]:
+        return step_band(u, BLACK, WHITE)
+    return BAR_COLOURS[4] if within(u, RED_SQUARE_X) else BAR_COLOURS[0]
+
+
+def castellation(u, y):
+    """Black/white blocks round the border, alternating cell by cell."""
+    if y < GRID_FIRST_ROW or y >= CARD_HEIGHT - GRID_FIRST_ROW:
+        cell = grid_cell(u)
+        black = (0 <= cell < GRID_COLUMNS - 1 and cell % 2 == 0
+                 and not on_vertical_line(u))
+        return BLACK if black else WHITE
+    if on_horizontal_line(y):
+        return WHITE
+    row = grid_cell_row(y)
+    if row == BURST_GATE_CELL_ROW and u < CARD_WIDTH / 2.0:
+        return BURST_GATE
+    return BLACK if row % 2 == 0 else WHITE
+
+
+def side_column(u, y, r_axis):
+    """Strip and block content for one side; u is measured from that side's
+    picture edge. Returns None where the crosshatch shows through."""
+    plus, minus = (PLUS_R, MINUS_R) if r_axis else (PLUS_B, MINUS_B)
+    if grid_cell(u) == 0 and not on_vertical_line(u):
+        # Line-alternating strip: drawn as the + field; the project's
+        # chroma_line_sign region makes it alternate with the V-switch.
+        return WHITE if on_horizontal_line(y) else plus
+    block_x = (grid_column_centre(1) + LINE_WIDTH / 2.0,
+               grid_column_centre(3) - LINE_WIDTH / 2.0)
+    if within(u, block_x) and within(y, SIDE_BLOCK_ROWS):
+        small_top = within(y, SIDE_SMALL_TOP_ROWS)
+        small_bottom = within(y, SIDE_SMALL_BOTTOM_ROWS)
+        # Grid line 2 shows beside the tall bar except where a rectangle
+        # abuts it.
+        if not (small_top or small_bottom) and on_vertical_line(u):
+            return None
+        if u < grid_column_centre(2):
+            return minus if y < SIDE_SPLIT_ROW else plus
+        if small_top:
+            return G_ZERO_HIGH
+        if small_bottom:
+            return G_ZERO_LOW
+    return None
+
+
+def pal_stress_card(u, y, u_centre):
+    """PAL_STRESS colour at card position u (units) on frame row y."""
+    left_edge = GRID_FIRST_COLUMN - LINE_WIDTH / 2.0
+    right_edge = CARD_WIDTH - left_edge
+    if (y < GRID_FIRST_ROW or y >= CARD_HEIGHT - GRID_FIRST_ROW
+            or u < left_edge or u >= right_edge):
+        return castellation(u, y)
+    if in_circle(u, y):
+        return circle_interior(u, y, u_centre)
+    side = None
+    if u < CARD_WIDTH / 2.0:
+        side = side_column(u, y, r_axis=True)
+    else:
+        side = side_column(CARD_WIDTH - u, y, r_axis=False)
+    if side is not None:
+        return side
+    if on_vertical_line(u) or on_horizontal_line(y):
+        return WHITE
     return GREY
 
 
 def pal_stress(x, y, width, height):
-    if in_circle(x, y):
-        return circle_interior(x, y)
-    for x0, x1, axis in ((*LEFT_PANEL_X, "r"), (*RIGHT_PANEL_X, "b")):
-        if x0 <= x < x1:
-            for y0, y1, kind in PANEL_ROWS:
-                if y0 <= y < y1:
-                    return panel_colour(kind, axis)
-    return WHITE if on_grid(x, y) else GREY
+    """Box-filters the card over the source pixel's span of card units."""
+    scale = CARD_WIDTH / width
+    u_centre = (x + 0.5) * scale
+    total = [0.0, 0.0, 0.0]
+    for k in range(SUBSAMPLES):
+        u = (x + (k + 0.5) / SUBSAMPLES) * scale
+        colour = pal_stress_card(u, y, u_centre)
+        for c in range(3):
+            total[c] += colour[c]
+    return tuple(value / SUBSAMPLES for value in total)
 
 
 def zone_phase(x, y, width, height):

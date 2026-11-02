@@ -224,10 +224,12 @@ Rectangles of the source picture whose U or V is multiplied by each line's PAL V
   source: "{bundled}/exr/720x576/PAL_STRESS.exr"
   duration_frames: 8
   chroma_line_sign:
-    - region: {x: 48, y: 96, width: 96, height: 144}
+    - region: {x: 26, y: 16, width: 38, height: 544}
       v: follow_switch
-    - region: {x: 576, y: 96, width: 96, height: 144}
+    - region: {x: 656, y: 16, width: 38, height: 544}
       u: follow_switch
+    - region: {x: 0, y: 100, width: 24, height: 40}
+      v: follow_switch
 ```
 
 | Key | Type | Required | Values | Description |

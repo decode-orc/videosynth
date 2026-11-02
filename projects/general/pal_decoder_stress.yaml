@@ -2,7 +2,7 @@ project:
   name: PALDecoderStressFixture
   version: "1.0"
   description: >-
-    PAL decoder-stress card with line-alternating +/-(R-Y) and +/-(B-Y) bars,
+    PAL decoder-stress card with line-alternating +/-(R-Y) and +/-(B-Y) strips,
     and static luma and chroma zone plates, all band-limited and written with
     their picture truth
 
@@ -22,13 +22,18 @@ sections:
     duration_frames: 8
     horizontal_resample: bandlimited
     chroma_line_sign:
-      # Left bar: unswitched V carrier, so V alternates line by line after the
-      # decoder's V-switch.
-      - region: {x: 48, y: 96, width: 96, height: 144}
+      # Left outer strip: unswitched V carrier, so V alternates line by line
+      # after the decoder's V-switch (colourless +/-(R-Y)).
+      - region: {x: 26, y: 16, width: 38, height: 544}
         v: follow_switch
-      # Right bar: U alternates with the V-switch (anti-PAL).
-      - region: {x: 576, y: 96, width: 96, height: 144}
+      # Right outer strip: U alternates with the V-switch (colourless
+      # +/-(B-Y), anti-PAL).
+      - region: {x: 656, y: 16, width: 38, height: 544}
         u: follow_switch
+      # Burst-gate check: line-alternating (R-Y) on black in the far
+      # left-hand castellation.
+      - region: {x: 0, y: 100, width: 24, height: 40}
+        v: follow_switch
   - name: PalLumaZonePlate
     type: progressive
     source: "{bundled}/exr/720x576/LUMA_ZONE_PLATE.exr"
