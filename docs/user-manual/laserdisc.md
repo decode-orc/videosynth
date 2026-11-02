@@ -4,6 +4,36 @@ videosynth can generate complete laserdisc-style discs: a lead-in, a programme a
 
 This page explains how a disc project is put together. The exact fields for each code type are in the [laserdisc code reference](../reference/laserdisc-codes.md).
 
+## Where the LaserDisc settings live
+
+Everything specific to LaserDisc is in two places, and a project that is not a disc needs neither:
+
+- the project-level [`laserdisc:`](../reference/laserdisc.md) block — the disc format, the PAL pilot burst, the NTSC VBI burst, EFM digital audio and the [LaserVision channel](../reference/laserdisc-channel.md);
+- a [`laserdisc:`](../reference/section-laserdisc.md) block on each section that belongs to the disc — its disc area and the biphase codes it carries.
+
+```yaml
+laserdisc:
+  disc_type: CAV          # or CLV
+  pilot_burst: true       # PAL only
+  efm_audio:
+    pair: 0
+
+sections:
+  - name: Programme
+    # ...
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 1
+```
+
+A section `laserdisc:` block needs the project-level block. SECAM projects cannot have either: there is no SECAM LaserVision format.
+
+In the GUI these are the checkable **LaserDisc** group at the bottom of the project settings and the **LaserDisc** group in the section editor, which appears only once the project's group is ticked — see [The GUI](gui.md#laserdisc).
+
+Older project files put these settings in `cvbs_presets`, `output`, `line_injections`, `channel` and each section's `section_type` and `line_injections`. Those keys are now parse errors naming the new place; the full table is in the [`laserdisc` reference](../reference/laserdisc.md#where-these-settings-used-to-live).
+
 ## What the codes do
 
 Every field of a compliant disc carries a **24-bit biphase-modulated code** on reserved VBI lines. NTSC discs additionally carry a **40-bit FM code** on separate lines. Between them they tell the player:
@@ -16,10 +46,10 @@ Every field of a compliant disc carries a **24-bit biphase-modulated code** on r
 
 ## Disc structure
 
-A disc is expressed as sections carrying a `section_type`:
+A disc is expressed as sections whose `laserdisc:` block sets an `area`:
 
-| `section_type` | Purpose | Minimum duration |
-|----------------|---------|------------------|
+| `area` | Purpose | Minimum duration |
+|--------|---------|------------------|
 | `lead_in` | Before the programme; the player spins up and synchronises here | 938 frames |
 | `programme_area` | The content | — |
 | `lead_out` | After the programme; signals the end of the disc | 1250 frames |
@@ -32,14 +62,14 @@ Section order is validated. Once any section is a `lead_in` or `lead_out`, the s
 - at most one `lead_out`, and nothing may follow it;
 - everything between them must be `programme_area`.
 
-Out-of-order sections would break monotonic picture-number and time-code generation, so this is an error rather than a warning.
+Out-of-order sections would break monotonic picture-number and time-code generation, so this is an error rather than a warning. The exact rules are in the [section `laserdisc` reference](../reference/section-laserdisc.md#ordering-rules).
 
 ## CAV or CLV
 
 The disc format is a **project-wide** setting, because a disc is entirely one or the other:
 
 ```yaml
-line_injections:
+laserdisc:
   disc_type: CAV        # or CLV
 ```
 
@@ -55,7 +85,7 @@ The disc format decides which code types are legal. Setting `disc_type` changes 
 
 ## Declaring codes
 
-Codes are declared per section, because they legitimately differ between disc areas:
+Codes are declared per section, in the section's `laserdisc.codes` list, because they legitimately differ between disc areas:
 
 ```yaml
 sections:
@@ -63,24 +93,23 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x576/100_BARS.exr"
     duration_frames: 250
-    section_type: programme_area
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 1
-          - code_type: chapter_number
-            chapter: 1
-          - code_type: programme_status
-            programme_status: "0x8DC000"
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 1
+        - code_type: chapter_number
+          chapter: 1
+        - code_type: programme_status
+          programme_status: "0x8DC000"
 ```
 
 !!! important "You never choose VBI lines"
-    `target_lines` must **not** appear on a `laserdisc` injection — specifying it is a validation error. Line placement is entirely determined by the standard from the code type, the disc format, and which field opens the current picture. videosynth works it out per frame.
+    There is no `target_lines` key on laserdisc codes. Line placement is entirely determined by the standard from the code type, the disc format, and which field opens the current picture. videosynth works it out per frame.
 
 ## Which codes go where
 
-Only certain code types are legal in each section type. These matrices are what the validator enforces.
+Only certain code types are legal in each disc area. These matrices are what the validator enforces.
 
 ### CAV
 
@@ -122,24 +151,22 @@ For `picture_number`, the rule is simply: **set `start_value` on the first progr
 ```yaml
 # First programme section — anchor the numbering.
 - name: Chapter0
-  section_type: programme_area
-  line_injections:
-    - type: laserdisc
-      codes:
-        - code_type: picture_number
-          start_value: 1
-        - code_type: chapter_number
-          chapter: 0
+  laserdisc:
+    area: programme_area
+    codes:
+      - code_type: picture_number
+        start_value: 1
+      - code_type: chapter_number
+        chapter: 0
 
 # Later section — numbering continues automatically.
 - name: Chapter1
-  section_type: programme_area
-  line_injections:
-    - type: laserdisc
-      codes:
-        - code_type: picture_number     # no start_value
-        - code_type: chapter_number
-          chapter: 1
+  laserdisc:
+    area: programme_area
+    codes:
+      - code_type: picture_number     # no start_value
+      - code_type: chapter_number
+        chapter: 1
 ```
 
 Setting `start_value` on a later section **re-anchors** the count there. That is a deliberate discontinuity — useful for modelling a player skip or a replayed passage, and wrong for ordinary chapter boundaries. Chapter changes never reset a timecode.
@@ -212,11 +239,13 @@ NTSC discs carry two parallel encoding systems, and a compliant disc has both:
 To enable it, add the FM code types alongside the 24-bit ones:
 
 ```yaml
-codes:
-  - code_type: picture_number
-    start_value: 1
-  - code_type: fm_picture_number      # NTSC CAV
-  - code_type: fm_white_flag
+laserdisc:
+  area: programme_area
+  codes:
+    - code_type: picture_number
+      start_value: 1
+    - code_type: fm_picture_number      # NTSC CAV
+    - code_type: fm_white_flag
 ```
 
 or, on a CLV disc, `fm_programme_time` in place of `fm_picture_number`.
@@ -278,10 +307,11 @@ The colour field sequence follows the disc's video frames throughout, so it stay
 ## What else a disc needs
 
 - **VITS on the laserdisc lines.** The broadcast VITS lines collide with the reserved code ranges, so use `placement: laserdisc`. NTSC discs *must* carry `virs` — see [VITS](vits.md).
-- **The pilot burst.** PAL discs carry a 3.75 MHz burst on every sync pulse (`pal_laserdisc_pilot_burst: true`), which needs a signed or raw [sample encoding](video-signal.md#sample-encodings) to avoid clipping.
-- **The VBI burst.** NTSC discs keep the colour burst on the equalising and broad sync lines of the vertical interval (`ntsc_laserdisc_vbi_burst: true`); the burst on the broad pulses dips below sync tip, so it too needs a signed or raw [sample encoding](video-signal.md#sample-encodings) to avoid clipping.
-- **No VITC.** Laserdisc uses the IEC biphase system as its sole timecode mechanism, and a `vitc` injection alongside a `laserdisc` one is a validation error. (VITC is not implemented at all in the current runtime, so the question does not arise in practice.)
-- **EFM digital audio**, optionally — see [Audio](audio.md). Note that `section_type` alone drives the EFM disc-area mapping, so a project can have an EFM lead-in without carrying biphase codes at all.
+- **The pilot burst.** PAL discs carry a 3.75 MHz burst on every sync pulse ([`laserdisc.pilot_burst: true`](../reference/laserdisc.md#pilot_burst)), which needs a signed or raw [sample encoding](video-signal.md#sample-encodings) to avoid clipping.
+- **The VBI burst.** NTSC discs keep the colour burst on the equalising and broad sync lines of the vertical interval ([`laserdisc.vbi_burst: true`](../reference/laserdisc.md#vbi_burst)); the burst on the broad pulses dips below sync tip, so it too needs a signed or raw [sample encoding](video-signal.md#sample-encodings) to avoid clipping.
+- **No VITC.** Laserdisc uses the IEC biphase system as its sole timecode mechanism, and a `vitc` injection in a section that carries laserdisc codes is a validation error. (VITC is not implemented at all in the current runtime, so the question does not arise in practice.)
+- **EFM digital audio**, optionally — [`laserdisc.efm_audio`](../reference/laserdisc.md#efm_audio); see [Audio](audio.md#laserdisc-efm-digital-audio). The section's `laserdisc.area` alone drives the EFM disc-area mapping, so a project can have an EFM lead-in without carrying biphase codes at all.
+- **The LaserVision channel**, optionally — the FM-beat herringbone, the IEC 60856 group-delay pre-distortion, the replay response and the field-2 offset, in [`laserdisc.channel`](../reference/laserdisc-channel.md); see [Impairments](impairments.md#the-laservision-channel).
 
 ## A complete example
 
@@ -299,7 +329,6 @@ output:
   video_path: "{output}/ntsc_clv_disc.cvbs"
 
 line_injections:
-  disc_type: CLV
   placement: laserdisc
   vits:
     - vits_type: virs                 # mandatory on NTSC discs
@@ -309,46 +338,46 @@ line_injections:
     - vits_type: ntc7-combination
       target_lines: [283]
 
+laserdisc:
+  disc_type: CLV
+
 sections:
   - name: LeadIn
     type: progressive
     source: "{bundled}/exr/720x486/PLUGE.exr"
     duration_frames: 938
-    section_type: lead_in
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: lead_in
-          - code_type: fm_white_flag
+    laserdisc:
+      area: lead_in
+      codes:
+        - code_type: lead_in
+        - code_type: fm_white_flag
 
   - name: Programme
     type: progressive
     source: "{bundled}/exr/720x486/SMPTE_BARS_001.exr"
     duration_frames: 1800
-    section_type: programme_area
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: programme_time_code
-          - code_type: clv_code
-          - code_type: clv_picture_number
-          - code_type: chapter_number
-            chapter: 1
-          - code_type: programme_status
-            programme_status: "0x8DC000"
-          - code_type: fm_programme_time
-          - code_type: fm_white_flag
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: programme_time_code
+        - code_type: clv_code
+        - code_type: clv_picture_number
+        - code_type: chapter_number
+          chapter: 1
+        - code_type: programme_status
+          programme_status: "0x8DC000"
+        - code_type: fm_programme_time
+        - code_type: fm_white_flag
 
   - name: LeadOut
     type: progressive
     source: "{bundled}/exr/720x486/PLUGE.exr"
     duration_frames: 1250
-    section_type: lead_out
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: lead_out
-          - code_type: fm_white_flag
+    laserdisc:
+      area: lead_out
+      codes:
+        - code_type: lead_out
+        - code_type: fm_white_flag
 ```
 
 ## Further reading

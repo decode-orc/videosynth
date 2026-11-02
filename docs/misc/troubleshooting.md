@@ -6,35 +6,19 @@ Common validation errors and what to do about each.
 
 ### `Top-level YAML contains unsupported field: 'x'`
 
-Only seven top-level blocks exist: `project`, `cvbs_presets`, `output`, `line_injections`, `channel`, `chroma_error` and `sections`. Check for a typo, or for a key that belongs one level deeper.
+Only eight top-level blocks exist: `project`, `cvbs_presets`, `output`, `line_injections`, `laserdisc`, `channel`, `chroma_error` and `sections`. Check for a typo, or for a key that belongs one level deeper.
 
 The same message shape appears for every block — `section contains unsupported field: 'duration_frame'`, `cvbs_presets contains unsupported field: 'field_order'`. Unknown keys are always errors, never silently ignored.
 
-### `section field 'section_type' has unrecognised value 'x'`
-
-`section_type` accepts only `lead_in`, `programme_area` and `lead_out`.
-
-### Sections in the wrong order
-
-Once any section is a `lead_in` or `lead_out`, the sequence must be `[lead_in] programme_area… [lead_out]` — at most one lead-in and it must be first, at most one lead-out and it must be last, everything between them `programme_area`. Reorder the sections.
-
 ## Presets
-
-### `pal_laserdisc_pilot_burst can only be enabled for PAL projects`
-
-The pilot burst is defined by IEC 60856 for PAL Laservision. The NTSC laserdisc equivalent is `ntsc_laserdisc_vbi_burst`.
-
-### `ntsc_laserdisc_vbi_burst can only be enabled for NTSC projects`
-
-The VBI burst is defined by IEC 60857 for NTSC Laservision. Remove it from PAL, PAL-M and SECAM projects; PAL laserdisc projects use `pal_laserdisc_pilot_burst`.
 
 ### `signal_state_preset must be 'STANDARD_STABLE_UNLOCKED' for SECAM projects`
 
 SECAM chroma is frequency modulated, so the CVBS file format defines no subcarrier phase lock for it and a SECAM file must not be declared phase locked. Set `signal_state_preset: STANDARD_STABLE_UNLOCKED`, or leave the key out to get it by default. PAL, NTSC and PAL-M projects need `STANDARD_STABLE_LOCKED`.
 
-### `laserdisc line injections, line_injections.disc_type and laserdisc VITS placement are not available for SECAM projects`
+### `there is no SECAM LaserVision format, so the laserdisc block, section laserdisc blocks and laserdisc VITS placement are not available for SECAM projects`
 
-There is no SECAM LaserVision format. Remove the section `laserdisc` injections and `line_injections.disc_type`, and use `standard` or `custom` VITS placement.
+Remove the project's `laserdisc:` block and every section's `laserdisc:` block, and use `standard` or `custom` VITS placement.
 
 ### `SECAM warning: VITS test signals are rendered with their PAL definitions`
 
@@ -48,11 +32,67 @@ A warning, not an error. Field identification is a SECAM signal; remove the key 
 
 The setup pedestal is a System M concept. Remove the key from PAL projects.
 
-### `pal_laserdisc_pilot_burst warning: preset 'CVBS_U10_4FSC' clips sub-sync excursions below -300 mV`
+## LaserDisc settings
+
+### `cvbs_presets.pal_laserdisc_pilot_burst has moved to laserdisc.pilot_burst.`
+
+The project file predates the `laserdisc:` block. Every LaserDisc setting now lives there or in a section's own `laserdisc:` block, and each old key gives this error with its new place:
+
+| Old key | New key |
+|---------|---------|
+| `cvbs_presets.pal_laserdisc_pilot_burst` | `laserdisc.pilot_burst` |
+| `cvbs_presets.ntsc_laserdisc_vbi_burst` | `laserdisc.vbi_burst` |
+| `output.efm_audio` | `laserdisc.efm_audio` |
+| `line_injections.disc_type` | `laserdisc.disc_type` |
+| `channel.fm_beat` | `laserdisc.channel.fm_beat` |
+| `sections[].section_type` | `sections[].laserdisc.area` |
+| `sections[].line_injections` entry with `type: laserdisc` | `sections[].laserdisc.codes` |
+
+Move each key; the values are unchanged. A section's codes list moves up one level, directly under `laserdisc:`:
+
+```yaml
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 1
+```
+
+Opening and saving the project in the GUI does not convert it: the old keys fail to parse. See [`laserdisc`](../reference/laserdisc.md#where-these-settings-used-to-live).
+
+### `section.laserdisc.area has unrecognised value 'x'`
+
+`area` accepts only `lead_in`, `programme_area` and `lead_out`.
+
+### `section 'x' has a laserdisc block, but the project has no top-level laserdisc block`
+
+A section can sit on a disc only when the project is one. Add a top-level `laserdisc:` block — with `disc_type` if any section carries biphase codes.
+
+### `a section declares laserdisc codes but laserdisc.disc_type is not set`
+
+Biphase codes need a disc format. Set `laserdisc.disc_type` to `CAV` or `CLV`.
+
+### `section 'x' carries laserdisc codes, so its laserdisc.area must be set`
+
+The disc area decides which codes are legal, so a section with `codes` needs `area` beside them.
+
+### Sections in the wrong order
+
+Once any section's `area` is `lead_in` or `lead_out`, the sequence must be `[lead_in] programme_area… [lead_out]` — at most one lead-in and it must be first, at most one lead-out and it must be last, everything between them `programme_area`. Reorder the sections.
+
+### `laserdisc.pilot_burst can only be enabled for PAL projects`
+
+The pilot burst is defined by IEC 60856 for PAL LaserVision. The NTSC equivalent is `laserdisc.vbi_burst`.
+
+### `laserdisc.vbi_burst can only be enabled for NTSC projects`
+
+The VBI burst is defined by IEC 60857 for NTSC LaserVision. Remove it from PAL and PAL-M projects; PAL discs use `laserdisc.pilot_burst`.
+
+### `laserdisc.pilot_burst warning: preset 'CVBS_U10_4FSC' clips sub-sync excursions below -300 mV`
 
 A warning, not an error. The pilot burst trough reaches −600 mV, which an unsigned preset cannot represent. Switch to `CVBS_S16_4FSC`, `RAW_S16_28M` or `RAW_S16_40M` to keep the full waveform, or accept the clipping if the burst is not what you are testing.
 
-### `ntsc_laserdisc_vbi_burst warning: preset 'CVBS_U10_4FSC' clips sub-sync excursions below sync tip`
+### `laserdisc.vbi_burst warning: preset 'CVBS_U10_4FSC' clips sub-sync excursions below sync tip`
 
 A warning, not an error. The colour burst on the broad field-sync pulses is centred on sync tip and reaches −60 IRE, below the lowest legal code of an unsigned preset. Switch to `CVBS_S16_4FSC`, `RAW_S16_28M` or `RAW_S16_40M` to keep the full waveform, or accept the clipping if the burst is not what you are testing.
 
@@ -152,25 +192,24 @@ A still has no length of its own, so `duration_frames: "all"` (or leaving `durat
 
 ## Line injections
 
-### `target_lines must not be specified for laserdisc injections`
+### `laserdisc.codes[] contains unsupported field: 'target_lines'`
 
-Laserdisc line placement is fixed by IEC 60856/60857 and computed per frame. Remove the `target_lines` key.
+Laserdisc line placement is fixed by IEC 60856/60857 and computed per frame, so codes have no `target_lines`. Remove the key.
 
 ### `line injection type 'vitc' is not implemented in the current runtime`
 
-VITC is described by the schema but has no runtime behaviour, so it is rejected rather than silently dropped. `type: line_content` is likewise rejected, with `unsupported injection type 'line_content'`. `laserdisc` is the only usable section-level injection type today.
+VITC is described by the schema but has no runtime behaviour, so it is rejected rather than silently dropped. `type: line_content` is likewise rejected, with `unsupported injection type 'line_content'`. Laserdisc codes are not line injections: they go in the section's [`laserdisc.codes`](../reference/section-laserdisc.md#codes) list.
 
 ### `VITS target line 17 conflicts with laserdisc reserved VBI ranges for NTSC`
 
-The broadcast VITS lines collide with the laserdisc address-code ranges, which are reserved whenever `line_injections.disc_type` is set. On a disc, use the laserdisc VITS lines instead — set `placement: laserdisc` and use `virs` on 19/282 for colour reference. See [VITS types](../reference/vits-types.md).
+The broadcast VITS lines collide with the laserdisc address-code ranges, which are reserved whenever `laserdisc.disc_type` is set. On a disc, use the laserdisc VITS lines instead — set `placement: laserdisc` and use `virs` on 19/282 for colour reference. See [VITS types](../reference/vits-types.md).
 
 ### `NTSC and PAL-M laserdisc projects require a virs VITS injection for colour`
 
-IEC 60857 §9.1.3 makes VIRS mandatory on NTSC and PAL-M discs, so any such project with `disc_type` set needs one. Add it to the **project-level** `line_injections:` block:
+IEC 60857 §9.1.3 makes VIRS mandatory on NTSC and PAL-M discs, so any such project with `laserdisc.disc_type` set needs one. Add it to the **project-level** `line_injections:` block:
 
 ```yaml
 line_injections:
-  disc_type: CAV
   placement: laserdisc
   vits:
     - vits_type: virs
@@ -213,17 +252,33 @@ You have set `start_value: 1` on `picture_number` in a later section, which re-a
 
 ## Impairments
 
-### `channel block must set at least one of: timing_offset_samples`
+### `channel block must set at least one of: timing_offset_samples, edge_smear`
 
-An empty `channel:` block configures nothing. Omit the block for an ideal channel, or set `timing_offset_samples`.
+An empty `channel:` block configures nothing. Omit the block for an ideal channel, or set `timing_offset_samples` or `edge_smear`. A `channel:` block that held only `fm_beat` is now empty: the beat is in `laserdisc.channel`.
 
 ### `timing_offset_samples must be in the range [-8.0, 8.0]`
 
 The offset is meant for sub-sample and few-sample alignment errors between pressings. Larger shifts are not a timing impairment; change the content instead. See [channel](../reference/channel.md).
 
-### `chroma_error block must set at least one of: gain, phase_deg, line_jitter`
+### `channel.fm_beat has moved to laserdisc.channel.fm_beat.`
 
-An empty `chroma_error:` block configures nothing. Omit the block for an error-free chroma path. `include_burst` alone also configures nothing: it only widens where the error applies, so add a `gain`, `phase_deg` or `line_jitter`. The same applies to an empty `line_jitter:`, which must set its `phase_deg` or `gain`; a `seed` alone draws nothing.
+The FM beat is a LaserVision impairment, so it is in the [LaserVision channel](../reference/laserdisc-channel.md). Move the `fm_beat:` block under `laserdisc: channel:`; its keys are unchanged.
+
+### `Laserdisc channel validation error: fm_beat is supported for 625-line PAL only`
+
+The beat model is fitted to PAL LaserDisc pressings. Remove `fm_beat` from NTSC and PAL-M projects.
+
+### `group_delay.preset iec60856_nominal is the 625-line PAL pre-distortion of IEC 60856`
+
+The nominal curve is PAL's. On NTSC or PAL-M, give the curve yourself as `points_ns`.
+
+### `response_db and response_by_picture cannot both be set`
+
+`response_by_picture` already gives the replay response at every disc position. Keep one of the two.
+
+### `chroma_error block must set at least one of: gain, phase_deg, line_jitter, differential, crosstalk`
+
+An empty `chroma_error:` block configures nothing. Omit the block for an error-free chroma path. `include_burst` alone also configures nothing: it only widens where the error applies, so add one of the others. The same applies to an empty `line_jitter:`, which must set its `phase_deg` or `gain` (a `seed` alone draws nothing), an empty `differential:` (its `gain` or `phase_deg`) and an empty `crosstalk:` (its `v_to_u` or `u_to_v`).
 
 ### `chroma_error.include_burst must be true or false`
 
@@ -232,6 +287,10 @@ An empty `chroma_error:` block configures nothing. Omit the block for an error-f
 ### `Chroma error validation error: … must be in the range …`
 
 The ranges model a mis-adjusted but working player: half to one and a half times saturation, any hue, and per-line jitter up to 10° and 0.1 gain. See [chroma_error](../reference/chroma-error.md).
+
+### `crosstalk.alternate_with_switch follows the PAL V-switch, so it needs a PAL or PAL-M project`
+
+NTSC has no V-switch for the crosstalk to alternate with. Leave `alternate_with_switch` out (or `false`) for a fixed leak.
 
 ### `chroma_error is not supported for SECAM`
 
@@ -337,7 +396,7 @@ A soundtrack comes from the section's own video, so an EXR still has none. Use a
 
 ### No `.efm` file is written
 
-A warning will say that no section declares the pair named in `output.efm_audio`. Add an `audio:` block declaring that pair to at least one section.
+A warning will say that no section declares the pair named in `laserdisc.efm_audio`. Add an `audio:` block declaring that pair to at least one section.
 
 ### `output.truth requires a PAL, NTSC or PAL-M project`
 

@@ -241,7 +241,7 @@ bool AudioTrackGenerator::Begin(
     if (efm_active_) {
       logger_->Info("Audio: channel pair " + std::to_string(efm_pair_) +
                     " also synthesised at 44.1 kHz for EFM output.");
-    } else if (project.output.efm_audio.enabled) {
+    } else if (project.laserdisc.efm_audio.enabled) {
       logger_->Debug(
           "Audio: EFM output requested but inactive (pair not declared or "
           "standard has no LaserDisc digital audio specification).");

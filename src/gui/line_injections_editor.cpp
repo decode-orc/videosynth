@@ -196,11 +196,12 @@ void LineInjectionsEditor::LoadInjectionForm() {
 
   if (disc_type_ == DiscType::kUnknown) {
     disc_type_label_->setText(
-        tr("Set the disc format (CAV/CLV) in project settings before adding "
-           "laserdisc codes."));
+        tr("Set the disc format (CAV/CLV) in the project's LaserDisc settings "
+           "before adding laserdisc codes."));
   } else {
     disc_type_label_->setText(
-        tr("Disc format: %1 (project-wide — change it in project settings).")
+        tr("Disc format: %1 (project-wide — change it in the project's "
+           "LaserDisc settings).")
             .arg(QString::fromStdString(DiscTypeToString(disc_type_))));
   }
 
@@ -219,8 +220,8 @@ void LineInjectionsEditor::RebuildCodeChecklist() {
     empty_hint_label_->setText(
         disc_type_ == DiscType::kUnknown
             ? QString()
-            : tr("Set this section's disc section type (lead-in / programme "
-                 "area / lead-out) to choose its laserdisc codes."));
+            : tr("Set this section's disc area (lead-in / programme area / "
+                 "lead-out) to choose its laserdisc codes."));
     return;
   }
 
@@ -249,7 +250,7 @@ void LineInjectionsEditor::RebuildCodeChecklist() {
                     : own_code_types;
   if (code_types.empty()) {
     empty_hint_label_->setText(
-        tr("The selected sections' disc section types share no laserdisc "
+        tr("The selected sections' disc areas share no laserdisc "
            "codes, so none can be batch-edited; select the sections "
            "individually to edit their codes."));
     return;

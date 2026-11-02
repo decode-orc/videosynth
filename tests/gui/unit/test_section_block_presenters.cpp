@@ -13,6 +13,8 @@
 #include <string>
 #include <vector>
 
+#include "line_injection_presenter.h"
+#include "project_templates.h"
 #include "section_block_presenters.h"
 #include "videosynth/model.h"
 #include "videosynth/project_validator.h"
@@ -1155,6 +1157,87 @@ TEST(SectionBlockPresenterTest,
   EXPECT_EQ(DurationSecondsToFrames(1000.0, 25.0, 100), 100);
   // A non-positive rate cannot convert; the safe minimum is returned.
   EXPECT_EQ(DurationSecondsToFrames(10.0, 0.0, 100), 1);
+}
+
+TEST(SectionBlockPresentersTest, SectionLaserdiscBlockClears) {
+  Section section;
+  EXPECT_FALSE(SectionHasLaserdiscBlock(section));
+  EXPECT_FALSE(ClearSectionLaserdiscBlock(&section));
+
+  section.section_type = SectionType::kLeadOut;
+  EXPECT_TRUE(SectionHasLaserdiscBlock(section));
+  section.section_type = SectionType::kUnknown;
+  Section::LineInjection injection;
+  injection.type = "laserdisc";
+  section.line_injections.push_back(injection);
+  EXPECT_TRUE(SectionHasLaserdiscBlock(section));
+
+  section.section_type = SectionType::kProgrammeArea;
+  EXPECT_TRUE(ClearSectionLaserdiscBlock(&section));
+  EXPECT_EQ(section.section_type, SectionType::kUnknown);
+  EXPECT_TRUE(section.line_injections.empty());
+  EXPECT_FALSE(SectionHasLaserdiscBlock(section));
+}
+
+TEST(SectionBlockPresentersTest, SectionLaserdiscGroupFollowsProjectBlock) {
+  Project project;
+  EXPECT_FALSE(SectionLaserdiscGroupVisible(project));
+  project.laserdisc.enabled = true;
+  EXPECT_TRUE(SectionLaserdiscGroupVisible(project));
+}
+
+TEST(SectionBlockPresentersTest, EnablingSectionLaserdiscSeedsProgrammeArea) {
+  Section section;
+  SetSectionLaserdiscEnabled(&section, true, Standard::kPal, DiscType::kCAV);
+  EXPECT_EQ(section.section_type, SectionType::kProgrammeArea);
+  ASSERT_EQ(section.line_injections.size(), 1U);
+  EXPECT_EQ(section.line_injections[0].type, "laserdisc");
+  std::vector<std::string> codes;
+  for (const Section::LineInjectionCode& code :
+       section.line_injections[0].codes) {
+    codes.push_back(code.code_type);
+  }
+  EXPECT_EQ(codes,
+            RecommendedLaserdiscCodeTypes(
+                DiscType::kCAV, SectionType::kProgrammeArea, Standard::kPal));
+
+  SetSectionLaserdiscEnabled(&section, false, Standard::kPal, DiscType::kCAV);
+  EXPECT_FALSE(SectionHasLaserdiscBlock(section));
+}
+
+TEST(SectionBlockPresentersTest, EnablingSectionLaserdiscKeepsExistingData) {
+  Section section;
+  section.section_type = SectionType::kLeadOut;
+  SetSectionLaserdiscEnabled(&section, true, Standard::kNtsc, DiscType::kCLV);
+  EXPECT_EQ(section.section_type, SectionType::kLeadOut);
+  ASSERT_EQ(section.line_injections.size(), 1U);
+  const std::vector<Section::LineInjectionCode> seeded =
+      section.line_injections[0].codes;
+  EXPECT_FALSE(seeded.empty());
+
+  section.line_injections[0].codes.pop_back();
+  const Section edited = section;
+  SetSectionLaserdiscEnabled(&section, true, Standard::kNtsc, DiscType::kCLV);
+  EXPECT_EQ(section, edited);
+}
+
+// A laserdisc project's sections, toggled on through the helper, validate.
+TEST(SectionBlockPresentersTest, EnabledSectionLaserdiscValidates) {
+  for (const Standard standard : {Standard::kPal, Standard::kNtsc}) {
+    SCOPED_TRACE(StandardToString(standard));
+    Project project;
+    project.cvbs_presets.video_standard_preset = standard;
+    project.output.video_path = "out/video.cvbs";
+    project.output.metadata_path = "out/video.meta";
+    project.laserdisc = MakeLaserdiscParameters();
+    project.line_injections = MakeLaserdiscLineInjections(standard);
+    project.sections.push_back(MakeProgressiveSectionTemplate(1, standard));
+    SetSectionLaserdiscEnabled(&project.sections[0], true, standard,
+                               DiscType::kCAV);
+    const ValidationResult result = ProjectValidator().Validate(project);
+    EXPECT_TRUE(result.is_valid)
+        << (result.errors.empty() ? "" : result.errors.front());
+  }
 }
 
 }  // namespace

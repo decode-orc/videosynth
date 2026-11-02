@@ -1,6 +1,6 @@
 # NTSC LaserDisc Digital Audio (EFM) Example
 #
-# Exercises the EFM channel-stream encoder end to end: `output.efm_audio`
+# Exercises the EFM channel-stream encoder end to end: `laserdisc.efm_audio`
 # selects channel pair 0, which is additionally synthesised at 44100 Hz
 # (IEC 60857:1986 Amd 2, 13.2: Fs = 7007/2500 x F_H) and written as an
 # IEC 60908-1999 EFM T-value stream to
@@ -24,8 +24,8 @@
 # first track's leading 2 s pause excluded from that minimum. Each programme
 # section uses a different source so track boundaries are visible in the video.
 #
-# No biphase `line_injections` are declared: `section_type` alone drives the EFM
-# disc-area mapping, which keeps the lead-in short. A CAV biphase lead-in would
+# No biphase codes are declared: each section's `laserdisc.area` alone drives
+# the EFM disc-area mapping, which keeps the lead-in short. A CAV biphase lead-in would
 # instead have to run for at least 938 frames.
 
 project:
@@ -40,6 +40,8 @@ cvbs_presets:
 
 output:
   video_path: "{output}/videosynth_ntsc_efm_audio.cvbs"
+
+laserdisc:
   efm_audio:
     pair: 0
 
@@ -53,7 +55,8 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x486/PLUGE.exr"
     duration_frames: 60
-    section_type: lead_in
+    laserdisc:
+      area: lead_in
 
   # ---------------------------------------------------------------------------
   # Track 1 (7.007 s). Its first 2 s are the mandatory pause: the EFM stream
@@ -63,7 +66,8 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x486/75_BARS.exr"
     duration_frames: 210
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
     audio:
       channel_pairs:
         - pair: 0
@@ -82,7 +86,8 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x486/Y_CB_CR_RAMPS.exr"
     duration_frames: 150
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
     audio:
       channel_pairs:
         - pair: 0
@@ -100,7 +105,8 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x486/MULTIBURST.exr"
     duration_frames: 150
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
     audio:
       channel_pairs:
         - pair: 0
@@ -123,4 +129,5 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x486/PLUGE.exr"
     duration_frames: 90
-    section_type: lead_out
+    laserdisc:
+      area: lead_out

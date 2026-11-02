@@ -44,7 +44,7 @@ Start with `CVBS_U10_4FSC`. It is what the decoding tool chain expects and it is
 Choose a **signed** preset — `CVBS_S16_4FSC` — or a raw preset when the signal contains **excursions below the 10-bit legal-code floor**. The clearest case is the PAL laserdisc pilot burst, whose trough reaches −600 mV, well under the −300 mV that the unsigned presets can represent. The NTSC laserdisc VBI burst is the other: on the broad field-sync pulses it reaches −60 IRE, below sync tip. Generating either with an unsigned preset is legal, and videosynth warns you that the burst trough is being clipped:
 
 ```text
-[warning] pal_laserdisc_pilot_burst warning: preset 'CVBS_U10_4FSC' clips
+[warning] laserdisc.pilot_burst warning: preset 'CVBS_U10_4FSC' clips
 sub-sync excursions below -300 mV; the pilot burst trough reaches -600 mV.
 Use CVBS_S16_4FSC or RAW_S16_28M/RAW_S16_40M to preserve the full burst waveform.
 ```
@@ -77,17 +77,6 @@ Luma and chroma are generated independently regardless, and combined only at the
 
 ## Standard-specific options
 
-### PAL laserdisc pilot burst
-
-```yaml
-cvbs_presets:
-  pal_laserdisc_pilot_burst: true
-```
-
-Superimposes a 3.75 MHz (240 × f_H) sinusoidal burst at ±300 mV on **every** sync pulse in the luma channel, per IEC 60856 §9.1.2. Laserdisc players use it as a tracking reference.
-
-PAL only — enabling it on an NTSC project is a validation error. Pair it with a signed or raw sample encoding so the −600 mV trough survives quantisation.
-
 ### SECAM chroma
 
 ```yaml
@@ -114,21 +103,10 @@ The D'R/D'B line sequence follows BT.1700 Figure 16 — line 7 of the first fram
 
 OSD overlays carry the undeviated subcarrier under their text, as a colourless area of a SECAM picture does. The subcarrier phase restarts at the edges of the text, so a decoder may show a brief transient there.
 
-SECAM projects cannot use the laserdisc features: there is no SECAM LaserVision format, so laserdisc line injections, `line_injections.disc_type`, laserdisc VITS placement, the pilot burst and EFM digital audio are validation errors.
+SECAM projects cannot use the LaserDisc features: there is no SECAM LaserVision format, so the project and section [`laserdisc:`](../reference/laserdisc.md) blocks and laserdisc VITS placement are validation errors.
 
 !!! note "Limitations"
     VITS test signals use the 625-line PAL catalogue, so any chroma packet in them is PAL-modulated; a SECAM project with VITS produces a validation warning. The luminance intermodulation correction that BT.470 allows for SECAM is not applied.
-
-### NTSC laserdisc VBI burst
-
-```yaml
-cvbs_presets:
-  ntsc_laserdisc_vbi_burst: true
-```
-
-Standard NTSC suppresses the colour burst on the equalising and broad sync lines of the vertical interval. An NTSC LaserDisc keeps it there: IEC 60857 §9.1.2 requires the burst on every line, once per line at its normal position after 0H (Figure 6a). With this option the burst continues through lines 1–9 and 264–272 with the same amplitude and the same continuous subcarrier phase as every other line. The burst is added in the chroma channel, so on the equalising lines it sits at blanking and on the broad field-sync lines, where the gate falls inside the broad pulse, it is centred on sync tip.
-
-NTSC only — enabling it on a PAL, PAL-M or SECAM project is a validation error. The burst on the broad pulses dips to −60 IRE, below the NTSC 10-bit legal-code floor at sync tip, so pair it with a signed or raw sample encoding to keep the whole waveform; an unsigned preset clips it and produces a warning.
 
 ### NTSC black setup
 
@@ -140,6 +118,32 @@ cvbs_presets:
 NTSC (and PAL-M) place black at 7.5 IRE above blanking by default — the "setup" pedestal. Setting `0.0` puts black at blanking instead, which is how Japanese NTSC and much digital-origin material behave.
 
 Only `7.5` and `0.0` are accepted, and only on NTSC or PAL-M projects. Specifying it on a PAL project is a validation error.
+
+## LaserDisc signal options
+
+Two LaserVision signal features are set in the project's [`laserdisc:`](../reference/laserdisc.md) block rather than in `cvbs_presets`, with the rest of the LaserDisc settings. A project that is not a disc can ignore this section. See [Laserdisc discs](laserdisc.md) for the rest of a disc project.
+
+### PAL pilot burst
+
+```yaml
+laserdisc:
+  pilot_burst: true
+```
+
+Superimposes a 3.75 MHz (240 × f_H) sinusoidal burst at ±300 mV on **every** sync pulse in the luma channel, per IEC 60856 §9.1.2. Laserdisc players use it as a tracking reference.
+
+PAL only — enabling it on an NTSC project is a validation error. Pair it with a signed or raw sample encoding so the −600 mV trough survives quantisation.
+
+### NTSC VBI burst
+
+```yaml
+laserdisc:
+  vbi_burst: true
+```
+
+Standard NTSC suppresses the colour burst on the equalising and broad sync lines of the vertical interval. An NTSC LaserDisc keeps it there: IEC 60857 §9.1.2 requires the burst on every line, once per line at its normal position after 0H (Figure 6a). With this option the burst continues through lines 1–9 and 264–272 with the same amplitude and the same continuous subcarrier phase as every other line. The burst is added in the chroma channel, so on the equalising lines it sits at blanking and on the broad field-sync lines, where the gate falls inside the broad pulse, it is centred on sync tip.
+
+NTSC only — enabling it on a PAL, PAL-M or SECAM project is a validation error. The burst on the broad pulses dips to −60 IRE, below the NTSC 10-bit legal-code floor at sync tip, so pair it with a signed or raw sample encoding to keep the whole waveform; an unsigned preset clips it and produces a warning.
 
 ## Active picture
 

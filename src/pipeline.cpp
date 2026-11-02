@@ -357,7 +357,7 @@ bool VideoSynthPipeline::RunProject(const Project& project,
       channel_.ApplyChannel(project, schedule, disc_frame, 1U, &out_frame->y_mv,
                             &out_frame->c_mv);
       chroma_error_.ApplyChromaError(project, schedule, disc_frame, 1U,
-                                     &out_frame->c_mv);
+                                     &out_frame->y_mv, &out_frame->c_mv);
       if (noise_injection_ != nullptr) {
         noise_injection_->InjectNoise(
             project, schedule, disc_frame, 1U,
@@ -478,7 +478,7 @@ bool VideoSynthPipeline::RunProject(const Project& project,
       channel_.ApplyChannel(project, schedule, processed_frames,
                             frames_this_batch, &y_mv, &c_mv);
       chroma_error_.ApplyChromaError(project, schedule, processed_frames,
-                                     frames_this_batch, &c_mv);
+                                     frames_this_batch, &y_mv, &c_mv);
 
       if (noise_injection_ != nullptr) {
         noise_injection_->InjectNoise(

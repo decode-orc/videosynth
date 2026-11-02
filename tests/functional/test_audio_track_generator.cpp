@@ -254,8 +254,8 @@ TEST(AudioTrackGeneratorTest, SynthesisesSelectedPairAt44100Hz) {
   std::filesystem::remove(efm1);
 
   Project project = MakeProject(video_path);
-  project.output.efm_audio.enabled = true;
-  project.output.efm_audio.pair = 1;
+  project.laserdisc.efm_audio.enabled = true;
+  project.laserdisc.efm_audio.pair = 1;
   Section lead_in;
   lead_in.name = "LeadIn";
   lead_in.section_type = SectionType::kLeadIn;
@@ -313,8 +313,8 @@ TEST(AudioTrackGeneratorTest, AbortRemovesThePartialEfmTrack) {
   std::filesystem::remove(efm0);
 
   Project project = MakeProject(video_path);
-  project.output.efm_audio.enabled = true;
-  project.output.efm_audio.pair = 0;
+  project.laserdisc.efm_audio.enabled = true;
+  project.laserdisc.efm_audio.pair = 0;
   Section section;
   section.name = "Tone";
   section.section_type = SectionType::kProgrammeArea;
@@ -345,8 +345,8 @@ TEST(AudioTrackGeneratorTest, EfmSynthesisIsDeterministicAcrossRuns) {
 
   Project project = MakeProject(video_path);
   project.cvbs_presets.video_standard_preset = Standard::kNtsc;
-  project.output.efm_audio.enabled = true;
-  project.output.efm_audio.pair = 0;
+  project.laserdisc.efm_audio.enabled = true;
+  project.laserdisc.efm_audio.pair = 0;
   // Lead-in audio is not muted by the track-1 pause, so the compared samples
   // carry the synthesised tone.
   Section section;
@@ -380,8 +380,8 @@ TEST(AudioTrackGeneratorTest,
   std::filesystem::remove(audio0);
 
   Project project = MakeProject(video_path);
-  project.output.efm_audio.enabled = true;
-  project.output.efm_audio.pair = 3;  // Not declared by any section.
+  project.laserdisc.efm_audio.enabled = true;
+  project.laserdisc.efm_audio.pair = 3;  // Not declared by any section.
   Section section;
   section.name = "Tone";
   section.audio_channel_pairs = {MakePair(0, /*left=*/true, /*right=*/true)};
@@ -401,7 +401,7 @@ TEST(AudioTrackGeneratorTest,
 
   // SECAM has no LaserDisc digital audio specification, so a valid pair
   // selection still leaves the EFM path inactive.
-  project.output.efm_audio.pair = 0;
+  project.laserdisc.efm_audio.pair = 0;
   project.cvbs_presets.video_standard_preset = Standard::kSecam;
   {
     AudioTrackGenerator generator;
@@ -601,8 +601,8 @@ TEST(AudioTrackGeneratorTest, EfmPairReadsItsMediaAgainAt44100Hz) {
   library.media["clip.mp4"] = {0.0, 60.0};
 
   Project project = MakeProject(video_path);
-  project.output.efm_audio.enabled = true;
-  project.output.efm_audio.pair = 0;
+  project.laserdisc.efm_audio.enabled = true;
+  project.laserdisc.efm_audio.pair = 0;
   // Lead-in audio is not muted by the track-1 pause.
   Section section;
   section.name = "Clip";

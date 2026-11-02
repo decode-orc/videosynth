@@ -40,11 +40,10 @@ sections:
       scratch:
         scale: 2
         seed: 1001
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 1
+    laserdisc:
+      codes:
+        - code_type: picture_number
+          start_value: 1
 
   # Banner for the second section
   - name: Second
@@ -257,20 +256,21 @@ cvbs_presets:
 output:
   video_path: "{output}/film.cvbs"
 line_injections:
-  disc_type: CAV
   vits:
     - vits_type: virs
+laserdisc:
+  disc_type: CAV
 sections:
   - name: Film
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 1
-          - code_type: chapter_number
-            chapter: 1
-          - code_type: fm_picture_number
-          - code_type: fm_white_flag
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 1
+        - code_type: chapter_number
+          chapter: 1
+        - code_type: fm_picture_number
+        - code_type: fm_white_flag
 '''
 
 
@@ -292,18 +292,18 @@ class DiscRewriteTest(unittest.TestCase):
             'fm_picture_number': ['fm_programme_time'],
         })
         self.assertIn(
-            '          - code_type: programme_time_code\n'
-            '          - code_type: clv_picture_number\n'
-            '          - code_type: chapter_number\n'
-            '            chapter: 1\n'
-            '          - code_type: fm_programme_time\n'
-            '          - code_type: fm_white_flag\n', derived)
+            '        - code_type: programme_time_code\n'
+            '        - code_type: clv_picture_number\n'
+            '        - code_type: chapter_number\n'
+            '          chapter: 1\n'
+            '        - code_type: fm_programme_time\n'
+            '        - code_type: fm_white_flag\n', derived)
         self.assertNotIn('start_value', derived)
 
     def test_replace_codes_with_empty_list_removes_entry(self):
         derived = gen.replace_codes(FILM_DISC, {'chapter_number': []})
         self.assertNotIn('chapter', derived)
-        self.assertIn('start_value: 1\n          - code_type: '
+        self.assertIn('start_value: 1\n        - code_type: '
                       'fm_picture_number', derived)
 
     def test_replace_codes_rejects_unmatched_or_malformed_rules(self):

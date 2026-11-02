@@ -16,7 +16,7 @@ authored comments survive into the derived project:
                           suffix between .cvbs and .cvbsy accordingly
   video_standard          set cvbs_presets.video_standard_preset (a standard
                           sharing the source's raster, such as NTSC -> PAL_M)
-  disc_type               set line_injections.disc_type
+  disc_type               set laserdisc.disc_type
   replace_codes           a mapping of laserdisc code_type to a list of code
                           types: every code entry of that type, with its
                           options, becomes bare entries of the listed types
@@ -503,7 +503,7 @@ def derive(text: str, variant: dict) -> str:
                                  str(variant['video_standard']))
 
     if 'disc_type' in variant:
-        text = set_nested_scalar(text, 'line_injections', 'disc_type',
+        text = set_nested_scalar(text, 'laserdisc', 'disc_type',
                                  str(variant['disc_type']))
 
     if 'replace_codes' in variant:

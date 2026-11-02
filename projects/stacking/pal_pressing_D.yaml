@@ -37,16 +37,18 @@ cvbs_presets:
   video_standard_preset: PAL
   sample_encoding_preset: CVBS_U10_4FSC
   signal_state_preset: STANDARD_STABLE_LOCKED
-  pal_laserdisc_pilot_burst: true
 
 output:
   video_path: "{output}/videosynth_pal_pressing_D.cvbs"
 
 line_injections:
-  disc_type: CAV
   vits:
     - vits_type: uk-national
       target_lines: [19]
+
+laserdisc:
+  disc_type: CAV
+  pilot_burst: true
 
 channel:
   timing_offset_samples: 0.0
@@ -60,7 +62,13 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x576/100_BARS.exr"
     duration_frames: 4
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 1
+        - code_type: programme_status
+          programme_status: "0x8DC000"
     noise:
       # Capture layer: FM-demodulated noise rises towards high frequencies.
       noise_db: 46.0
@@ -90,13 +98,6 @@ sections:
       scratch:
         scale: 2
         seed: 1001
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 1
-          - code_type: programme_status
-            programme_status: "0x8DC000"
 
   # ---------------------------------------------------------------------------
   # PNs 5–8: testcard-f
@@ -105,7 +106,13 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x576/TESTCARD-F.exr"
     duration_frames: 4
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 5
+        - code_type: programme_status
+          programme_status: "0x8DC000"
     noise:
       # Capture layer: FM-demodulated noise rises towards high frequencies.
       noise_db: 46.0
@@ -135,13 +142,6 @@ sections:
       scratch:
         scale: 2
         seed: 1001
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 5
-          - code_type: programme_status
-            programme_status: "0x8DC000"
 
   # ---------------------------------------------------------------------------
   # PNs 9–12: multi-burst
@@ -150,7 +150,13 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x576/MULTIBURST.exr"
     duration_frames: 4
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 9
+        - code_type: programme_status
+          programme_status: "0x8DC000"
     noise:
       # Capture layer: FM-demodulated noise rises towards high frequencies.
       noise_db: 46.0
@@ -180,13 +186,6 @@ sections:
       scratch:
         scale: 2
         seed: 1001
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 9
-          - code_type: programme_status
-            programme_status: "0x8DC000"
 
   # ---------------------------------------------------------------------------
   # PNs 13–16: Y/Cb/Cr ramps
@@ -195,7 +194,13 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x576/Y_CB_CR_RAMPS.exr"
     duration_frames: 4
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 13
+        - code_type: programme_status
+          programme_status: "0x8DC000"
     noise:
       # Capture layer: FM-demodulated noise rises towards high frequencies.
       noise_db: 46.0
@@ -225,10 +230,3 @@ sections:
       scratch:
         scale: 2
         seed: 1001
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 13
-          - code_type: programme_status
-            programme_status: "0x8DC000"

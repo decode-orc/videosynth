@@ -29,6 +29,8 @@
 #include "videosynth/biphase_injection_manager.h"
 #include "videosynth/chroma_encoder.h"
 #include "videosynth/clv_code_generator.h"
+#include "videosynth/colour_sequence.h"
+#include "videosynth/field_offset_filter.h"
 #include "videosynth/film_cadence.h"
 #include "videosynth/fixed_point.h"
 #include "videosynth/frame_enrichment.h"
@@ -165,28 +167,6 @@ constexpr double kPi = 3.14159265358979323846;
 constexpr double kTwoPi = 2.0 * kPi;
 constexpr double kQuarterWaveRad = kPi / 2.0;
 
-// Samples per subcarrier cycle at 4fsc. The carrier advances exactly π/2 per
-// sample, so its phase is a pure function of the sample index modulo this
-// value; see docs-tech/design/high-level-design.md, "Subcarrier Lock
-// Implementation".
-constexpr std::size_t kSubcarrierLatticeSamples = 4U;
-
-// Number of frames after which a clean synthesised frame repeats exactly for
-// identical source content. The subcarrier lattice position advances by
-// (samples per frame mod 4) each frame — period 4 for PAL (709,379 ≡ 3) and
-// PAL-M (477,225 ≡ 1), period 2 for NTSC (477,750 ≡ 2) — and the PAL/PAL-M
-// burst meander and V-switch have period 2, which divides 4. The LaserDisc
-// pilot burst is period 1 (17,734,475 = 25 × 709,379). SECAM chroma is
-// rendered from 0H of every line, independent of the lattice position, and
-// its D'R/D'B sequence and phase inversion repeat every 2 frames (ITU-R
-// BT.1700 Annex 1 Part C Figure 16, Table 4 Note 1). Every use of the disc
-// frame index in clean synthesis therefore depends only on the index modulo
-// this period.
-std::size_t ColourSequencePeriodFrames(Standard standard) {
-  return (standard == Standard::kNtsc || standard == Standard::kSecam) ? 2U
-                                                                       : 4U;
-}
-
 // Reduces a phase argument into [0, 2π).
 //
 // Every phase in the synthesiser is periodic, so this is mathematically a
@@ -201,32 +181,11 @@ double WrapPhaseRad(double phase_rad) {
   return wrapped;
 }
 
-// Phase of the colour subcarrier at an absolute sample index, exactly.
-//
-// Reducing the index onto the 4-sample lattice before the multiply keeps the
-// result exact for the life of the render: sin/cos see one of four bounded
-// arguments rather than (π/2) × an index that reaches 1.9 × 10^11 on a
-// three-hour disc.
-double SubcarrierPhaseRad(std::size_t absolute_sample_index) {
-  return kQuarterWaveRad *
-         static_cast<double>(absolute_sample_index % kSubcarrierLatticeSamples);
-}
-
 // IEC 60856 §9.1.2: pilot burst frequency is 240 × fH = 3.75 MHz and
 // amplitude is 6/7 of (white - blanking) = 6/7 × 700 mV = 600 mV p-p,
 // centred on sync tip (−300 mV), giving ±300 mV swing.
 constexpr double kPilotBurstFreqHz = 3.75e6;
 constexpr double kPilotBurstAmplitudeMv = 300.0;
-
-// ITU-R BT.1700 Annex 1 Part B Figure 8 with Table 1 item 10f: the 8-field
-// PAL sequence pairs each burst-blanking meander position with a specific
-// subcarrier-to-frame phase. Rotating the subcarrier lattice by 270° anchors
-// disc frame 0 (meander parity 0, fields I/II) to the subcarrier phase that
-// decoders identify as colour fields 1/2. Validated against the
-// ld-decode/decode-orc field-phase detection: without this anchor the two
-// fields of a frame decode as non-consecutive field IDs. The anchor applies
-// to 625-line PAL only; PAL-M keeps a zero anchor.
-constexpr double kPalSubcarrierAnchorRad = 3.0 * kPi / 2.0;
 
 double SyncEdgeRiseTimeSeconds(Standard standard);
 double BurstEnvelopeRiseTimeSeconds(Standard standard);
@@ -740,20 +699,6 @@ double BurstEnvelopeRiseTimeSeconds(Standard standard) {
   return 300.0e-9;
 }
 
-int PalBurstSequenceIndex(std::size_t frame_index, int field_index_1based) {
-  // ITU-R BT.1700 Annex 1 Part B Table 1 item 10f: defines sequence I/II/III/IV
-  // repeating over colour fields. A frame contains two consecutive fields.
-  return static_cast<int>(
-      ((2U * frame_index) + static_cast<std::size_t>(field_index_1based - 1)) %
-      4U);
-}
-
-bool PalBurstPositiveOnOddLine(int burst_sequence_index) {
-  // Sequence I/II: odd lines use +135 deg, even lines use -135 deg.
-  // Sequence III/IV: odd lines use -135 deg, even lines use +135 deg.
-  return burst_sequence_index == 0 || burst_sequence_index == 1;
-}
-
 bool IsPalBurstBlankedLine(int line_1based, int colour_frame_parity) {
   // ITU-R BT.1700 Annex 1 Part B Figure 8: the four 9-line burst-blanking
   // windows are defined in frame-line numbers and span frame boundaries:
@@ -789,16 +734,6 @@ bool IsPalMBurstBlankedLine(int line_1based, int colour_frame_parity) {
          line_1based >= 523;
 }
 
-double PalBurstPhaseRadForLine(std::size_t frame_index,
-                               const LineTimingPrimitive& line) {
-  const int burst_sequence_index =
-      PalBurstSequenceIndex(frame_index, line.field_index_1based);
-  const bool line_is_odd = (line.line_number_1based % 2) == 1;
-  const bool positive_on_odd = PalBurstPositiveOnOddLine(burst_sequence_index);
-  const bool positive_phase = line_is_odd ? positive_on_odd : !positive_on_odd;
-  return positive_phase ? (3.0 * kPi / 4.0) : (-3.0 * kPi / 4.0);
-}
-
 bool PalBurstEnabledForLine(std::size_t frame_index,
                             const LineTimingPrimitive& line) {
   if (line.sync_pulse_kind != SyncPulseKind::kHorizontal) {
@@ -815,11 +750,6 @@ bool PalMBurstEnabledForLine(std::size_t frame_index,
   }
   const int colour_frame_parity = static_cast<int>(frame_index % 2U);
   return !IsPalMBurstBlankedLine(line.line_number_1based, colour_frame_parity);
-}
-
-bool PalInvertVAxisForLine(std::size_t frame_index,
-                           const LineTimingPrimitive& line) {
-  return PalBurstPhaseRadForLine(frame_index, line) < 0.0;
 }
 
 using RenderedVitsLineMap =
@@ -1163,10 +1093,10 @@ bool GenerationStage::SynthesisResourceCache::Build(
                            out->synth.burst_rise_samples);
   }
 
-  out->ntsc_vbi_burst = project.cvbs_presets.ntsc_laserdisc_vbi_burst &&
-                        standard == Standard::kNtsc;
-  out->pal_pilot_burst = project.cvbs_presets.pal_laserdisc_pilot_burst &&
-                         standard == Standard::kPal;
+  out->ntsc_vbi_burst =
+      project.laserdisc.vbi_burst && standard == Standard::kNtsc;
+  out->pal_pilot_burst =
+      project.laserdisc.pilot_burst && standard == Standard::kPal;
   out->pilot_omega =
       out->pal_pilot_burst
           ? (2.0 * kPi * kPilotBurstFreqHz / out->timing.sample_rate_4fsc_hz)
@@ -1511,7 +1441,7 @@ bool GenerationStage::BuildFrameSchedule(
   template_cache_->Clear();
   biphase_manager_.Reset();
   biphase_manager_.SetProjectDiscType(
-      DiscTypeFromString(project.line_injections.disc_type));
+      DiscTypeFromString(project.laserdisc.disc_type));
 
   // Compute disc_frame_offset = (first_PN - 1) from the first CAV
   // picture_number code. This offset is added to global_frame_index when
@@ -1600,7 +1530,7 @@ bool GenerationStage::BuildFrameSchedule(
   // The {timecode} OSD token is a continuous CLV programme timecode; it is only
   // meaningful on CLV discs, where it runs from the start of the output.
   const bool disc_is_clv =
-      DiscTypeFromString(project.line_injections.disc_type) == DiscType::kCLV;
+      DiscTypeFromString(project.laserdisc.disc_type) == DiscType::kCLV;
   for (std::size_t frame_index = 0; frame_index < out_schedule->size();
        ++frame_index) {
     FrameScheduleItem& item = (*out_schedule)[frame_index];
@@ -1920,9 +1850,7 @@ void GenerationStage::SynthesiseTemplate(
         // additionally carries the subcarrier anchor so picture chroma stays
         // phase-coherent with the anchored burst.
         const double phase_offset =
-            (video_standard == Standard::kNtsc)
-                ? (line.burst_phase_rad + kPi)
-                : (is_pal ? kPalSubcarrierAnchorRad : 0.0);
+            PictureChromaPhaseOffsetRad(video_standard, line);
         const double phase_start =
             WrapPhaseRad(SubcarrierPhaseRad(active_window_line_start_absolute) +
                          phase_offset);
@@ -2424,6 +2352,22 @@ bool GenerationStage::GenerateFrames(
                               : frame_error);
         return false;
       }
+    }
+    // laserdisc.channel.field2_offset misregisters field 2 in the picture
+    // domain: field 2 reads its rows from an offset copy of its source. The
+    // offset is in 4fsc samples across the active window and in frame lines,
+    // so it converts to source pixels and rows here.
+    const Field2OffsetParameters& field2_offset =
+        project.laserdisc.channel.field2_offset;
+    if (project.laserdisc.channel.enabled && field2_offset.enabled &&
+        (field2_offset.x_samples != 0.0 || field2_offset.y_lines != 0.0)) {
+      const FrameSourceImage& field2_source = *field_images[1];
+      const double dx_pixels =
+          field2_offset.x_samples *
+          static_cast<double>(field2_source.active_width) /
+          static_cast<double>(resources->active_window_samples);
+      field_images[1] = std::make_shared<const FrameSourceImage>(
+          OffsetSourceImage(field2_source, dx_pixels, field2_offset.y_lines));
     }
     const std::array<const FrameSourceImage*, 2> field_sources = {
         field_images[0].get(), field_images[1].get()};

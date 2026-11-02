@@ -2,7 +2,8 @@
  * File:        section_block_presenters.h
  * Module:      gui
  * Purpose:     Widget-free mapping layer for the optional per-section YAML
- *              blocks (audio, noise, dropouts, luma bandwidth, OSD)
+ *              blocks (audio, noise, dropouts, luma bandwidth, OSD,
+ *              laserdisc)
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -306,5 +307,27 @@ std::vector<Section::LineInjection> ApplyLineInjectionEditDelta(
 // one lead_out per project, so batch-assigning either can never validate;
 // programme_area (and clearing the type) may repeat freely.
 bool SectionTypeAllowsBatchAssignment(SectionType type);
+
+// The section editor shows a section's LaserDisc group (disc area and codes)
+// only for projects that declare a laserdisc block, so projects without one
+// never see it.
+bool SectionLaserdiscGroupVisible(const Project& project);
+
+// True when `section` carries laserdisc data: a disc area or laserdisc code
+// injections (its YAML `laserdisc:` block).
+bool SectionHasLaserdiscBlock(const Section& section);
+
+// Removes the section's laserdisc data (disc area and code injections), as
+// required once the project has no laserdisc block. Returns true when the
+// section changed.
+bool ClearSectionLaserdiscBlock(Section* section);
+
+// Toggles the section's laserdisc block. Enabling places the section in the
+// programme area unless it already has a disc area (the programme area is the
+// only area several sections may share) and, when it carries no laserdisc
+// codes yet, seeds the codes RecommendedLaserdiscCodeTypes expects for that
+// area, `disc_type` and `standard`. Disabling clears the area and the codes.
+void SetSectionLaserdiscEnabled(Section* section, bool enabled,
+                                Standard standard, DiscType disc_type);
 
 }  // namespace videosynth::gui

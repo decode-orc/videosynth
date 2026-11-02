@@ -62,7 +62,7 @@ Any valid VBI line. The overlap and reserved-range rules still apply.
 
 ## Compatibility with laserdisc codes
 
-When `line_injections.disc_type` is set, no VITS may target a line in the reserved address-code ranges — PAL 6–18 and 319–331, NTSC/PAL-M 10–18 and 273–281. That rules out most of the broadcast lines.
+When [`laserdisc.disc_type`](laserdisc.md#disc_type) is set, no VITS may target a line in the reserved address-code ranges — PAL 6–18 and 319–331, NTSC/PAL-M 10–18 and 273–281. That rules out most of the broadcast lines.
 
 ### PAL
 
@@ -86,7 +86,7 @@ When `line_injections.disc_type` is set, no VITS may target a line in the reserv
 | `virs` | 19, 282 | **Required** |
 
 !!! important "NTSC discs must carry VIRS"
-    IEC 60857 §9.1.3 makes the Video Index Reference Signal mandatory on NTSC laserdiscs. An NTSC or PAL-M project that sets `disc_type` and has no `virs` entry fails validation:
+    IEC 60857 §9.1.3 makes the Video Index Reference Signal mandatory on NTSC laserdiscs. An NTSC or PAL-M project that sets `laserdisc.disc_type` and has no `virs` entry fails validation:
 
     ```text
     Line injection validation error: NTSC and PAL-M laserdisc projects require

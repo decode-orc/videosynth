@@ -383,9 +383,6 @@ TEST_F(ProjectDocumentTest, ChannelEditUndoesAndRedoesEveryField) {
       [](ChannelParameters* c) { c->edge_smear.enabled = true; },
       [](ChannelParameters* c) { c->edge_smear.fraction = 0.2; },
       [](ChannelParameters* c) { c->edge_smear.tau_samples = 4.0; },
-      [](ChannelParameters* c) { c->fm_beat.enabled = true; },
-      [](ChannelParameters* c) { c->fm_beat.carrier_black_hz = 7.1e6; },
-      [](ChannelParameters* c) { c->fm_beat.level_db = -30.0; },
   };
   for (const Edit edit : edits) {
     const ChannelParameters original = document_.project().channel;
@@ -403,6 +400,46 @@ TEST_F(ProjectDocumentTest, ChannelEditUndoesAndRedoesEveryField) {
   EXPECT_EQ(document_.UndoDescription(), QStringLiteral("Edit channel"));
 }
 
+TEST_F(ProjectDocumentTest, LaserdiscEditUndoesAndRedoesEveryField) {
+  using Edit = void (*)(LaserdiscParameters*);
+  const Edit edits[] = {
+      [](LaserdiscParameters* l) { l->enabled = true; },
+      [](LaserdiscParameters* l) { l->disc_type = "CLV"; },
+      [](LaserdiscParameters* l) { l->pilot_burst = true; },
+      [](LaserdiscParameters* l) { l->vbi_burst = true; },
+      [](LaserdiscParameters* l) { l->efm_audio.enabled = true; },
+      [](LaserdiscParameters* l) { l->efm_audio.pair = 2; },
+      [](LaserdiscParameters* l) { l->channel.enabled = true; },
+      [](LaserdiscParameters* l) { l->channel.fm_beat.enabled = true; },
+      [](LaserdiscParameters* l) { l->channel.fm_beat.level_db = -30.0; },
+      [](LaserdiscParameters* l) { l->channel.group_delay.enabled = true; },
+      [](LaserdiscParameters* l) { l->channel.group_delay.scale = 0.5; },
+      [](LaserdiscParameters* l) {
+        l->channel.group_delay.points_ns = {{0.5, 0.0}, {4.0, -80.0}};
+      },
+      [](LaserdiscParameters* l) { l->channel.response_db = {{1.0, -2.0}}; },
+      [](LaserdiscParameters* l) {
+        l->channel.response_by_picture = {{1, {{1.0, 0.0}}}};
+      },
+      [](LaserdiscParameters* l) { l->channel.field2_offset.enabled = true; },
+      [](LaserdiscParameters* l) { l->channel.field2_offset.y_lines = 0.5; },
+  };
+  for (const Edit edit : edits) {
+    const LaserdiscParameters original = document_.project().laserdisc;
+    LaserdiscParameters edited = original;
+    edit(&edited);
+    const int settings_changed = counter_->project_settings_changed;
+    ASSERT_TRUE(document_.SetLaserdisc(edited));
+    EXPECT_EQ(counter_->project_settings_changed, settings_changed + 1);
+    EXPECT_FALSE(document_.SetLaserdisc(edited));
+    ASSERT_TRUE(document_.Undo());
+    EXPECT_EQ(document_.project().laserdisc, original);
+    ASSERT_TRUE(document_.Redo());
+    EXPECT_EQ(document_.project().laserdisc, edited);
+  }
+  EXPECT_EQ(document_.UndoDescription(), QStringLiteral("Edit laserdisc"));
+}
+
 TEST_F(ProjectDocumentTest, ChromaErrorEditUndoesAndRedoesEveryField) {
   using Edit = void (*)(ChromaErrorParameters*);
   const Edit edits[] = {
@@ -414,6 +451,17 @@ TEST_F(ProjectDocumentTest, ChromaErrorEditUndoesAndRedoesEveryField) {
       [](ChromaErrorParameters* c) { c->line_jitter.gain = 0.02; },
       [](ChromaErrorParameters* c) { c->line_jitter.seed_specified = true; },
       [](ChromaErrorParameters* c) { c->line_jitter.seed = 31; },
+      [](ChromaErrorParameters* c) { c->differential.enabled = true; },
+      [](ChromaErrorParameters* c) { c->differential.gain = {{0.0, 0.9}}; },
+      [](ChromaErrorParameters* c) {
+        c->differential.phase_deg = {{100.0, 4.0}};
+      },
+      [](ChromaErrorParameters* c) { c->crosstalk.enabled = true; },
+      [](ChromaErrorParameters* c) { c->crosstalk.v_to_u = 0.1; },
+      [](ChromaErrorParameters* c) { c->crosstalk.u_to_v = -0.1; },
+      [](ChromaErrorParameters* c) {
+        c->crosstalk.alternate_with_switch = true;
+      },
   };
   for (const Edit edit : edits) {
     const ChromaErrorParameters original = document_.project().chroma_error;

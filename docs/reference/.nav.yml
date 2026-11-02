@@ -7,12 +7,15 @@ nav:
   - channel.md
   - chroma-error.md
   - sections.md
-  - section-line-injections.md
   - section-noise.md
   - section-dropouts.md
   - section-osd.md
   - section-audio.md
-  - laserdisc-codes.md
+  - LaserDisc:
+    - laserdisc.md
+    - laserdisc-channel.md
+    - section-laserdisc.md
+    - laserdisc-codes.md
   - vits-types.md
   - asset-roots.md
   - cli-options.md

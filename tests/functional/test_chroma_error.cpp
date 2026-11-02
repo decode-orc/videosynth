@@ -4,7 +4,9 @@
  * Purpose:     End-to-end check of the chroma error on generated colour bars:
  *              demodulated against the generated burst, every bar's hue
  *              shifts by phase_deg and its saturation scales by gain on PAL,
- *              NTSC and PAL-M.
+ *              NTSC and PAL-M; the subcarrier reference agrees with the
+ *              generated burst; crosstalk mixes the decoded U and V; and
+ *              differential gain and phase follow each bar's luma.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -20,6 +22,7 @@
 #include <vector>
 
 #include "videosynth/chroma_error_stage.h"
+#include "videosynth/colour_sequence.h"
 #include "videosynth/fixed_point.h"
 #include "videosynth/frame_line_layout.h"
 #include "videosynth/generation_stage.h"
@@ -160,6 +163,225 @@ TEST(ChromaErrorFunctionalTest, BarsHueAndSaturationShiftAgainstBurst) {
       }
     }
     EXPECT_GT(measured, 6 * 400) << StandardToString(standard);
+  }
+}
+
+// The generated frames of these tests are disc frame 0, colour sequence
+// phase 0, so the frame starts the subcarrier lattice.
+constexpr std::size_t kSequencePhase = 0U;
+
+// U and the transmitted V (W = s V) of a subcarrier phasor measured by
+// Phasor() on `line`: with C = U sin(p) + W cos(p) and p = pi/2 s + offset,
+// the phasor is (W - jU) e^{j offset}.
+void DecodeAxes(std::complex<double> phasor, Standard standard,
+                const LineTimingPrimitive& line, double* u, double* w) {
+  const std::complex<double> axes =
+      phasor * std::polar(1.0, -PictureChromaPhaseOffsetRad(standard, line));
+  *u = -axes.imag();
+  *w = axes.real();
+}
+
+double VSwitch(Standard standard, const LineTimingPrimitive& line) {
+  const bool pal = standard == Standard::kPal || standard == Standard::kPalM;
+  return (pal && PalInvertVAxisForLine(kSequencePhase, line)) ? -1.0 : 1.0;
+}
+
+// The crosstalk demodulates against PictureChromaPhaseOffsetRad and the
+// V-switch, so both must agree with the burst generation emits: PAL and PAL-M
+// burst at +-135 degrees from +U with the decoded V positive (BT.1700 Part B
+// Table 1 item 10f), NTSC burst at 180 degrees (SMPTE 170M Section 10).
+TEST(ChromaErrorFunctionalTest, SubcarrierReferenceMatchesTheGeneratedBurst) {
+  for (Standard standard : {Standard::kPal, Standard::kNtsc, Standard::kPalM}) {
+    Project project = MakeBarsProject(standard);
+    std::vector<SampleFixed> y;
+    std::vector<SampleFixed> c;
+    std::vector<std::string> errors;
+    ASSERT_TRUE(GenerationStage().Generate(project, &y, &c, &errors))
+        << (errors.empty() ? "" : errors[0]);
+    const TimingConstants timing = GetTimingConstants(standard);
+    const std::vector<int> offsets =
+        BuildLineSampleOffsets(BuildLineSampleCounts(
+            standard, timing.lines_per_frame, timing.samples_per_line_4fsc));
+    const ActiveRasterGeometry geometry =
+        GetActiveRasterGeometry(standard, timing.sample_rate_4fsc_hz);
+    int burst_start = 0;
+    int burst_end = 0;
+    BurstRange(standard, timing.sample_rate_4fsc_hz, &burst_start, &burst_end);
+
+    int measured = 0;
+    for (const LineTimingPrimitive& line :
+         BuildFrameTimingPrimitives(standard)) {
+      const int base =
+          offsets[static_cast<std::size_t>(line.line_number_1based - 1)];
+      const std::complex<double> burst =
+          Phasor(c, base + burst_start, base + burst_end);
+      // Picture lines only: the reference is defined for picture chroma.
+      if (std::abs(burst) < 1.0 ||
+          ActiveFrameLineIndex(geometry, line.line_number_1based) < 0) {
+        continue;
+      }
+      double u = 0.0;
+      double w = 0.0;
+      DecodeAxes(burst, standard, line, &u, &w);
+      const double v = VSwitch(standard, line) * w;
+      // The shaped burst envelope biases the four-sample phasor by about
+      // 0.4 degrees; a wrong reference is off by a multiple of 90 degrees or
+      // flips the sign of V, far outside this tolerance.
+      constexpr double kTolerance = 0.01;
+      const double amplitude = std::abs(burst);
+      if (standard == Standard::kNtsc) {
+        ASSERT_NEAR(u / amplitude, -1.0, kTolerance) << line.line_number_1based;
+        ASSERT_NEAR(v / amplitude, 0.0, kTolerance) << line.line_number_1based;
+      } else {
+        ASSERT_NEAR(u / amplitude, -std::sqrt(0.5), kTolerance)
+            << StandardToString(standard) << " line "
+            << line.line_number_1based;
+        ASSERT_NEAR(v / amplitude, std::sqrt(0.5), kTolerance)
+            << StandardToString(standard) << " line "
+            << line.line_number_1based;
+      }
+      ++measured;
+    }
+    EXPECT_GT(measured, 400) << StandardToString(standard);
+  }
+}
+
+// Middle half of bar `bar` of 8 on the line starting at `base`, a whole
+// number of subcarrier cycles long.
+void BarRange(const ActiveRasterGeometry& geometry, int base, int bar,
+              int* start, int* end) {
+  constexpr int kBars = 8;
+  const int window =
+      geometry.active_window_end_samples - geometry.active_window_start_samples;
+  *start = base + geometry.active_window_start_samples +
+           ((4 * bar + 1) * window) / (4 * kBars);
+  *end = base + geometry.active_window_start_samples +
+         ((4 * bar + 3) * window) / (4 * kBars);
+  *end -= (*end - *start) % 4;
+}
+
+TEST(ChromaErrorFunctionalTest, CrosstalkMixesTheDecodedComponents) {
+  constexpr double kVToU = 0.2;
+  constexpr double kUToV = -0.1;
+  for (Standard standard : {Standard::kPal, Standard::kNtsc, Standard::kPalM}) {
+    for (bool alternate : {false, true}) {
+      if (alternate && standard == Standard::kNtsc) {
+        continue;
+      }
+      Project project = MakeBarsProject(standard);
+      std::vector<SampleFixed> y;
+      std::vector<SampleFixed> c;
+      std::vector<std::string> errors;
+      ASSERT_TRUE(GenerationStage().Generate(project, &y, &c, &errors))
+          << (errors.empty() ? "" : errors[0]);
+      project.chroma_error.enabled = true;
+      project.chroma_error.crosstalk = {.enabled = true,
+                                        .v_to_u = kVToU,
+                                        .u_to_v = kUToV,
+                                        .alternate_with_switch = alternate};
+      std::vector<IGenerationStage::FrameScheduleItem> schedule(1U);
+      schedule[0].section = &project.sections[0];
+      std::vector<SampleFixed> mixed = c;
+      ChromaErrorStage(1U).ApplyChromaError(project, schedule, 0U, 1U, &y,
+                                            &mixed);
+
+      const TimingConstants timing = GetTimingConstants(standard);
+      const std::vector<int> offsets =
+          BuildLineSampleOffsets(BuildLineSampleCounts(
+              standard, timing.lines_per_frame, timing.samples_per_line_4fsc));
+      const ActiveRasterGeometry geometry =
+          GetActiveRasterGeometry(standard, timing.sample_rate_4fsc_hz);
+      int measured = 0;
+      for (const LineTimingPrimitive& line :
+           BuildFrameTimingPrimitives(standard)) {
+        const int row = ActiveFrameLineIndex(geometry, line.line_number_1based);
+        const int field_row = row % geometry.active_lines_per_field;
+        if (row < 0 || field_row == 0 ||
+            field_row == geometry.active_lines_per_field - 1) {
+          continue;
+        }
+        const int base =
+            offsets[static_cast<std::size_t>(line.line_number_1based - 1)];
+        const double s = VSwitch(standard, line);
+        const double a = alternate ? s : 1.0;
+        for (int bar = 1; bar < 7; ++bar) {
+          int start = 0;
+          int end = 0;
+          BarRange(geometry, base, bar, &start, &end);
+          double u0 = 0.0;
+          double w0 = 0.0;
+          double u1 = 0.0;
+          double w1 = 0.0;
+          DecodeAxes(Phasor(c, start, end), standard, line, &u0, &w0);
+          DecodeAxes(Phasor(mixed, start, end), standard, line, &u1, &w1);
+          const double v0 = s * w0;
+          const double v1 = s * w1;
+          const double scale = std::hypot(u0, v0);
+          ASSERT_NEAR(u1, u0 + (a * kVToU * v0), 0.002 * scale)
+              << StandardToString(standard) << " line "
+              << line.line_number_1based << " bar " << bar;
+          ASSERT_NEAR(v1, v0 + (a * kUToV * u0), 0.002 * scale)
+              << StandardToString(standard) << " line "
+              << line.line_number_1based << " bar " << bar;
+          ++measured;
+        }
+      }
+      EXPECT_GT(measured, 6 * 400) << StandardToString(standard);
+    }
+  }
+}
+
+TEST(ChromaErrorFunctionalTest, DifferentialGainAndPhaseFollowTheLuma) {
+  // Gain falls by half from blanking to 100 IRE; phase rises 10 degrees.
+  const std::vector<LevelCurvePoint> gain = {{0.0, 1.0}, {100.0, 0.5}};
+  const std::vector<LevelCurvePoint> phase = {{0.0, 0.0}, {100.0, 10.0}};
+  for (Standard standard : {Standard::kPal, Standard::kNtsc}) {
+    Project project = MakeBarsProject(standard);
+    std::vector<SampleFixed> y;
+    std::vector<SampleFixed> c;
+    std::vector<std::string> errors;
+    ASSERT_TRUE(GenerationStage().Generate(project, &y, &c, &errors))
+        << (errors.empty() ? "" : errors[0]);
+    project.chroma_error.enabled = true;
+    project.chroma_error.differential = {
+        .enabled = true, .gain = gain, .phase_deg = phase};
+    std::vector<IGenerationStage::FrameScheduleItem> schedule(1U);
+    schedule[0].section = &project.sections[0];
+    std::vector<SampleFixed> shifted = c;
+    ChromaErrorStage(1U).ApplyChromaError(project, schedule, 0U, 1U, &y,
+                                          &shifted);
+
+    const TimingConstants timing = GetTimingConstants(standard);
+    const SignalLevels levels = GetSignalLevels(project.cvbs_presets);
+    const std::vector<int> offsets =
+        BuildLineSampleOffsets(BuildLineSampleCounts(
+            standard, timing.lines_per_frame, timing.samples_per_line_4fsc));
+    const ActiveRasterGeometry geometry =
+        GetActiveRasterGeometry(standard, timing.sample_rate_4fsc_hz);
+    // One mid-picture line of field 1.
+    const int line_1based = Is625LineStandard(standard) ? 160 : 140;
+    const int base = offsets[static_cast<std::size_t>(line_1based - 1)];
+    for (int bar = 1; bar < 7; ++bar) {
+      int start = 0;
+      int end = 0;
+      BarRange(geometry, base, bar, &start, &end);
+      double luma_mv = 0.0;
+      for (int n = start; n < end; ++n) {
+        luma_mv += SampleFixedToMillivolts(y[static_cast<std::size_t>(n)]);
+      }
+      luma_mv /= static_cast<double>(end - start);
+      const double ire = 100.0 * (luma_mv - levels.blanking_mv) /
+                         (levels.white_mv - levels.blanking_mv);
+      const std::complex<double> before = Phasor(c, start, end);
+      const std::complex<double> after = Phasor(shifted, start, end);
+      EXPECT_NEAR(std::abs(after) / std::abs(before), 1.0 - (0.005 * ire),
+                  0.003)
+          << StandardToString(standard) << " bar " << bar;
+      EXPECT_NEAR(std::remainder(std::arg(after) - std::arg(before), 2 * kPi) *
+                      180.0 / kPi,
+                  0.1 * ire, 0.2)
+          << StandardToString(standard) << " bar " << bar;
+    }
   }
 }
 

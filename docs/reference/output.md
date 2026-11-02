@@ -6,8 +6,6 @@ Where the generated media goes and in what form. Required.
 output:
   video_path: "{output}/pal_disc.cvbs"
   signal_type: composite
-  efm_audio:
-    pair: 0
   truth: true
 ```
 
@@ -17,10 +15,9 @@ output:
 |-----|------|----------|--------|---------|
 | `video_path` | string | Yes | A path, optionally with an [asset root token](asset-roots.md) | — |
 | `signal_type` | string | No | `composite`, `yc` | `composite` |
-| `efm_audio` | map | No | See below | absent |
 | `truth` | bool | No | `true`, `false` | `false` |
 
-No other key is accepted. In particular the metadata sidecar path is **not** configurable — it is derived from `video_path` and always sits beside it.
+No other key is accepted. In particular the metadata sidecar path is **not** configurable — it is derived from `video_path` and always sits beside it. LaserDisc EFM digital audio is selected in the [`laserdisc`](laserdisc.md#efm_audio) block; its files are written here, beside the video.
 
 ## `video_path`
 
@@ -55,29 +52,6 @@ Parent directories are created automatically.
 
 Luma and chroma are generated independently regardless; this only selects whether they are combined before writing.
 
-## `efm_audio`
-
-Its presence enables laserdisc EFM digital audio output for one channel pair. Omit the block to disable.
-
-PAL uses the 625-line definition of IEC 60856 Amd 2 clause 13. NTSC and PAL-M use the 525-line definition of IEC 60857 Amd 2 clause 13: no LaserVision standard names PAL-M, and a PAL-M disc is a 525-line disc at the NTSC frame rate, so it takes the NTSC sample sequence and identifies as a 525-line disc in its table of contents.
-
-| Key | Type | Required | Range |
-|-----|------|----------|-------|
-| `pair` | int | Yes | 0–7 |
-
-Constraints:
-
-| Rule | Severity |
-|------|----------|
-| `pair` in 0–7 | Error |
-| Standard must be `PAL`, `NTSC` or `PAL_M` (not `SECAM`) | Error |
-| At most 79 `programme_area` sections (one EFM track each) | Error |
-| No section declares `pair` — nothing to encode, no `.efm` written | Warning |
-| A `programme_area` section under 4 s (6 s for the first) | Warning |
-| No `lead_in` section, so no table of contents | Warning |
-
-The pair's tone parameters are declared only in the per-section [`audio:`](section-audio.md) blocks; its 48 kHz WAV track is written as normal and is unaffected. See [Audio](../user-manual/audio.md#laserdisc-efm-digital-audio).
-
 ## `truth`
 
 `true` writes the picture truth: the component Y, U and V that went into the composite modulator, for scoring a decoder against the source picture rather than against its own Y/C separation. PAL, NTSC and PAL-M only.
@@ -86,10 +60,11 @@ The truth is taken after every step applied before modulation, and before any im
 
 | Included | Excluded |
 |----------|----------|
-| The source-to-4fsc [horizontal mapping](sections.md#horizontal_resample) | [`channel`](channel.md) (timing offset, edge smear, FM beat) |
-| The section's [`luma_bandwidth`](sections.md#luma_bandwidth) limit | [`chroma_error`](chroma-error.md) |
-| The chroma low-pass (33-tap Hamming-windowed 1.3 MHz for PAL and PAL-M, 17-tap 1.2 MHz for NTSC) | [Noise](section-noise.md) and [dropouts](section-dropouts.md) |
-| [`chroma_line_sign`](sections.md#chroma_line_sign) regions | [OSD](section-osd.md) text (drawn afterwards; a warning) |
+| The source-to-4fsc [horizontal mapping](sections.md#horizontal_resample) | [`channel`](channel.md) (timing offset, edge smear) |
+| The section's [`luma_bandwidth`](sections.md#luma_bandwidth) limit | The [LaserVision channel](laserdisc-channel.md) (FM beat, group delay, replay response) |
+| The chroma low-pass (33-tap Hamming-windowed 1.3 MHz for PAL and PAL-M, 17-tap 1.2 MHz for NTSC) | [`chroma_error`](chroma-error.md) |
+| [`chroma_line_sign`](sections.md#chroma_line_sign) regions | [Noise](section-noise.md) and [dropouts](section-dropouts.md) |
+| [`laserdisc.channel.field2_offset`](laserdisc-channel.md#field2_offset), which changes the picture that is modulated | [OSD](section-osd.md) text (drawn afterwards; a warning) |
 
 ### `.truth`
 

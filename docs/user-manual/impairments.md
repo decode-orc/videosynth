@@ -2,7 +2,7 @@
 
 A clean synthetic signal proves that a decoder works. A deliberately degraded one proves how it fails. videosynth can add controlled amounts of noise and dropout to any section, with reproducible seeds, so a decoder or restoration tool can be exercised against a known level of damage.
 
-Noise and dropouts are declared per section, so damage can vary along the timeline — a clean passage, then a noisy one, then a scratch that appears and fades. So is the luma bandwidth limit. The `channel:` and `chroma_error:` blocks are project-level: the first describes the pressing, the second the capture.
+Noise and dropouts are declared per section, so damage can vary along the timeline — a clean passage, then a noisy one, then a scratch that appears and fades. So is the luma bandwidth limit. The `channel:` and `chroma_error:` blocks are project-level: the first describes the pressing, the second the capture. A LaserDisc project can add the LaserVision pressing and replay channel in `laserdisc.channel`.
 
 ## Noise
 
@@ -211,28 +211,51 @@ This is ground truth for the flagged dropouts. A dropout-detection or concealmen
 
 A real multi-capture set rarely comes from one disc. Two pressings of the same title carry the same programme but different pressing noise, and a glass master can record defects of its own. Two players also lock their capture clocks with a slightly different sampling phase, so one capture's samples fall a fraction of a sample away from another's. A stacking tool has to group the captures by pressing and align them in time before averaging.
 
-The project-level `channel:` block describes the pressing and the channel it is read through:
+The project-level `channel:` block describes the pressing and the channel it is read through, on any standard:
 
 ```yaml
 channel:
   timing_offset_samples: -0.3   # this pressing arrives 0.3 sample early
   edge_smear: { fraction: 0.12, tau_samples: 3.0 }
-  fm_beat: { level_db: -24.0 }  # 625-line PAL only
 ```
 
 - `timing_offset_samples` shifts the whole frame — sync, VBI and picture — by that many 4fsc samples; positive is later. The range is −8.0 to 8.0. Fractional offsets are a band-limited delay, accurate to well within 0.001 sample up to 6 MHz.
 - `edge_smear` makes every sharp transition trail: a `fraction` (up to 0.5) of the signal passes through a low-pass with a time constant of `tau_samples` 4fsc samples. It applies to the whole frame, VITS included, so the smear can be measured from a VITS bar edge.
-- `fm_beat` adds the FM-beat herringbone that some PAL LaserDisc glass masters recorded: a faint diagonal pattern in saturated flat colour, at 2.7–3.2 MHz depending on the colour's brightness. `level_db` sets it relative to the chroma of a 50 IRE colour. The beat is computed from the picture itself, so every capture of the pressing carries exactly the same beat, and stacking does not remove it. Greyscale areas carry none. It is a validation error on NTSC, PAL-M and SECAM.
-- All three happen before noise is added, in the order beat, smear, offset. The capture noise is added afterwards, so its configured spectrum is exactly what the output carries. The pressing (`shared`) noise is delayed by the same timing offset as the picture, so it stays on the picture's samples; the smear does not apply to it.
+- Both happen before noise is added, smear first. The capture noise is added afterwards, so its configured spectrum is exactly what the output carries. The pressing (`shared`) noise is delayed by the same timing offset as the picture, so it stays on the picture's samples; the smear does not apply to it.
 
-Everything in `channel:` belongs to the pressing, so every project of one pressing uses the same block. A pressing is then:
+### The LaserVision channel
+
+A LaserDisc project can also model what the glass master, the disc and a player's replay path do to the signal, in the [`laserdisc.channel`](../reference/laserdisc-channel.md) block:
+
+```yaml
+laserdisc:
+  channel:
+    fm_beat: { level_db: -24.0 }               # 625-line PAL only
+    group_delay: { preset: iec60856_nominal }  # 625-line PAL preset
+    response_db: [[0.0, 0.0], [4.4, -2.0], [5.0, -6.0], [5.5, -20.0]]
+    field2_offset: { x_samples: 0.25 }
+```
+
+| Key | What it models |
+|-----|----------------|
+| [`fm_beat`](../reference/laserdisc-channel.md#fm_beat) | The FM-beat herringbone some PAL glass masters recorded: a faint diagonal pattern in saturated flat colour at 2.7–3.2 MHz, computed from the picture itself, so every capture of the pressing carries the same beat and stacking does not remove it. 625-line PAL only |
+| [`group_delay`](../reference/laserdisc-channel.md#group_delay) | The IEC 60856 group-delay pre-distortion left in a signal decoded without a player's replay filter — the nominal curve, or a custom one, scaled |
+| [`response_db`](../reference/laserdisc-channel.md#response_db) | The player's replay amplitude response, which cuts the upper chroma sideband |
+| [`response_by_picture`](../reference/laserdisc-channel.md#response_by_picture) | A replay response that changes across a CAV disc, interpolated by picture number |
+| [`field2_offset`](../reference/laserdisc-channel.md#field2_offset) | Field 2 misregistered against field 1, in the picture before encoding |
+
+The beat and the replay filter run before the general edge smear and timing offset, which apply to them as a player's readout would. Each key at zero is the identity, so the output is bit-identical to leaving it out. See [the stage order](../reference/laserdisc-channel.md#stage-order).
+
+### Pressing or capture
+
+Everything in `channel:` and `laserdisc.channel:` belongs to the pressing, so every project of one pressing uses the same blocks. A pressing is then:
 
 | Belongs to | Keys | Same across captures of one pressing? |
 |------------|------|----------------------------------------|
-| The pressing | `channel:`, `noise.shared`, dropouts with `anchor: disc` | Yes |
+| The pressing | `channel:`, `laserdisc.channel:`, `noise.shared`, dropouts with `anchor: disc` | Yes |
 | One capture | capture `noise_db`/`noise_spread_db`/`noise_seed`/`spectrum`, section-anchored `dropouts`, `chroma_error`, `luma_bandwidth` | No: a new seed (or player) for every capture |
 
-The repository's [pressing sets](../misc/example-projects.md#pressings-and-captures) follow this pattern. There are two pressings per standard, offset by one whole sample, a third PAL pressing that adds the FM beat, an edge smear and a 0.15-sample offset, and a fourth PAL pressing with unflagged, disc-anchored pressing defects. Each has six derived captures, one of which starts later and one of which replays a range. No two pressings share a capture seed. See [channel](../reference/channel.md) for the full reference.
+The repository's [pressing sets](../misc/example-projects.md#pressings-and-captures) follow this pattern. There are two pressings per standard, offset by one whole sample, a third PAL pressing that adds the FM beat, an edge smear and a 0.15-sample offset, and a fourth PAL pressing with unflagged, disc-anchored pressing defects. Each has six derived captures, one of which starts later and one of which replays a range. No two pressings share a capture seed. See [channel](../reference/channel.md) and [LaserVision channel](../reference/laserdisc-channel.md) for the full reference.
 
 ## Chroma gain and phase error
 
@@ -248,9 +271,11 @@ chroma_error:
 - Only picture chroma changes. The burst, VBI, VITS lines and blanking are untouched, so a decoder that locks to burst sees a real hue and saturation error.
 - With `include_burst: true` the burst takes the error too: a whole chroma path (or an FM/MTF loss) rather than a mis-adjusted picture path. A decoder that references its chroma gain to the burst can then measure and correct the gain, and sees no hue error against burst.
 - `line_jitter` adds a fresh Gaussian deviation to phase and gain on every picture line.
+- [`differential`](../reference/chroma-error.md#differential) makes gain and phase depend on the luma level under the chroma — differential gain and phase, given as `[IRE, value]` curves. It leaves residual subcarrier in flat colour for every PAL comb method.
+- [`crosstalk`](../reference/chroma-error.md#crosstalk) leaks a fraction of V into U, or U into V, as a player's chroma path can. With `alternate_with_switch: true` (PAL and PAL-M only) the leak alternates line by line in the decoded picture.
 - On PAL and PAL-M a constant phase error alternates in sign from line to line after decoding, which a delay-line decoder turns into a small loss of saturation; NTSC shows it as a hue shift.
 
-The chroma error belongs to one **capture**, not the pressing: different players reading one disc each have their own, so captures of one pressing can differ in hue and saturation while their pressing's [channel](../reference/channel.md) impairments stay identical. Per-line jitter averages away across captures; a constant error does not. The pressing table in [Pressings and the channel](#pressings-and-the-channel) puts `chroma_error` with the capture keys.
+The chroma error belongs to one **capture**, not the pressing: different players reading one disc each have their own, so captures of one pressing can differ in hue and saturation while their pressing's [channel](../reference/channel.md) impairments stay identical. Per-line jitter averages away across captures; a constant error does not. The pressing table in [Pressing or capture](#pressing-or-capture) puts `chroma_error` with the capture keys.
 
 The stage runs after the channel and before noise. See [chroma_error](../reference/chroma-error.md) for the full reference.
 

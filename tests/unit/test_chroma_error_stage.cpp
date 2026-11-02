@@ -115,7 +115,7 @@ TEST(ChromaErrorStageTest, ParserRejectsEmptyBlocks) {
   ASSERT_FALSE(result.ok);
   EXPECT_EQ(result.errors[0],
             "chroma_error block must set at least one of: gain, phase_deg, "
-            "line_jitter.");
+            "line_jitter, differential, crosstalk.");
 
   result = ParseWithChromaError("chroma_error:\n  line_jitter: { seed: 3 }\n");
   ASSERT_FALSE(result.ok);

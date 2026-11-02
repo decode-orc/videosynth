@@ -7,6 +7,10 @@ chroma_error:
   gain: 1.05
   phase_deg: 2.0
   line_jitter: { phase_deg: 0.5, gain: 0.01, seed: 5 }
+  differential:
+    gain: [[0, 1.00], [50, 0.98], [100, 0.95]]
+    phase_deg: [[0, 0.0], [50, 1.0], [100, 2.5]]
+  crosstalk: { v_to_u: 0.3, alternate_with_switch: true }
   include_burst: false
 ```
 
@@ -19,6 +23,8 @@ Unlike [`channel`](channel.md), which belongs to the pressing, the chroma error 
 | `gain` | float | No | 0.5 to 1.5 | 1.0 | Chroma amplitude multiplier (saturation) |
 | `phase_deg` | float | No | −180.0 to 180.0 | 0.0 | Chroma phase advance relative to burst (hue), in degrees |
 | `line_jitter` | map | No | — | — | Per-line random variation, below |
+| `differential` | map | No | — | — | Differential gain and phase, below |
+| `crosstalk` | map | No | — | — | U/V crosstalk, below |
 | `include_burst` | bool | No | `true`, `false` | `false` | Apply the error to the colour burst as well; see [Including the burst](#including-the-burst) |
 
 ### `line_jitter`
@@ -29,7 +35,38 @@ Unlike [`channel`](channel.md), which belongs to the pressing, the chroma error 
 | `gain` | float | No | 0.0 to 0.1 | Standard deviation of the per-line gain, about `gain` |
 | `seed` | integer | No | any | Fixed RNG seed. Omit for a run-specific seed |
 
-`chroma_error:` must set at least one of `gain`, `phase_deg` or `line_jitter` (`include_burst` alone does not count), and `line_jitter:` must set at least one of its `phase_deg` or `gain`; an empty block is a parse error.
+### `differential`
+
+Chroma gain and phase that depend on the luma level the chroma sits on: the classic composite non-linearity, which leaves residual subcarrier in flat colour for every PAL comb method (Clarke, BBC RD 1988/11).
+
+| Key | Type | Required | Range | Description |
+|-----|------|----------|-------|-------------|
+| `gain` | list of [IRE, gain] pairs | One of the two | IRE −50 to 150, strictly ascending; gain 0.5 to 1.5 | Gain multiplier against luma level |
+| `phase_deg` | list of [IRE, degrees] pairs | One of the two | IRE −50 to 150, strictly ascending; phase −30 to 30 | Phase advance against luma level |
+
+- The luma level is the Y signal under each chroma sample, in IRE: 100 × (Y − blanking) / (white − blanking). On NTSC with 7.5 IRE setup, black is at 7.5.
+- Breakpoints are joined by straight lines and the end values are held beyond them. An absent curve is the identity (gain 1, phase 0).
+- The gain multiplies `gain` (and the line's jitter) and the phase adds to `phase_deg`, sample by sample.
+- Curves that are gain 1 and phase 0 everywhere are the identity, and the output is bit-identical to leaving `differential` out.
+
+### `crosstalk`
+
+A 2×2 mixing of the decoded colour-difference components, as a player's chroma path that leaks one into the other:
+
+```text
+U' = U + a · v_to_u · V
+V' = V + a · u_to_v · U
+```
+
+| Key | Type | Required | Range | Default | Description |
+|-----|------|----------|-------|---------|-------------|
+| `v_to_u` | float | One of the two | −0.5 to 0.5 | 0.0 | Fraction of V added to U |
+| `u_to_v` | float | One of the two | −0.5 to 0.5 | 0.0 | Fraction of U added to V |
+| `alternate_with_switch` | bool | No | `true`, `false` | `false` | Make `a` the line's PAL V-switch sign; otherwise `a` is 1 |
+
+U and V are the components a decoder recovers, with the PAL V-switch removed (NTSC: B−Y and R−Y). With `alternate_with_switch: true` the crosstalk alternates line by line in the decoded picture — which is the same as a fixed leak in the transmitted signal, before the switch is undone. That needs a V-switch, so it is PAL and PAL-M only. Zero terms are the identity, and the output is bit-identical to leaving `crosstalk` out.
+
+`chroma_error:` must set at least one of `gain`, `phase_deg`, `line_jitter`, `differential` or `crosstalk` (`include_burst` alone does not count); `line_jitter:` must set at least one of its `phase_deg` or `gain`, `differential:` one of its `gain` or `phase_deg`, and `crosstalk:` one of its `v_to_u` or `u_to_v`. An empty block is a parse error.
 
 ## Behaviour
 
@@ -40,6 +77,8 @@ Unlike [`channel`](channel.md), which belongs to the pressing, the chroma error 
 | `gain` | Every picture line's chroma amplitude is scaled |
 | `phase_deg` | Every picture line's chroma phase is advanced relative to burst |
 | `line_jitter` | Each picture line adds its own Gaussian deviation to the phase and gain |
+| `differential` | Each sample's gain and phase also follow the luma under it |
+| `crosstalk` | Each picture line's decoded U and V are mixed |
 | `include_burst: true` | Every line's burst is scaled and rotated as well |
 
 ### Picture chroma only
@@ -52,6 +91,7 @@ By default the error is applied to chroma inside the active window of active pic
 
 - A picture line's burst takes that line's own error, jitter included, so picture and burst move together.
 - Bursts on VBI and VITS lines take the block's `gain` and `phase_deg`, without jitter.
+- `differential` and `crosstalk` apply to the burst as they do to the picture. The burst sits on blanking, so it takes the differential gain and phase at 0 IRE.
 - The picture chroma is bit-identical to `include_burst: false`; only the bursts change.
 
 A burst-locked decoder therefore sees no hue error against burst, and one that references its chroma gain to the burst amplitude can measure and correct the gain. The window rotated around each burst is the burst gate widened by 8 samples each side, enough to follow the largest [channel](channel.md) timing offset. The burst is short against the Hilbert transformer, so a phase rotation of the burst is accurate to about 1° and 3 %; a pure gain error is exact.
@@ -64,7 +104,9 @@ On each picture line the stage forms the quadrature of the chroma with a Hilbert
 g · (C · cos θ − Ĉ · sin θ)
 ```
 
-which scales the subcarrier by `g` and advances its phase by `θ`. The Hilbert transformer is a 47-tap Kaiser-windowed design, accurate to within 10⁻⁴ from 2 MHz to 2 MHz below Nyquist on every standard (2–6.87 MHz on 625-line, 2–5.16 MHz on 525-line), which covers every chroma band. It is computed from the active window's own samples, so the burst never leaks into it.
+which scales the subcarrier by `g` and advances its phase by `θ`. With `differential`, `g` and `θ` change sample by sample with the luma. The Hilbert transformer is a 47-tap Kaiser-windowed design, accurate to within 10⁻⁴ from 2 MHz to 2 MHz below Nyquist on every standard (2–6.87 MHz on 625-line, 2–5.16 MHz on 525-line), which covers every chroma band. It is computed from the active window's own samples, so the burst never leaks into it.
+
+Crosstalk is applied first. Each line is demodulated against the subcarrier reference the generator modulated it with — U on the sin axis and V on the cos axis of the 4fsc lattice, with the line's V-switch sign — giving U = C sin φ − Ĉ cos φ and the transmitted V as C cos φ + Ĉ sin φ. The two are mixed, and the line is remodulated before the gain and phase are applied.
 
 On PAL and PAL-M the phase advance is the same on every line, so it alternates in sign once the decoder undoes the V-axis switch — the classic PAL hue error that a delay-line decoder turns into a saturation loss.
 
@@ -79,7 +121,7 @@ Each picture line always draws two values, phase then gain, whether or not each 
 ## Stage order
 
 1. Generation
-2. [Channel](channel.md) (timing offset)
+2. [LaserVision channel](laserdisc-channel.md) and [channel](channel.md)
 3. **Chroma error**
 4. Noise (capture layer, then shared layer)
 5. Dropouts
@@ -92,3 +134,5 @@ The chroma error runs after the channel, so pressing impairments are computed fr
 - Values outside their ranges, or not finite, are validation errors.
 - A non-numeric value, a non-boolean `include_burst`, an unknown key or an empty block is a parse error.
 - SECAM is a validation error: it has no quadrature chroma to rotate.
+- `crosstalk.alternate_with_switch: true` on NTSC is a validation error: NTSC has no V-switch.
+- A `differential` entry that is not a numeric `[IRE, value]` pair, or levels that do not ascend, is an error.

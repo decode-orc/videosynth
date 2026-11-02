@@ -258,7 +258,7 @@ TEST(PulldownGenerationTest, CavFilmKeepsTheColourSequenceOnDiscFrames) {
   project.cvbs_presets.video_standard_preset = Standard::kNtsc;
   project.cvbs_presets.sample_encoding_preset = "CVBS_U10_4FSC";
   project.cvbs_presets.signal_state_preset = "STANDARD_STABLE_LOCKED";
-  project.line_injections.disc_type = "CAV";
+  project.laserdisc.disc_type = "CAV";
   Section film =
       MakeFilm("Film", 0, 9, CadencePhase::kA, CadenceContinuity::kRestart);
   film.section_type = SectionType::kProgrammeArea;

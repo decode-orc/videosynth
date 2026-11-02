@@ -36,8 +36,9 @@ Project MakeLaserdiscProject(Standard standard, DiscType disc_type,
   project.cvbs_presets.video_standard_preset = standard;
   project.output.video_path = "out/video.cvbs";
   project.output.metadata_path = "out/video.meta";
-  // disc_type and the VITS set are project-wide.
-  project.line_injections.disc_type = DiscTypeToString(disc_type);
+  // The disc format and the VITS set are project-wide.
+  project.laserdisc.enabled = true;
+  project.laserdisc.disc_type = DiscTypeToString(disc_type);
   if (standard == Standard::kNtsc || standard == Standard::kPalM) {
     // IEC 60857 §9.1.3: System M laserdisc discs need a virs reference.
     project.line_injections.vits.push_back(VitsInjection{"virs", {19, 282}});
@@ -130,14 +131,12 @@ TEST(LineInjectionPresenterTest,
 TEST(LineInjectionPresenterTest, ReconcileReSeedsLaserdiscSetOnStandardChange) {
   // PAL laserdisc set → switch to NTSC must re-seed the NTSC laserdisc set.
   ProjectLineInjections pal;
-  pal.disc_type = "CAV";
   pal.placement = VitsPlacement::kLaserdisc;
   pal.vits = LaserdiscVitsSet(Standard::kPal);
 
   const ProjectLineInjections ntsc =
       ReconcileVitsForStandard(pal, Standard::kNtsc);
 
-  EXPECT_EQ(ntsc.disc_type, "CAV");
   EXPECT_EQ(ntsc.placement, VitsPlacement::kLaserdisc);
   EXPECT_EQ(ntsc.vits, LaserdiscVitsSet(Standard::kNtsc));
 }
@@ -169,18 +168,16 @@ TEST(LineInjectionPresenterTest, ReconcileKeepsStillValidVitsTypes) {
   EXPECT_EQ(palm.vits[0].vits_type, "virs");
 }
 
-TEST(LineInjectionPresenterTest, ReconcileClearsLaserdiscFormatForSecam) {
-  // There is no SECAM LaserVision format: the disc format is dropped and
-  // laserdisc placement falls back to standard placement.
+TEST(LineInjectionPresenterTest, ReconcileDropsLaserdiscPlacementForSecam) {
+  // There is no SECAM LaserVision format: laserdisc placement falls back to
+  // standard placement.
   ProjectLineInjections pal;
-  pal.disc_type = "CAV";
   pal.placement = VitsPlacement::kLaserdisc;
   pal.vits = LaserdiscVitsSet(Standard::kPal);
 
   const ProjectLineInjections secam =
       ReconcileVitsForStandard(pal, Standard::kSecam);
 
-  EXPECT_TRUE(secam.disc_type.empty());
   EXPECT_EQ(secam.placement, VitsPlacement::kStandard);
   EXPECT_TRUE(secam.vits.empty());
 }

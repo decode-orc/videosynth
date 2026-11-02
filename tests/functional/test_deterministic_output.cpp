@@ -84,7 +84,7 @@ Project MakeDeterministicProject(const std::filesystem::path& output_dir,
       (output_dir / ("videosynth_determinism_" + run_tag + ".meta")).string();
 
   // Laserdisc format and VITS complement are project-wide decisions.
-  project.line_injections.disc_type = "CAV";
+  project.laserdisc.disc_type = "CAV";
   project.line_injections.vits.push_back(VitsInjection{"uk-national", {19}});
 
   Section lead_in;

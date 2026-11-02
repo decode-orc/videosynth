@@ -59,7 +59,7 @@ Section::LineInjection MakeLaserdiscInjection() {
 TEST(CrossInjectionValidationTest, RejectsPalVits17WhenLaserdiscIsActive) {
   // vits17 targets line 17 which is in the PAL reserved range 6–18.
   Project p = MakeBasePalProject();
-  p.line_injections.disc_type = "CAV";
+  p.laserdisc.disc_type = "CAV";
   p.line_injections.vits.push_back(VitsInjection{"vits17", {17}});
   Section s = MakePalSection();
   s.line_injections.push_back(MakeLaserdiscInjection());
@@ -76,7 +76,7 @@ TEST(CrossInjectionValidationTest,
      RejectsPalItuMultiburstWhenLaserdiscIsActive) {
   // itu-multiburst targets line 18, inside PAL reserved range 6–18.
   Project p = MakeBasePalProject();
-  p.line_injections.disc_type = "CAV";
+  p.laserdisc.disc_type = "CAV";
   p.line_injections.vits.push_back(VitsInjection{"itu-multiburst", {18}});
   Section s = MakePalSection();
   s.line_injections.push_back(MakeLaserdiscInjection());
@@ -93,7 +93,7 @@ TEST(CrossInjectionValidationTest,
      RejectsPalItuCompositeWhenLaserdiscIsActive) {
   // itu-composite targets line 330, inside PAL reserved range 319–331.
   Project p = MakeBasePalProject();
-  p.line_injections.disc_type = "CAV";
+  p.laserdisc.disc_type = "CAV";
   p.line_injections.vits.push_back(VitsInjection{"itu-composite", {330}});
   Section s = MakePalSection();
   s.line_injections.push_back(MakeLaserdiscInjection());
@@ -110,7 +110,7 @@ TEST(CrossInjectionValidationTest,
      RejectsPalItuCombinationWhenLaserdiscIsActive) {
   // itu-combination targets line 331, inside PAL reserved range 319–331.
   Project p = MakeBasePalProject();
-  p.line_injections.disc_type = "CAV";
+  p.laserdisc.disc_type = "CAV";
   p.line_injections.vits.push_back(VitsInjection{"itu-combination", {331}});
   Section s = MakePalSection();
   s.line_injections.push_back(MakeLaserdiscInjection());
@@ -129,7 +129,7 @@ TEST(CrossInjectionValidationTest,
      RejectsNtscNtc7CompositeWhenLaserdiscIsActive) {
   // ntc7-composite targets line 17, inside NTSC reserved range 10–18.
   Project p = MakeBaseNtscProject();
-  p.line_injections.disc_type = "CAV";
+  p.laserdisc.disc_type = "CAV";
   p.line_injections.vits.push_back(VitsInjection{"ntc7-composite", {17}});
   Section s = MakePalSection();
   s.line_injections.push_back(MakeLaserdiscInjection());
@@ -146,7 +146,7 @@ TEST(CrossInjectionValidationTest,
      RejectsNtscFccMultiburstWhenLaserdiscIsActive) {
   // fcc-multiburst targets line 18, inside NTSC reserved range 10–18.
   Project p = MakeBaseNtscProject();
-  p.line_injections.disc_type = "CAV";
+  p.laserdisc.disc_type = "CAV";
   p.line_injections.vits.push_back(VitsInjection{"fcc-multiburst", {18}});
   Section s = MakePalSection();
   s.line_injections.push_back(MakeLaserdiscInjection());
@@ -163,7 +163,7 @@ TEST(CrossInjectionValidationTest,
      RejectsNtscNtc7CombinationWhenLaserdiscIsActive) {
   // ntc7-combination targets line 280, inside NTSC reserved range 273–281.
   Project p = MakeBaseNtscProject();
-  p.line_injections.disc_type = "CAV";
+  p.laserdisc.disc_type = "CAV";
   p.line_injections.vits.push_back(VitsInjection{"ntc7-combination", {280}});
   Section s = MakePalSection();
   s.line_injections.push_back(MakeLaserdiscInjection());
@@ -180,7 +180,7 @@ TEST(CrossInjectionValidationTest,
      RejectsNtscFccCompositeWhenLaserdiscIsActive) {
   // fcc-composite targets line 281, inside NTSC reserved range 273–281.
   Project p = MakeBaseNtscProject();
-  p.line_injections.disc_type = "CAV";
+  p.laserdisc.disc_type = "CAV";
   p.line_injections.vits.push_back(VitsInjection{"fcc-composite", {281}});
   Section s = MakePalSection();
   s.line_injections.push_back(MakeLaserdiscInjection());
@@ -199,7 +199,7 @@ TEST(CrossInjectionValidationTest,
      AcceptsPalUkNationalOnLine19WhenLaserdiscIsActive) {
   // uk-national targets line 19, outside the PAL reserved range 6–18 / 319–331.
   Project p = MakeBasePalProject();
-  p.line_injections.disc_type = "CAV";
+  p.laserdisc.disc_type = "CAV";
   p.line_injections.vits.push_back(VitsInjection{"uk-national", {19}});
   Section s = MakePalSection();
   s.line_injections.push_back(MakeLaserdiscInjection());
@@ -214,7 +214,7 @@ TEST(CrossInjectionValidationTest,
      AcceptsPalVits20OnLine20WhenLaserdiscIsActive) {
   // vits20 targets line 20, outside the PAL reserved range.
   Project p = MakeBasePalProject();
-  p.line_injections.disc_type = "CAV";
+  p.laserdisc.disc_type = "CAV";
   p.line_injections.vits.push_back(VitsInjection{"vits20", {20}});
   Section s = MakePalSection();
   s.line_injections.push_back(MakeLaserdiscInjection());
@@ -229,7 +229,7 @@ TEST(CrossInjectionValidationTest,
      AcceptsNtscVirsOnLines19And282WhenLaserdiscIsActive) {
   // virs targets lines 19 and 282 — both outside NTSC reserved ranges.
   Project p = MakeBaseNtscProject();
-  p.line_injections.disc_type = "CAV";
+  p.laserdisc.disc_type = "CAV";
   p.line_injections.vits.push_back(VitsInjection{"virs", {19, 282}});
   Section s = MakePalSection();
   s.line_injections.push_back(MakeLaserdiscInjection());
@@ -246,7 +246,7 @@ TEST(CrossInjectionValidationTest,
 
 TEST(CrossInjectionValidationTest, RejectsPalLineContentSectionInjection) {
   Project p = MakeBasePalProject();
-  p.line_injections.disc_type = "CAV";
+  p.laserdisc.disc_type = "CAV";
   Section s = MakePalSection();
   s.line_injections.push_back(MakeLaserdiscInjection());
 
@@ -265,7 +265,7 @@ TEST(CrossInjectionValidationTest, RejectsPalLineContentSectionInjection) {
 
 TEST(CrossInjectionValidationTest, RejectsNtscLineContentSectionInjection) {
   Project p = MakeBaseNtscProject();
-  p.line_injections.disc_type = "CAV";
+  p.laserdisc.disc_type = "CAV";
   p.line_injections.vits.push_back(VitsInjection{"virs", {19, 282}});
   Section s = MakePalSection();
   s.line_injections.push_back(MakeLaserdiscInjection());
@@ -288,6 +288,7 @@ TEST(CrossInjectionValidationTest, RejectsSectionVitsInjection) {
   // project-wide now.
   Project p = MakeBasePalProject();
   Section s = MakePalSection();
+  s.section_type = SectionType::kUnknown;
   Section::LineInjection vits;
   vits.type = "vits";
   vits.target_lines = {17};
@@ -311,6 +312,7 @@ TEST(CrossInjectionValidationTest,
   p.line_injections.vits.push_back(VitsInjection{"vits17", {17}});
   p.line_injections.vits.push_back(VitsInjection{"itu-multiburst", {18}});
   Section s = MakePalSection();
+  s.section_type = SectionType::kUnknown;
   p.sections.push_back(s);
 
   ProjectValidator v;

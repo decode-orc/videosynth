@@ -21,15 +21,20 @@ A project has exactly one video standard, one sample encoding and one signal sta
 project:          # Name, version, description
 cvbs_presets:     # The signal format — one per project
 output:           # Where the media goes, and in what form
-line_injections:  # Project-wide: disc format and the VITS set
+line_injections:  # Project-wide VITS set
+laserdisc:        # LaserDisc only: disc format, bursts, EFM audio, LaserVision channel
+channel:          # Pressing impairments
+chroma_error:     # Capture chroma error
 sections:         # The ordered timeline
 ```
+
+Only `cvbs_presets`, `output` and `sections` are required. Everything specific to LaserDisc is in the `laserdisc:` block, and in a `laserdisc:` block on each section that belongs to the disc, so a project that is not a disc never needs either.
 
 ## Sections
 
 A section is a contiguous run of output frames drawn from one source file, with its own impairments, audio, on-screen display and VBI codes. Sections play back to back in the order they are declared, and their frame counts add up to the length of the output.
 
-Sections are how a project expresses change over time — a different picture, a noisier passage, a new chapter, a scratch that appears halfway through. They are also how a laserdisc's structure is expressed: giving a section a `section_type` of `lead_in`, `programme_area` or `lead_out` turns the project into a disc, with all the validation that implies.
+Sections are how a project expresses change over time — a different picture, a noisier passage, a new chapter, a scratch that appears halfway through. They are also how a laserdisc's structure is expressed: giving a section a `laserdisc:` block with an `area` of `lead_in`, `programme_area` or `lead_out` turns the project into a disc, with all the validation that implies. See [Laserdisc discs](laserdisc.md).
 
 ## The pipeline
 
@@ -43,6 +48,10 @@ A run is a fixed sequence of stages:
   Validate         Check every rule; probe the source files
       ↓
   Generate         Synthesise Y and C for each frame, in millivolts
+      ↓
+  Channel          Pressing and replay impairments (LaserVision channel, edge smear, timing offset)
+      ↓
+  Chroma error     The capture's chroma gain, phase, differential and crosstalk
       ↓
   Noise            Add per-section Gaussian noise, before quantisation
       ↓
@@ -71,17 +80,19 @@ A frame template cache holds the parts of a frame that do not change between fra
 | Concept | Scope | Declared in |
 |---------|-------|-------------|
 | Video standard, sample encoding, signal state | Project | [`cvbs_presets`](../reference/cvbs-presets.md) |
-| Output paths, signal type, EFM selection | Project | [`output`](../reference/output.md) |
-| Disc format (CAV/CLV), VITS placement, VITS set | Project | [`line_injections`](../reference/line-injections.md) |
-| Pressing timing offset, edge smear, FM beat | Project | [`channel`](../reference/channel.md) |
-| Capture chroma gain and phase error | Project | [`chroma_error`](../reference/chroma-error.md) |
-| Picture source, duration, disc section type | Section | [`sections[]`](../reference/sections.md) |
-| Laserdisc biphase codes | Section | [`sections[].line_injections`](../reference/section-line-injections.md) |
+| Output paths, signal type, picture truth | Project | [`output`](../reference/output.md) |
+| VITS placement, VITS set | Project | [`line_injections`](../reference/line-injections.md) |
+| Pressing timing offset, edge smear | Project | [`channel`](../reference/channel.md) |
+| Capture chroma gain, phase, differential and crosstalk | Project | [`chroma_error`](../reference/chroma-error.md) |
+| Picture source, duration, cadence | Section | [`sections[]`](../reference/sections.md) |
+| *LaserDisc:* disc format, pilot/VBI burst, EFM audio | Project | [`laserdisc`](../reference/laserdisc.md) |
+| *LaserDisc:* FM beat, group delay, replay response, field-2 offset | Project | [`laserdisc.channel`](../reference/laserdisc-channel.md) |
+| *LaserDisc:* disc area, biphase codes | Section | [`sections[].laserdisc`](../reference/section-laserdisc.md) |
 | Noise, dropouts, luma bandwidth | Section | [`noise`](../reference/section-noise.md), [`dropouts`](../reference/section-dropouts.md), [`luma_bandwidth`](../reference/sections.md#luma_bandwidth) |
 | Audio channel pairs | Section | [`audio`](../reference/section-audio.md) |
 | On-screen display overlays | Section | [`osd`](../reference/section-osd.md) |
 
-The split is not arbitrary. Anything that describes the *file* is project-level; anything that can legitimately differ between one part of the timeline and another is section-level. A disc is entirely CAV or entirely CLV, so `disc_type` is project-level; a disc's picture numbers restart or jump between sections, so the codes are section-level.
+The split is not arbitrary. Anything that describes the *file* is project-level; anything that can legitimately differ between one part of the timeline and another is section-level. A disc is entirely CAV or entirely CLV, so `laserdisc.disc_type` is project-level; a disc's picture numbers restart or jump between sections, so the codes are section-level.
 
 ## Reading on
 

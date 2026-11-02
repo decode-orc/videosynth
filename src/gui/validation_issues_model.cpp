@@ -45,6 +45,9 @@ IssueField ClassifyIssueField(const std::string& message) {
   if (StartsWith(message, "Channel validation error")) {
     return IssueField::kChannel;
   }
+  if (StartsWith(message, "Laserdisc channel validation error")) {
+    return IssueField::kLaserdiscChannel;
+  }
   if (StartsWith(message, "Chroma error validation error")) {
     return IssueField::kChromaError;
   }

@@ -130,11 +130,10 @@ where `<basename>` is `output.video_path` with its trailing `.cvbs` or `.cvbsy` 
 
 ## Laserdisc EFM digital audio
 
-A laserdisc's digital audio channel can be generated from one of the pairs:
+A laserdisc's digital audio channel can be generated from one of the pairs, set in the project's [`laserdisc:`](../reference/laserdisc.md#efm_audio) block alongside the other LaserDisc settings:
 
 ```yaml
-output:
-  video_path: "{output}/pal_disc.cvbs"
+laserdisc:
   efm_audio:
     pair: 0
 ```
@@ -154,22 +153,22 @@ Each stream byte carries its run length in bits 3-0 and the producer's *doubt* a
 
 ### Disc structure drives track layout
 
-EFM track layout is derived from `section_type`, not from the biphase codes:
+EFM track layout is derived from each section's [`laserdisc.area`](../reference/section-laserdisc.md#area), not from the biphase codes:
 
-| Section type | EFM content |
-|--------------|-------------|
+| `area` | EFM content |
+|--------|-------------|
 | `lead_in` | The repetitive mode-4 table of contents — one POINT per track plus A0/A1/A2 |
 | `programme_area` | One track per contiguous run of frames sharing that section, numbered 01, 02, … in output order |
 | `lead_out` | Lead-out subcode (TNO = AA) |
 
-Because it depends only on `section_type`, a project can produce a proper EFM disc **without carrying any biphase codes at all** — which keeps the lead-in short. A CAV biphase lead-in would have to run for at least 938 frames; an EFM-only lead-in can be a couple of seconds.
+Because it depends only on the disc area, a project can produce a proper EFM disc **without carrying any biphase codes at all** — which keeps the lead-in short. A CAV biphase lead-in would have to run for at least 938 frames; an EFM-only lead-in can be a couple of seconds.
 
 ### Constraints
 
 | Rule | Severity |
 |------|----------|
 | `pair` must be 0–7 | Error |
-| Standard must be PAL, NTSC or PAL-M — SECAM has no laserdisc digital audio specification | Error |
+| Standard must be PAL, NTSC or PAL-M — SECAM has no LaserVision format, so it cannot have a `laserdisc:` block | Error |
 | At most 79 `programme_area` sections (one track each) | Error |
 | No section declares the selected pair → no `.efm` is written | Warning |
 | A `programme_area` section shorter than 4 s (6 s for the first, whose leading 2 s are the mandatory pause) | Warning |
@@ -193,6 +192,8 @@ cvbs_presets:
 
 output:
   video_path: "{output}/pal_efm_audio.cvbs"
+
+laserdisc:
   efm_audio:
     pair: 0
 
@@ -201,13 +202,15 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x576/PLUGE.exr"
     duration_frames: 50            # 2 s of TOC
-    section_type: lead_in
+    laserdisc:
+      area: lead_in
 
   - name: Track1
     type: progressive
     source: "{bundled}/exr/720x576/75_BARS.exr"
     duration_frames: 175           # 7 s: 2 s mandatory pause + 5 s programme
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
     audio:
       channel_pairs:
         - pair: 0
@@ -219,7 +222,8 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x576/Y_CB_CR_RAMPS.exr"
     duration_frames: 125           # 5 s
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
     audio:
       channel_pairs:
         - pair: 0
@@ -230,5 +234,6 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x576/PLUGE.exr"
     duration_frames: 75
-    section_type: lead_out
+    laserdisc:
+      area: lead_out
 ```

@@ -201,10 +201,11 @@ TEST(ValidationIssuesModelTest, ImpairmentIssuesNavigateToTheirField) {
          for (Section& section : p->sections) {
            section.source = "assets/ntsc.exr";
          }
-         p->channel.enabled = true;
-         p->channel.fm_beat.enabled = true;
+         p->laserdisc.enabled = true;
+         p->laserdisc.channel.enabled = true;
+         p->laserdisc.channel.fm_beat.enabled = true;
        },
-       -1, IssueField::kChannel},
+       -1, IssueField::kLaserdiscChannel},
       {"chroma error",
        [](Project* p) {
          p->chroma_error.enabled = true;

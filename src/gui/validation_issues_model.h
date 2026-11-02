@@ -31,6 +31,7 @@ enum class IssueField {
   kLumaBandwidth,
   kChannel,
   kChromaError,
+  kLaserdiscChannel,
   kCadence,
   kPicture,
 };

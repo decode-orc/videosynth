@@ -3,7 +3,7 @@
  * Module:      gui
  * Purpose:     Per-section form editor: source and span, field cadence,
  *              optional audio, luma bandwidth, noise, dropout, OSD blocks,
- *              and line injections
+ *              and the section's LaserDisc disc area and codes
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -43,7 +43,7 @@ namespace videosynth::gui {
 // the section and commit through ProjectDocument::SetSection; optional YAML
 // blocks are toggled through the section_block_presenters helpers so
 // disabled blocks never emit defaults. Every optional block (audio, luma
-// bandwidth, each noise layer, each dropout type, OSD, line injections) sits
+// bandwidth, each noise layer, each dropout type, OSD, LaserDisc) sits
 // in a checkable group whose contents
 // are hidden until the box is ticked, so an unused block collapses to a
 // single title row instead of cluttering the form. Source probing runs on the
@@ -90,7 +90,9 @@ class SectionEditor : public QWidget {
   QWidget* BuildNoiseGroup();
   QWidget* BuildDropoutsGroup();
   QWidget* BuildOsdGroup();
-  QWidget* BuildInjectionsGroup();
+  QWidget* BuildLaserdiscGroup();
+  // The disc area chosen in the LaserDisc group (kUnknown for "(none)").
+  SectionType SelectedDiscArea() const;
 
   void LoadFromDocument();
   void LoadOsdTable(const Section& section);
@@ -193,7 +195,6 @@ class SectionEditor : public QWidget {
 
   // General.
   QLineEdit* name_edit_ = nullptr;
-  QComboBox* section_type_combo_ = nullptr;
   QComboBox* source_mode_combo_ = nullptr;
   QStackedWidget* source_stack_ = nullptr;
   QComboBox* builtin_type_combo_ = nullptr;
@@ -280,8 +281,10 @@ class SectionEditor : public QWidget {
   QTableWidget* osd_table_ = nullptr;
   QPushButton* remove_overlay_button_ = nullptr;
 
-  // Line injections.
-  QGroupBox* injections_group_ = nullptr;
+  // LaserDisc: the disc area and the laserdisc codes, shown only for
+  // projects with a laserdisc block.
+  QGroupBox* laserdisc_group_ = nullptr;
+  QComboBox* disc_area_combo_ = nullptr;
   LineInjectionsEditor* injections_editor_ = nullptr;
 };
 

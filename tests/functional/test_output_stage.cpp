@@ -992,8 +992,8 @@ TEST(OutputStageTest, DoesNotWriteEfmMetadataIntoTheCoreDatabase) {
   pair2.left.enabled = true;
   section.audio_channel_pairs = {pair2};
   project.sections.push_back(section);
-  project.output.efm_audio.enabled = true;
-  project.output.efm_audio.pair = 2;
+  project.laserdisc.efm_audio.enabled = true;
+  project.laserdisc.efm_audio.pair = 2;
 
   const std::size_t frame_span =
       static_cast<std::size_t>(SamplesPerFrame4fsc(Standard::kPal));

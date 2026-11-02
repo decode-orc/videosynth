@@ -30,8 +30,7 @@ Unknown keys are rejected outright, at every level, naming the offending key and
 - One video standard, one sample encoding, one signal state per project.
 - `sample_encoding_preset` must be one of the four 4fsc presets or `RAW_S16_28M` / `RAW_S16_40M`.
 - `signal_state_preset` must be `STANDARD_STABLE_LOCKED`, or `STANDARD_STABLE_UNLOCKED` for `SECAM`.
-- `SECAM` projects cannot use laserdisc line injections, `line_injections.disc_type` or laserdisc VITS placement; with VITS a warning notes that VITS chroma stays PAL-modulated. `secam_field_identification: false` on another standard is a warning.
-- `pal_laserdisc_pilot_burst` is PAL only; `ntsc_laserdisc_vbi_burst` is NTSC only. Either with an unsigned sample encoding (`CVBS_U10_4FSC`, `CVBS_U16_4FSC`, `CVBS_TPG21_4FSC`) is a warning, because the burst trough falls below the legal-code floor and is clipped.
+- `SECAM` projects cannot have a project or section `laserdisc:` block or use laserdisc VITS placement; with VITS a warning notes that VITS chroma stays PAL-modulated. `secam_field_identification: false` on another standard is a warning.
 - `ntsc_black_setup_ire` is NTSC/PAL-M only and must be exactly `7.5` or `0.0`.
 - `output.video_path` is required; with `signal_type: yc` it must end in `.cvbsy`.
 - Output resolution is fixed by the standard and must not appear in the project.
@@ -57,42 +56,61 @@ Unknown keys are rejected outright, at every level, naming the offending key and
 - An EXR still takes neither `start_frame` nor `end_frame`, and needs an integer `duration_frames`.
 - A `"2:3"` [cadence](../reference/sections.md#cadence) needs NTSC or PAL-M and a video source; `continuity: continue` needs the previous section to be `"2:3"` too. See [Film and pulldown](sources.md#film-and-pulldown).
 - *Warning*: a cadence `phase` with `continuity: continue`, or a `phase` or `continuity` under `pattern: video` — both are ignored.
-- Once any section is a `lead_in` or `lead_out`, the sequence must be `[lead_in] programme_area… [lead_out]` — at most one of each, in that order, with nothing outside them.
-- *Warning*: on a CAV disc, a section carrying laserdisc codes that is a lead-in shorter than 938 frames or a lead-out shorter than 1250 frames.
+- The disc-structure rules (`laserdisc.area` ordering and minimum lengths) are listed under [LaserDisc](#laserdisc).
 
 ### Line injections
 
 - `target_lines` must be within the standard's range (1–625 PAL, 1–525 NTSC/PAL-M).
-- `target_lines` must **not** be given for `laserdisc` injections.
 - Injected lines must not overlap within a section, and VITS lines must not overlap within the project VITS set.
-- When `line_injections.disc_type` is set, no VITS may target a line in the reserved address ranges (PAL 6–18 and 319–331; NTSC/PAL-M 10–18 and 273–281).
-- `vitc` and `laserdisc` must not appear in the same section.
+- When `laserdisc.disc_type` is set, no VITS may target a line in the reserved address ranges (PAL 6–18 and 319–331; NTSC/PAL-M 10–18 and 273–281).
+- A section's `line_injections` list carries only `vitc`, which is not implemented and so is an error; it must not share a section with laserdisc `codes`. An entry with `type: laserdisc` is a parse error naming `laserdisc.codes`.
 - VITS `target_lines` are constrained by the `placement` policy — see [VITS](vits.md).
+
+### LaserDisc
+
+These apply only to a project with a [`laserdisc:`](../reference/laserdisc.md) block.
+
+- Each old LaserDisc key outside the `laserdisc:` blocks (`cvbs_presets.pal_laserdisc_pilot_burst`, `output.efm_audio`, `line_injections.disc_type`, `channel.fm_beat`, `sections[].section_type` and the rest) is a parse error naming its new place; see [where these settings used to live](../reference/laserdisc.md#where-these-settings-used-to-live).
+- An empty `laserdisc:` block, or an unknown key in it, is a parse error; so is an empty section `laserdisc:` block.
+- A section `laserdisc:` block needs the project-level block.
+- `disc_type` must be `CAV` or `CLV`.
+- `pilot_burst` is PAL only; `vbi_burst` is NTSC only. Either with an unsigned sample encoding (`CVBS_U10_4FSC`, `CVBS_U16_4FSC`, `CVBS_TPG21_4FSC`) is a warning, because the burst trough falls below the legal-code floor and is clipped.
+- Once any section's `area` is `lead_in` or `lead_out`, the sequence must be `[lead_in] programme_area… [lead_out]` — at most one of each, in that order, with nothing outside them.
+- *Warning*: on a CAV disc, a section carrying laserdisc codes that is a lead-in shorter than 938 frames or a lead-out shorter than 1250 frames.
+- The EFM rules (`efm_audio.pair`, track count and lengths) are listed under [Audio and EFM](#audio-and-efm).
 
 ### Laserdisc codes
 
-- The code type must be valid for the disc format, and for the section type it appears in.
-- A section declaring laserdisc codes needs `line_injections.disc_type` and a `section_type`.
+- The code type must be valid for the disc format, and for the section's disc area.
+- A section declaring laserdisc codes needs `laserdisc.disc_type` and its own `laserdisc.area`. There is no `target_lines` key on codes.
 - `picture_number` `start_value` must be 0–99,999 (PAL) or 0–79,999 (NTSC/PAL-M); `fm_picture_number` `start_value` 0–79,999.
 - *Warning*: a CAV section whose picture numbers would pass that maximum, where the number holds at the maximum. The count follows the numbering from section to section and counts pictures, so a `"2:3"` section counts its film frames. It stops at the first section whose length depends on an unknown source length.
 - Chapter numbers are 0–79.
 - `users_code` must be a hex value of at most 24 bits, with X₁ 0–7 and the D digit (bits 15–12) equal to `D`.
-- NTSC and PAL-M discs (any project with `disc_type` set) must carry a `virs` VITS entry.
+- NTSC and PAL-M discs (any project with `laserdisc.disc_type` set) must carry a `virs` VITS entry.
 - *Warning*: a CAV chapter shorter than 30 frames. Chapters that include a `duration_frames: all` section, and CLV chapters, are not checked.
+
+### LaserVision channel
+
+- `fm_beat:` on any standard but 625-line PAL is an error, as is `group_delay.preset: iec60856_nominal`. `fm_beat.carrier_black_hz` in 6.9–7.3 MHz; `fm_beat.level_db` in −60.0 to 0.0.
+- `group_delay.scale` in −2.0 to 2.0; `points_ns` delays in −1000 to 1000 ns.
+- `response_db` frequencies from 0 MHz to Nyquist, strictly ascending; levels −60 to +20 dB. `response_db` and `response_by_picture` cannot both be set; `response_by_picture` needs at least two entries with ascending pictures.
+- `field2_offset.x_samples` in −8.0 to 8.0; `field2_offset.y_lines` in −4.0 to 4.0.
+- An empty `laserdisc.channel:` block, an unknown key, a `group_delay` with both or neither of `preset` and `points_ns`, or an `fm_beat:` block without `level_db` is a parse error. See [LaserVision channel](../reference/laserdisc-channel.md#rules).
 
 ### Channel
 
 - `timing_offset_samples` in −8.0 to 8.0.
 - `edge_smear.fraction` in 0.0–0.5; `edge_smear.tau_samples` above 0 and at most 100.
-- `fm_beat:` on any standard but 625-line PAL is an error. `fm_beat.carrier_black_hz` in 6.9–7.3 MHz; `fm_beat.level_db` in −60.0 to 0.0.
 - Values that are not finite are errors.
-- A non-numeric value, an unknown key, an empty `channel:` block, an `edge_smear:` block without both `fraction` and `tau_samples`, or an `fm_beat:` block without `level_db` is a parse error.
+- A non-numeric value, an unknown key, an empty `channel:` block or an `edge_smear:` block without both `fraction` and `tau_samples` is a parse error. `fm_beat` here is a parse error naming `laserdisc.channel.fm_beat`.
 
 ### Chroma error
 
 - `gain` in 0.5–1.5; `phase_deg` in −180.0 to 180.0; `line_jitter.phase_deg` in 0.0–10.0; `line_jitter.gain` in 0.0–0.1. Values that are not finite are errors.
-- `chroma_error:` on a SECAM project is an error.
-- A non-numeric value, a non-boolean `include_burst`, an unknown key, an empty `chroma_error:` block (one with only `include_burst` counts as empty) or an empty `line_jitter:` block is a parse error.
+- `differential` curves: IRE −50 to 150, strictly ascending; gain 0.5–1.5; phase −30 to 30 degrees. `crosstalk.v_to_u` and `crosstalk.u_to_v` in −0.5 to 0.5.
+- `chroma_error:` on a SECAM project is an error, as is `crosstalk.alternate_with_switch: true` on NTSC.
+- A non-numeric value, a non-boolean `include_burst`, an unknown key, an empty `chroma_error:` block (one with only `include_burst` counts as empty), or an empty `line_jitter:`, `differential:` or `crosstalk:` block is a parse error.
 
 ### Luma bandwidth
 

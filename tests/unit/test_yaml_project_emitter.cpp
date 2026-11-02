@@ -123,6 +123,7 @@ TEST(YamlProjectEmitterTest, MinimalProjectOmitsUnsetOptionalBlocks) {
   EXPECT_EQ(emitted.find("osd"), std::string::npos);
   EXPECT_EQ(emitted.find("audio"), std::string::npos);
   EXPECT_EQ(emitted.find("line_injections"), std::string::npos);
+  EXPECT_EQ(emitted.find("laserdisc"), std::string::npos);
   EXPECT_EQ(emitted.find("signal_type"), std::string::npos);
   EXPECT_EQ(emitted.find("start_frame"), std::string::npos);
   EXPECT_EQ(emitted.find("cadence"), std::string::npos);
@@ -276,9 +277,10 @@ TEST(YamlProjectEmitterTest, PalPilotBurstRoundTrips) {
 cvbs_presets:
   video_standard_preset: PAL
   sample_encoding_preset: CVBS_S16_4FSC
-  pal_laserdisc_pilot_burst: true
 output:
   video_path: out/video.cvbs
+laserdisc:
+  pilot_burst: true
 sections:
   - name: Bars
     type: progressive
@@ -350,6 +352,7 @@ cvbs_presets:
   video_standard_preset: PAL
 output:
   video_path: out/video.cvbs
+laserdisc:
   efm_audio:
     pair: 2
 sections:
@@ -360,7 +363,7 @@ sections:
 )");
 }
 
-TEST(YamlProjectEmitterTest, DisabledEfmAudioOmitsOutputKey) {
+TEST(YamlProjectEmitterTest, DisabledEfmAudioOmitsTheKey) {
   YamlProjectParser parser;
   const ParseResult parsed = parser.ParseString(kMinimalPalYaml);
   ASSERT_TRUE(parsed.ok);
@@ -492,26 +495,25 @@ cvbs_presets:
   video_standard_preset: PAL
 output:
   video_path: out/video.cvbs
-line_injections:
+laserdisc:
   disc_type: CAV
 sections:
   - name: Chapter0
     type: progressive
     source: assets/chapter0.mkv
     duration_frames: 500
-    section_type: programme_area
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 1
-          - code_type: chapter_number
-            chapter: 5
-          - code_type: picture_stop
-          - code_type: programme_status
-            programme_status: "0x8DC000"
-          - code_type: users_code
-            users_code: "0x80D000"
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 1
+        - code_type: chapter_number
+          chapter: 5
+        - code_type: picture_stop
+        - code_type: programme_status
+          programme_status: "0x8DC000"
+        - code_type: users_code
+          users_code: "0x80D000"
 )");
 }
 
@@ -521,22 +523,28 @@ cvbs_presets:
   video_standard_preset: PAL
 output:
   video_path: out/video.cvbs
+laserdisc:
+  efm_audio:
+    pair: 0
 sections:
   - name: LeadIn
     type: progressive
     source: assets/bars.exr
     duration_frames: 938
-    section_type: lead_in
+    laserdisc:
+      area: lead_in
   - name: Programme
     type: progressive
     source: assets/bars.exr
     duration_frames: 500
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
   - name: LeadOut
     type: progressive
     source: assets/bars.exr
     duration_frames: 1250
-    section_type: lead_out
+    laserdisc:
+      area: lead_out
 )");
 }
 
@@ -633,14 +641,16 @@ cvbs_presets:
   video_standard_preset: PAL
 output:
   video_path: out/video.cvbs
+laserdisc:
+  channel:
+    fm_beat:
+      carrier_black_hz: 7079000
+      level_db: -24.0
 channel:
   timing_offset_samples: 0.25
   edge_smear:
     fraction: 0.12
     tau_samples: 3.5
-  fm_beat:
-    carrier_black_hz: 7079000
-    level_db: -24.0
 sections:
   - name: Bars
     type: progressive
@@ -653,9 +663,10 @@ cvbs_presets:
   video_standard_preset: PAL
 output:
   video_path: out/video.cvbs
-channel:
-  fm_beat:
-    level_db: -30.0
+laserdisc:
+  channel:
+    fm_beat:
+      level_db: -30.0
 sections:
   - name: Bars
     type: progressive
@@ -938,6 +949,97 @@ sections:
   const ValidationResult validation = validator.Validate(reparsed.project);
   EXPECT_TRUE(validation.is_valid)
       << (validation.errors.empty() ? "" : validation.errors.front());
+}
+
+TEST(YamlProjectEmitterTest, LaserVisionChannelRoundTrips) {
+  ExpectRoundTrip(R"(
+cvbs_presets:
+  video_standard_preset: PAL
+output:
+  video_path: out/video.cvbs
+laserdisc:
+  disc_type: CLV
+  pilot_burst: true
+  channel:
+    group_delay:
+      preset: iec60856_nominal
+      scale: 0.5
+    response_by_picture:
+      - picture: 1
+        response_db: [[0, 0], [4.4, -1.0], [5.0, -4.0]]
+      - picture: 54000
+        response_db: [[0, 0], [4.4, -3.0], [5.0, -9.0]]
+    field2_offset:
+      x_samples: 0.25
+      y_lines: -0.5
+sections:
+  - name: Bars
+    type: progressive
+    source: assets/bars.exr
+    duration_frames: 10
+)");
+  ExpectRoundTrip(R"(
+cvbs_presets:
+  video_standard_preset: NTSC
+output:
+  video_path: out/video.cvbs
+laserdisc:
+  vbi_burst: true
+  channel:
+    group_delay:
+      points_ns: [[0.5, 0], [3.0, -40]]
+    response_db: [[0, 0], [4.2, -6.0]]
+sections:
+  - name: Bars
+    type: progressive
+    source: assets/bars.exr
+    duration_frames: 10
+)");
+}
+
+TEST(YamlProjectEmitterTest, EmptyLaserdiscBlockStaysParseable) {
+  for (Standard standard : {Standard::kPal, Standard::kNtsc}) {
+    Project project;
+    project.cvbs_presets.video_standard_preset = standard;
+    project.output.video_path = "out/video.cvbs";
+    project.laserdisc.enabled = true;
+    Section section;
+    section.name = "Bars";
+    section.type = "progressive";
+    section.source = "assets/bars.exr";
+    section.duration_frames = 10;
+    project.sections.push_back(section);
+    const ParseResult parsed = YamlProjectParser().ParseString(
+        YamlProjectEmitter().EmitString(project));
+    ASSERT_TRUE(parsed.ok) << parsed.errors[0];
+    EXPECT_TRUE(parsed.project.laserdisc.enabled);
+    EXPECT_FALSE(parsed.project.laserdisc.pilot_burst);
+    EXPECT_FALSE(parsed.project.laserdisc.vbi_burst);
+  }
+}
+
+TEST(YamlProjectEmitterTest, DifferentialAndCrosstalkRoundTrip) {
+  ExpectRoundTrip(R"(
+cvbs_presets:
+  video_standard_preset: PAL
+output:
+  video_path: out/video.cvbs
+chroma_error:
+  gain: 1.0
+  phase_deg: 0.0
+  differential:
+    gain: [[0, 1.0], [50, 0.98], [100, 0.95]]
+    phase_deg: [[0, 0.0], [100, 2.5]]
+  crosstalk:
+    v_to_u: 0.3
+    u_to_v: -0.05
+    alternate_with_switch: true
+sections:
+  - name: Bars
+    type: progressive
+    source: assets/bars.exr
+    duration_frames: 10
+)");
 }
 
 }  // namespace

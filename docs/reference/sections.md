@@ -8,9 +8,8 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x576/100_BARS.exr"
     duration_frames: 250
-    section_type: programme_area
     start_frame: 0
-    line_injections: []
+    laserdisc: {area: programme_area}
     noise: {}
     dropouts: {}
     osd: {}
@@ -26,11 +25,11 @@ sections:
 | `source` | string | Yes | Path, optionally with an [asset root token](asset-roots.md) | — |
 | `duration_frames` | int or string | No | Positive integer, or `"all"` | `"all"` |
 | `duration_repeat` | int | No | Positive integer | `1` |
-| `section_type` | string | No | `lead_in`, `programme_area`, `lead_out` | absent |
 | `start_frame` | int | No | ≥ 0, inside the video source | `0` |
 | `end_frame` | int | No | ≥ `start_frame`, inside the video source | last source frame |
 | `cadence` | map | No | [field cadence](#cadence) | video cadence |
-| `line_injections` | list | No | [section line injections](section-line-injections.md) | absent |
+| `laserdisc` | map | No | [section `laserdisc`](section-laserdisc.md) — disc area and biphase codes (LaserDisc projects only) | absent |
+| `line_injections` | list | No | `vitc` only, not implemented — see [section `laserdisc`](section-laserdisc.md#vitc-line-injections) | absent |
 | `luma_bandwidth` | map | No | [luma bandwidth limit](#luma_bandwidth) | absent |
 | `horizontal_resample` | string | No | `nearest`, `bandlimited` ([horizontal mapping](#horizontal_resample)) | `nearest` |
 | `chroma_line_sign` | list | No | [chroma line sign regions](#chroma_line_sign) (PAL and PAL-M) | absent |
@@ -75,36 +74,11 @@ With `duration_frames: "all"`, plays the selected range this many times. Total o
 
 Ignored with a fixed integer `duration_frames`, and a warning is emitted if you set it there. The emitter writes it only alongside `duration_frames: all`, so a saved project drops an ignored `duration_repeat`.
 
-## `section_type`
+## `laserdisc`
 
-Marks the section as part of a laserdisc structure.
+Where the section sits on a LaserDisc — `lead_in`, `programme_area` or `lead_out` — and the biphase codes it carries. Only a project with a top-level [`laserdisc`](laserdisc.md) block may use it; omit it for a section that is not part of a disc. The disc area replaces the old `section_type` key, and the codes the old `type: laserdisc` line injection.
 
-| Value | Meaning | Recommended minimum (CAV) |
-|-------|---------|---------------------------|
-| `lead_in` | Before the programme content | 938 frames |
-| `programme_area` | The content itself | — |
-| `lead_out` | After the programme content | 1250 frames |
-
-Omitting it means the section is not part of a disc structure. A section that carries a `laserdisc` [line injection](section-line-injections.md) must set it.
-
-The minimums are checked as **warnings**, only on a CAV disc, only for a section that carries a `laserdisc` injection, and only when `duration_frames` is an integer:
-
-```text
-Laserdisc injection warning: CAV lead_in section has 500 frames; IEC 1.5 mm
-minimum at 1.6 um track pitch requires 938.
-```
-
-### Ordering rules
-
-Once any section is a `lead_in` or a `lead_out`, the whole sequence is checked (a project that uses only `programme_area` is not):
-
-- At most one `lead_in`, and no section may precede it.
-- At most one `lead_out`, and no section may follow it.
-- Every section between them must be `programme_area`. With only a lead-in this applies to every section after it, and with only a lead-out to every section before it.
-
-Violations are errors, not warnings: out-of-order sections would break monotonic picture-number and time-code generation (IEC 60856/60857).
-
-`section_type` also drives the [EFM](../user-manual/audio.md#laserdisc-efm-digital-audio) disc-area mapping — a lead-in carries the table of contents, each programme-area section is one EFM track, and the lead-out carries lead-out subcode. That mapping works whether or not the section carries biphase codes, which is why an EFM-only project can have a short lead-in without the 938-frame warning a biphase CAV lead-in would get.
+The keys, the CAV minimum durations, the [ordering rules](section-laserdisc.md#ordering-rules) and the EFM disc-area mapping are on the [section `laserdisc`](section-laserdisc.md) page.
 
 ## `start_frame`
 
@@ -254,7 +228,7 @@ Each has its own reference page:
 
 | Block | Purpose |
 |-------|---------|
-| [`line_injections`](section-line-injections.md) | Laserdisc biphase codes |
+| [`laserdisc`](section-laserdisc.md) | Disc area and laserdisc biphase codes |
 | [`noise`](section-noise.md) | Gaussian noise injection |
 | [`dropouts`](section-dropouts.md) | Random and scratch dropouts |
 | [`osd`](section-osd.md) | On-screen display overlays |
@@ -269,9 +243,8 @@ All are optional, and only blocks that are explicitly set are written back out b
 - `duration_frames` must be a positive integer or `"all"`.
 - `start_frame` ≥ 0 and `end_frame` ≥ `start_frame`, both inside the video source; `end_frame` never with an integer `duration_frames`.
 - An EXR still takes neither `start_frame` nor `end_frame`, and needs an integer `duration_frames`.
-- The disc-structure ordering rules above.
-- A section with a `laserdisc` injection must set `section_type`.
+- A `laserdisc` block needs the project's top-level `laserdisc` block. Disc areas follow the [ordering rules](section-laserdisc.md#ordering-rules), and a section with `codes` must set `area`.
 - `cadence` rules (above).
 - `luma_bandwidth` within its ranges (above).
 - `chroma_line_sign` only on PAL and PAL-M, with every region inside the raster and following the switch on at least one component.
-- CAV lead-in and lead-out minimum durations (warnings).
+- CAV lead-in and lead-out minimum durations (warnings; see [section `laserdisc`](section-laserdisc.md#area)).

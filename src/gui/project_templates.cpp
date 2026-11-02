@@ -87,9 +87,15 @@ int RemapBundledDefaultSources(Project* project, Standard standard) {
   return changed;
 }
 
+LaserdiscParameters MakeLaserdiscParameters() {
+  LaserdiscParameters laserdisc;
+  laserdisc.enabled = true;
+  laserdisc.disc_type = "CAV";
+  return laserdisc;
+}
+
 ProjectLineInjections MakeLaserdiscLineInjections(Standard standard) {
   ProjectLineInjections li;
-  li.disc_type = "CAV";
   // NTSC/PAL-M laserdisc discs require a virs VITS colour reference
   // (IEC 60857 §9.1.3); lines 19/282 follow the NTSC CAV disc fixtures.
   if (IsSystemM(standard)) {

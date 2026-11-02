@@ -26,16 +26,18 @@ cvbs_presets:
   video_standard_preset: NTSC
   sample_encoding_preset: CVBS_U10_4FSC
   signal_state_preset: STANDARD_STABLE_LOCKED
-  ntsc_laserdisc_vbi_burst: true
 
 output:
   video_path: "{output}/videosynth_ntsc_discsim_A.cvbs"
 
 line_injections:
-  disc_type: CAV
   vits:
     - vits_type: virs
       target_lines: [19, 282]
+
+laserdisc:
+  disc_type: CAV
+  vbi_burst: true
 
 sections:
 
@@ -46,7 +48,15 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x486/100_BARS.exr"
     duration_frames: 8
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 1
+        - code_type: programme_status
+          programme_status: "0x8DC001"
+        - code_type: fm_picture_number
+        - code_type: fm_white_flag
     noise:
       noise_db: 43.0
       noise_spread_db: 4.0
@@ -60,15 +70,6 @@ sections:
         scale: 8
         seed: 1001
         anchor: disc
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 1
-          - code_type: programme_status
-            programme_status: "0x8DC001"
-          - code_type: fm_picture_number
-          - code_type: fm_white_flag
     osd:
       overlays:
         - text: "PN:{picture_number} HEX:{biphase_hex} PHASE:{phase_id}"
@@ -85,7 +86,15 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x486/SMPTE_BARS_001.exr"
     duration_frames: 8
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 9
+        - code_type: programme_status
+          programme_status: "0x8DC001"
+        - code_type: fm_picture_number
+        - code_type: fm_white_flag
     noise:
       noise_db: 43.0
       noise_spread_db: 4.0
@@ -99,15 +108,6 @@ sections:
         scale: 8
         seed: 1001
         anchor: disc
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 9
-          - code_type: programme_status
-            programme_status: "0x8DC001"
-          - code_type: fm_picture_number
-          - code_type: fm_white_flag
     osd:
       overlays:
         - text: "PN:{picture_number} HEX:{biphase_hex} PHASE:{phase_id}"
@@ -124,7 +124,15 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x486/MULTIBURST.exr"
     duration_frames: 4
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 17
+        - code_type: programme_status
+          programme_status: "0x8DC001"
+        - code_type: fm_picture_number
+        - code_type: fm_white_flag
     noise:
       noise_db: 43.0
       noise_spread_db: 4.0
@@ -138,15 +146,6 @@ sections:
         scale: 8
         seed: 1001
         anchor: disc
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 17
-          - code_type: programme_status
-            programme_status: "0x8DC001"
-          - code_type: fm_picture_number
-          - code_type: fm_white_flag
     osd:
       overlays:
         - text: "PN:{picture_number} HEX:{biphase_hex} PHASE:{phase_id}"
@@ -163,7 +162,15 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x486/MULTIBURST.exr"
     duration_frames: 8
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 17
+        - code_type: programme_status
+          programme_status: "0x8DC001"
+        - code_type: fm_picture_number
+        - code_type: fm_white_flag
     noise:
       noise_db: 43.0
       noise_spread_db: 4.0
@@ -177,15 +184,6 @@ sections:
         scale: 8
         seed: 1001
         anchor: disc
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 17
-          - code_type: programme_status
-            programme_status: "0x8DC001"
-          - code_type: fm_picture_number
-          - code_type: fm_white_flag
     osd:
       overlays:
         - text: "PN:{picture_number} HEX:{biphase_hex} PHASE:{phase_id}"
@@ -202,7 +200,15 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x486/TARTAN.exr"
     duration_frames: 8
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 25
+        - code_type: programme_status
+          programme_status: "0x8DC001"
+        - code_type: fm_picture_number
+        - code_type: fm_white_flag
     noise:
       noise_db: 43.0
       noise_spread_db: 4.0
@@ -216,15 +222,6 @@ sections:
         scale: 8
         seed: 1001
         anchor: disc
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 25
-          - code_type: programme_status
-            programme_status: "0x8DC001"
-          - code_type: fm_picture_number
-          - code_type: fm_white_flag
     osd:
       overlays:
         - text: "PN:{picture_number} HEX:{biphase_hex} PHASE:{phase_id}"
@@ -241,7 +238,15 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x486/Y_CB_CR_RAMPS.exr"
     duration_frames: 8
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 33
+        - code_type: programme_status
+          programme_status: "0x8DC001"
+        - code_type: fm_picture_number
+        - code_type: fm_white_flag
     noise:
       noise_db: 43.0
       noise_spread_db: 4.0
@@ -255,15 +260,6 @@ sections:
         scale: 8
         seed: 1001
         anchor: disc
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 33
-          - code_type: programme_status
-            programme_status: "0x8DC001"
-          - code_type: fm_picture_number
-          - code_type: fm_white_flag
     osd:
       overlays:
         - text: "PN:{picture_number} HEX:{biphase_hex} PHASE:{phase_id}"

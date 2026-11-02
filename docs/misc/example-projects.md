@@ -26,11 +26,11 @@ Derived variants — the `stacking-captures` set, the impairment-free `stacking-
 - a shaped [shared (pressing) noise layer](../user-manual/impairments.md#pressing-noise-and-capture-noise), seeded 7001 for pressing A and 7002 for pressing B;
 - a [`channel:` timing offset](../reference/channel.md) of 0.0 samples for A and −1.0 for B. Captures of real pressings sit on a whole-sample grid of one another, so the two-pressing sets use a whole-sample offset; pressing C below is the sub-sample case.
 
-PAL also has a third pressing, C (`pal_pressing_C.yaml`), with the same content and layout. Its shared noise is seeded 7003, and its `channel:` block adds the two glass-master and readout impairments that are PAL-only or new to it:
+PAL also has a third pressing, C (`pal_pressing_C.yaml`), with the same content and layout. Its shared noise is seeded 7003, and it adds a glass-master and a readout impairment:
 
-- [`fm_beat`](../reference/channel.md#fm_beat) at −24 dB, the FM-beat herringbone, visible in the bars and the colour ramps;
-- [`edge_smear`](../reference/channel.md#edge_smear) with `fraction` 0.12 and `tau_samples` 3.0;
-- a timing offset of 0.15 samples.
+- [`laserdisc.channel.fm_beat`](../reference/laserdisc-channel.md#fm_beat) at −24 dB, the FM-beat herringbone, visible in the bars and the colour ramps;
+- [`channel.edge_smear`](../reference/channel.md#edge_smear) with `fraction` 0.12 and `tau_samples` 3.0;
+- a `channel:` timing offset of 0.15 samples.
 
 A fourth PAL pressing, D (`pal_pressing_D.yaml`), has pressing A's content, layout and channel, shared noise seeded 7004, and two kinds of dropout in every section:
 
@@ -50,7 +50,7 @@ The `stacking-captures` variant derives six captures of every pressing. Each has
 
 A `captures` entry in `projects/variants.json` may set `chroma_error` (a mapping that replaces the project's block, or `null` to remove it) and `timing_offset_samples` (written to `channel.timing_offset_samples`), alongside `capture_seed`, `remove_sections` and `repeat_sections`. The variant's `capture_seed_offsets` maps source filename globs to an integer added to the capture seeds of every matching source.
 
-`stacking-clean` derives an impairment-free truth for every capture (`_capN_clean`). It removes the noise and the dropouts, pressing defects included, but keeps the `channel:` block, because the timing offset, the beat and the smear are part of the pressing. The captures of one pressing then match each other on every picture number, apart from capture noise and the overrides of captures 5 and 6. Pressings A and B's truths differ by exactly one sample.
+`stacking-clean` derives an impairment-free truth for every capture (`_capN_clean`). It removes the noise and the dropouts, pressing defects included, but keeps the `channel:` and `laserdisc.channel:` blocks, because the timing offset, the beat and the smear are part of the pressing. The captures of one pressing then match each other on every picture number, apart from capture noise and the overrides of captures 5 and 6. Pressings A and B's truths differ by exactly one sample.
 
 ### Film with 2:3 pulldown
 
@@ -59,7 +59,7 @@ Two NTSC CAV discs play the bundled film clip, `FILM_COUNTER_24P.mkv`, with [2:3
 - `ntsc_film_pulldown.yaml` plays all 240 film frames from phase A: 300 output frames, PNs 1–240.
 - `ntsc_film_mixed.yaml` mixes video and film sections: colour bars, film from phase A, film continuing that cadence, scrolling colour bars, film restarting at phase C and ending on a single field, and film continuing mid-letter over the first film range again. Its header lists each section's film frames and picture numbers.
 
-The `film-clv` variant moves both onto a CLV disc, swapping the CAV picture numbers for the CLV time codes, and `film-pal-m` renders the CAV and CLV discs on PAL-M. The variant rules `video_standard`, `disc_type` and `replace_codes` in `projects/variants.json` do this.
+The `film-clv` variant moves both onto a CLV disc, swapping the CAV picture numbers for the CLV time codes, and `film-pal-m` renders the CAV and CLV discs on PAL-M. The variant rules `video_standard`, `disc_type` (which sets `laserdisc.disc_type`) and `replace_codes` in `projects/variants.json` do this.
 
 ### Disc-simulation sets
 

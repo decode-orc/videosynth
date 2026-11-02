@@ -156,8 +156,9 @@ TEST(ChannelImpairmentsFunctionalTest,
   const std::vector<SampleFixed> clean_y = y;
 
   project.channel.enabled = true;
-  project.channel.fm_beat.enabled = true;
-  project.channel.fm_beat.level_db = -20.0;
+  project.laserdisc.channel.enabled = true;
+  project.laserdisc.channel.fm_beat.enabled = true;
+  project.laserdisc.channel.fm_beat.level_db = -20.0;
   std::vector<IGenerationStage::FrameScheduleItem> schedule(1U);
   schedule[0].section = &project.sections[0];
 
@@ -229,8 +230,9 @@ TEST(ChannelImpairmentsFunctionalTest, GreyscalePictureIsBitIdenticalWithBeat) {
   const std::vector<SampleFixed> clean_c = c;
 
   project.channel.enabled = true;
-  project.channel.fm_beat.enabled = true;
-  project.channel.fm_beat.level_db = 0.0;
+  project.laserdisc.channel.enabled = true;
+  project.laserdisc.channel.fm_beat.enabled = true;
+  project.laserdisc.channel.fm_beat.level_db = 0.0;
   ChannelStage().ApplyChannel(project, {}, 0U, 1U, &y, &c);
   EXPECT_EQ(y, clean_y);
   EXPECT_EQ(c, clean_c);

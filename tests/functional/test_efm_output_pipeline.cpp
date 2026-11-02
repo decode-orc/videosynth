@@ -206,8 +206,8 @@ Project MakeEfmProject(Standard standard, const std::vector<SectionPlan>& plans,
   project.cvbs_presets.sample_encoding_preset = "CVBS_U10_4FSC";
   project.cvbs_presets.signal_state_preset = "STANDARD_STABLE_LOCKED";
   project.output.video_path = video_path.string();
-  project.output.efm_audio.enabled = true;
-  project.output.efm_audio.pair = 0;
+  project.laserdisc.efm_audio.enabled = true;
+  project.laserdisc.efm_audio.pair = 0;
   for (const SectionPlan& plan : plans) {
     Section section;
     section.name = plan.name;

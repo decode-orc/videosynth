@@ -103,5 +103,27 @@ TEST(ProjectTemplatesTest, FilmTemplatePlaysTheFilmClipWith23Pulldown) {
   EXPECT_EQ(section.cadence.continuity, CadenceContinuity::kRestart);
 }
 
+TEST(ProjectTemplatesTest, LaserdiscParametersDeclareACavDisc) {
+  const LaserdiscParameters laserdisc = MakeLaserdiscParameters();
+  EXPECT_TRUE(laserdisc.enabled);
+  EXPECT_EQ(laserdisc.disc_type, "CAV");
+  EXPECT_FALSE(laserdisc.channel.enabled);
+  EXPECT_FALSE(laserdisc.efm_audio.enabled);
+}
+
+TEST(ProjectTemplatesTest, LaserdiscSectionTemplatesCarryTheirDiscArea) {
+  EXPECT_EQ(MakeLaserdiscLeadInSectionTemplate(Standard::kPal).section_type,
+            SectionType::kLeadIn);
+  EXPECT_EQ(MakeLaserdiscProgrammeSectionTemplate(Standard::kPal).section_type,
+            SectionType::kProgrammeArea);
+  EXPECT_EQ(MakeLaserdiscLeadOutSectionTemplate(Standard::kPal).section_type,
+            SectionType::kLeadOut);
+}
+
+TEST(ProjectTemplatesTest, DefaultProjectHasNoLaserdiscBlock) {
+  EXPECT_EQ(MakeDefaultProject(Standard::kPal).laserdisc,
+            LaserdiscParameters{});
+}
+
 }  // namespace
 }  // namespace videosynth::gui

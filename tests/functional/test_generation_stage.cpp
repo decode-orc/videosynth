@@ -1333,7 +1333,7 @@ Project MakePalPilotBurstProject() {
   project.cvbs_presets.video_standard_preset = Standard::kPal;
   project.cvbs_presets.sample_encoding_preset = "CVBS_U10_4FSC";
   project.cvbs_presets.signal_state_preset = "STANDARD_STABLE_LOCKED";
-  project.cvbs_presets.pal_laserdisc_pilot_burst = true;
+  project.laserdisc.pilot_burst = true;
   project.sections.push_back(
       Section{.name = "PilotBurst",
               .type = "progressive",
@@ -1662,7 +1662,7 @@ TEST(GenerationStageTest, PalSyncSamplesAreConstantWithoutPilotBurst) {
 
 Project MakeNtscVbiBurstProject() {
   Project project = MakeProject(Standard::kNtsc);
-  project.cvbs_presets.ntsc_laserdisc_vbi_burst = true;
+  project.laserdisc.vbi_burst = true;
   return project;
 }
 
@@ -1811,7 +1811,7 @@ TEST(GenerationStageTest,
 TEST(GenerationStageTimingTest,
      PalColourSequenceRepeatsExactlyEveryFourFramesAtAnyDiscPosition) {
   Project project = MakeProject(Standard::kPal, 1);
-  project.cvbs_presets.pal_laserdisc_pilot_burst = true;
+  project.laserdisc.pilot_burst = true;
 
   // Picture numbers whose (PN − 1) disc positions are 0, 4, 100,000 and
   // 100,004: two pairs one colour period apart, the second pair far beyond a
@@ -1872,10 +1872,10 @@ std::string MovingZoneMkvPath(Standard standard) {
 // with a per-frame token, a project VITS line, and (for PAL) the pilot burst.
 Project MakeTemplatePatchProject(Standard standard, int duration_frames) {
   Project project = MakeProject(standard, duration_frames);
-  project.line_injections.disc_type = "CAV";
+  project.laserdisc.disc_type = "CAV";
   if (standard == Standard::kPal) {
     project.line_injections.vits.push_back(VitsInjection{"uk-national", {19}});
-    project.cvbs_presets.pal_laserdisc_pilot_burst = true;
+    project.laserdisc.pilot_burst = true;
   } else {
     project.line_injections.vits.push_back(
         VitsInjection{"ntc7-composite", {17}});

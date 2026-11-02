@@ -395,36 +395,37 @@ TEST(YamlProjectParserTest, ParsesLineInjectionsAndLaserdiscPresetFlags) {
       "  video_standard_preset: PAL\n"
       "  sample_encoding_preset: CVBS_U10_4FSC\n"
       "  signal_state_preset: STANDARD_STABLE_LOCKED\n"
-      "  pal_laserdisc_pilot_burst: true\n"
-      "  ntsc_laserdisc_vbi_burst: false\n"
       "output:\n"
       "  video_path: out.cvbs\n"
       "line_injections:\n"
-      "  disc_type: CAV\n"
       "  vits:\n"
       "    - vits_type: virs\n"
       "      target_lines: [19, 20]\n"
+      "laserdisc:\n"
+      "  disc_type: CAV\n"
+      "  pilot_burst: true\n"
+      "  vbi_burst: false\n"
       "sections:\n"
       "  - name: ProgressiveWithInjections\n"
       "    type: progressive\n"
       "    source: fixture.exr\n"
       "    duration_frames: 4\n"
-      "    line_injections:\n"
-      "      - type: laserdisc\n"
-      "        codes:\n"
-      "          - code_type: picture_number\n"
-      "            start_value: 1\n";
+      "    laserdisc:\n"
+      "      area: programme_area\n"
+      "      codes:\n"
+      "        - code_type: picture_number\n"
+      "          start_value: 1\n";
 
   YamlProjectParser parser;
   const ParseResult result = parser.ParseString(yaml);
 
   ASSERT_TRUE(result.ok);
   ASSERT_EQ(result.project.sections.size(), 1U);
-  EXPECT_TRUE(result.project.cvbs_presets.pal_laserdisc_pilot_burst);
-  EXPECT_FALSE(result.project.cvbs_presets.ntsc_laserdisc_vbi_burst);
+  EXPECT_TRUE(result.project.laserdisc.pilot_burst);
+  EXPECT_FALSE(result.project.laserdisc.vbi_burst);
 
-  // Project-wide line injections: disc_type + VITS set.
-  EXPECT_EQ(result.project.line_injections.disc_type, "CAV");
+  // The laserdisc block's disc_type and the project-wide VITS set.
+  EXPECT_EQ(result.project.laserdisc.disc_type, "CAV");
   ASSERT_EQ(result.project.line_injections.vits.size(), 1U);
   EXPECT_EQ(result.project.line_injections.vits[0].vits_type, "virs");
   ASSERT_EQ(result.project.line_injections.vits[0].target_lines.size(), 2U);
@@ -587,7 +588,8 @@ TEST(YamlProjectParserTest, ParsesSectionTypeLeadIn) {
       "    type: progressive\n"
       "    source: fixture.exr\n"
       "    duration_frames: 8\n"
-      "    section_type: lead_in\n";
+      "    laserdisc:\n"
+      "      area: lead_in\n";
 
   YamlProjectParser parser;
   const ParseResult result = parser.ParseString(yaml);
@@ -613,7 +615,8 @@ TEST(YamlProjectParserTest, ParsesSectionTypeProgrammeArea) {
       "    type: progressive\n"
       "    source: fixture.exr\n"
       "    duration_frames: 8\n"
-      "    section_type: programme_area\n";
+      "    laserdisc:\n"
+      "      area: programme_area\n";
 
   YamlProjectParser parser;
   const ParseResult result = parser.ParseString(yaml);
@@ -640,7 +643,8 @@ TEST(YamlProjectParserTest, ParsesSectionTypeLeadOut) {
       "    type: progressive\n"
       "    source: fixture.exr\n"
       "    duration_frames: 8\n"
-      "    section_type: lead_out\n";
+      "    laserdisc:\n"
+      "      area: lead_out\n";
 
   YamlProjectParser parser;
   const ParseResult result = parser.ParseString(yaml);
@@ -691,14 +695,15 @@ TEST(YamlProjectParserTest, RejectsUnrecognisedSectionTypeValue) {
       "    type: progressive\n"
       "    source: fixture.exr\n"
       "    duration_frames: 8\n"
-      "    section_type: programme\n";
+      "    laserdisc:\n"
+      "      area: programme\n";
 
   YamlProjectParser parser;
   const ParseResult result = parser.ParseString(yaml);
 
   EXPECT_FALSE(result.ok);
   ASSERT_FALSE(result.errors.empty());
-  EXPECT_NE(result.errors[0].find("section_type"), std::string::npos);
+  EXPECT_NE(result.errors[0].find("laserdisc.area"), std::string::npos);
   EXPECT_NE(result.errors[0].find("programme"), std::string::npos);
 }
 
@@ -1227,9 +1232,9 @@ TEST(YamlProjectParserTest, RejectsUnknownChannelRampKey) {
   ASSERT_FALSE(result.errors.empty());
 }
 
-// Minimal project text with an `output` block whose body is supplied by the
-// caller, used by the EFM digital audio output cases below.
-std::string MakeProjectWithOutputBlock(const std::string& output_body) {
+// Minimal project text with a `laserdisc` block whose body is supplied by the
+// caller (no block when empty), used by the EFM digital audio cases below.
+std::string MakeProjectWithLaserdiscBlock(const std::string& laserdisc_body) {
   return std::string(
              "project:\n"
              "  name: EfmAudio\n"
@@ -1240,7 +1245,7 @@ std::string MakeProjectWithOutputBlock(const std::string& output_body) {
              "  signal_state_preset: STANDARD_STABLE_LOCKED\n"
              "output:\n"
              "  video_path: out.cvbs\n") +
-         output_body +
+         (laserdisc_body.empty() ? "" : "laserdisc:\n" + laserdisc_body) +
          "sections:\n"
          "  - name: Programme\n"
          "    type: progressive\n"
@@ -1249,7 +1254,7 @@ std::string MakeProjectWithOutputBlock(const std::string& output_body) {
 }
 
 TEST(YamlProjectParserTest, ParsesEfmAudioOutputPair) {
-  const std::string yaml = MakeProjectWithOutputBlock(
+  const std::string yaml = MakeProjectWithLaserdiscBlock(
       "  efm_audio:\n"
       "    pair: 3\n");
 
@@ -1257,21 +1262,22 @@ TEST(YamlProjectParserTest, ParsesEfmAudioOutputPair) {
   const ParseResult result = parser.ParseString(yaml);
 
   ASSERT_TRUE(result.ok);
-  EXPECT_TRUE(result.project.output.efm_audio.enabled);
-  EXPECT_EQ(result.project.output.efm_audio.pair, 3);
+  EXPECT_TRUE(result.project.laserdisc.efm_audio.enabled);
+  EXPECT_EQ(result.project.laserdisc.efm_audio.pair, 3);
 }
 
-TEST(YamlProjectParserTest, EfmAudioDisabledWhenOutputBlockAbsent) {
+TEST(YamlProjectParserTest, EfmAudioDisabledWhenLaserdiscBlockAbsent) {
   YamlProjectParser parser;
-  const ParseResult result = parser.ParseString(MakeProjectWithOutputBlock(""));
+  const ParseResult result =
+      parser.ParseString(MakeProjectWithLaserdiscBlock(""));
 
   ASSERT_TRUE(result.ok);
-  EXPECT_FALSE(result.project.output.efm_audio.enabled);
-  EXPECT_EQ(result.project.output.efm_audio.pair, 0);
+  EXPECT_FALSE(result.project.laserdisc.efm_audio.enabled);
+  EXPECT_EQ(result.project.laserdisc.efm_audio.pair, 0);
 }
 
 TEST(YamlProjectParserTest, RejectsEfmAudioWithoutPair) {
-  const std::string yaml = MakeProjectWithOutputBlock(
+  const std::string yaml = MakeProjectWithLaserdiscBlock(
       "  efm_audio:\n"
       "    {}\n");
 
@@ -1283,7 +1289,7 @@ TEST(YamlProjectParserTest, RejectsEfmAudioWithoutPair) {
 }
 
 TEST(YamlProjectParserTest, RejectsUnsupportedEfmAudioField) {
-  const std::string yaml = MakeProjectWithOutputBlock(
+  const std::string yaml = MakeProjectWithLaserdiscBlock(
       "  efm_audio:\n"
       "    pair: 0\n"
       "    channel: left\n");
@@ -1296,7 +1302,7 @@ TEST(YamlProjectParserTest, RejectsUnsupportedEfmAudioField) {
 }
 
 TEST(YamlProjectParserTest, RejectsNonIntegerEfmAudioPair) {
-  const std::string yaml = MakeProjectWithOutputBlock(
+  const std::string yaml = MakeProjectWithLaserdiscBlock(
       "  efm_audio:\n"
       "    pair: first\n");
 
@@ -1305,6 +1311,202 @@ TEST(YamlProjectParserTest, RejectsNonIntegerEfmAudioPair) {
 
   EXPECT_FALSE(result.ok);
   ASSERT_FALSE(result.errors.empty());
+}
+
+// Every LaserDisc key that used to live elsewhere is rejected at its old
+// place with an error naming its new one.
+TEST(YamlProjectParserTest, NamesTheNewHomeOfEveryMovedLaserdiscKey) {
+  const std::string presets =
+      "cvbs_presets:\n"
+      "  video_standard_preset: PAL\n";
+  const std::string output = "output:\n  video_path: out.cvbs\n";
+  const std::string section =
+      "sections:\n"
+      "  - name: S\n"
+      "    type: progressive\n"
+      "    source: fixture.exr\n"
+      "    duration_frames: 4\n";
+  const struct {
+    std::string yaml;
+    const char* error;
+  } cases[] = {
+      {presets + "  pal_laserdisc_pilot_burst: true\n" + output + section,
+       "cvbs_presets.pal_laserdisc_pilot_burst has moved to "
+       "laserdisc.pilot_burst."},
+      {presets + "  ntsc_laserdisc_vbi_burst: true\n" + output + section,
+       "cvbs_presets.ntsc_laserdisc_vbi_burst has moved to "
+       "laserdisc.vbi_burst."},
+      {presets + output + "  efm_audio:\n    pair: 0\n" + section,
+       "output.efm_audio has moved to laserdisc.efm_audio."},
+      {presets + output + "line_injections:\n  disc_type: CAV\n" + section,
+       "line_injections.disc_type has moved to laserdisc.disc_type."},
+      {presets + output + section + "    section_type: lead_in\n",
+       "section.section_type has moved to the section's laserdisc.area."},
+      {presets + output + section +
+           "    line_injections:\n"
+           "      - type: laserdisc\n",
+       "line_injections[] type 'laserdisc' has moved: laserdisc codes go in "
+       "the section's laserdisc.codes list."},
+  };
+  for (const auto& test_case : cases) {
+    const ParseResult result = YamlProjectParser().ParseString(test_case.yaml);
+    ASSERT_FALSE(result.ok) << test_case.yaml;
+    ASSERT_FALSE(result.errors.empty());
+    EXPECT_EQ(result.errors[0], test_case.error);
+  }
+}
+
+TEST(YamlProjectParserTest, ParsesTheLaserVisionChannel) {
+  const ParseResult result =
+      YamlProjectParser().ParseString(MakeProjectWithLaserdiscBlock(
+          "  channel:\n"
+          "    group_delay: { preset: iec60856_nominal, scale: 0.5 }\n"
+          "    response_by_picture:\n"
+          "      - {picture: 1, response_db: [[0, 0], [5.0, -4.0]]}\n"
+          "      - {picture: 54000, response_db: [[0, 0], [5.0, -9.0]]}\n"
+          "    field2_offset: { x_samples: 0.25, y_lines: -0.5 }\n"));
+  ASSERT_TRUE(result.ok) << result.errors[0];
+  const LaserdiscChannelParameters& channel = result.project.laserdisc.channel;
+  EXPECT_TRUE(result.project.laserdisc.enabled);
+  EXPECT_TRUE(channel.enabled);
+  EXPECT_TRUE(channel.group_delay.enabled);
+  EXPECT_EQ(channel.group_delay.preset, GroupDelayPreset::kIec60856Nominal);
+  EXPECT_DOUBLE_EQ(channel.group_delay.scale, 0.5);
+  ASSERT_EQ(channel.response_by_picture.size(), 2U);
+  EXPECT_EQ(channel.response_by_picture[1].picture, 54000);
+  EXPECT_DOUBLE_EQ(channel.response_by_picture[1].response_db[1].relative_db,
+                   -9.0);
+  EXPECT_TRUE(channel.field2_offset.enabled);
+  EXPECT_DOUBLE_EQ(channel.field2_offset.x_samples, 0.25);
+  EXPECT_DOUBLE_EQ(channel.field2_offset.y_lines, -0.5);
+
+  const ParseResult custom =
+      YamlProjectParser().ParseString(MakeProjectWithLaserdiscBlock(
+          "  channel:\n"
+          "    group_delay:\n"
+          "      points_ns: [[0.5, 0], [4.43, -135]]\n"
+          "    response_db: [[0, 0], [4.4, -2.0]]\n"));
+  ASSERT_TRUE(custom.ok) << custom.errors[0];
+  const LaserdiscChannelParameters& custom_channel =
+      custom.project.laserdisc.channel;
+  EXPECT_EQ(custom_channel.group_delay.preset, GroupDelayPreset::kCustom);
+  ASSERT_EQ(custom_channel.group_delay.points_ns.size(), 2U);
+  EXPECT_DOUBLE_EQ(custom_channel.group_delay.points_ns[1].delay_ns, -135.0);
+  EXPECT_DOUBLE_EQ(custom_channel.group_delay.scale, 1.0);
+  ASSERT_EQ(custom_channel.response_db.size(), 2U);
+}
+
+TEST(YamlProjectParserTest, RejectsMalformedLaserdiscBlocks) {
+  const struct {
+    const char* body;
+    const char* error;
+  } cases[] = {
+      {"  disc_type: [CAV]\n", "laserdisc.disc_type must be a string."},
+      {"  pilot_burst: maybe\n",
+       "laserdisc.pilot_burst must be true or false."},
+      {"  efm_audio:\n    pair: first\n",
+       "laserdisc.efm_audio.pair must be an integer."},
+      {"  channel: {}\n",
+       "laserdisc.channel must set at least one of: fm_beat, group_delay, "
+       "response_db, response_by_picture, field2_offset."},
+      {"  channel:\n    group_delay: { scale: 1 }\n",
+       "laserdisc.channel.group_delay must set exactly one of: preset, "
+       "points_ns."},
+      {"  channel:\n    group_delay: { preset: iec60857 }\n",
+       "laserdisc.channel.group_delay.preset has unrecognised value "
+       "'iec60857'. Expected: iec60856_nominal."},
+      {"  channel:\n    group_delay: { points_ns: [[1, 2, 3]] }\n",
+       "laserdisc.channel.group_delay.points_ns entries must be "
+       "[frequency_mhz, delay_ns] pairs."},
+      {"  channel:\n    response_db: [[0, flat]]\n",
+       "laserdisc.channel.response_db entries must be numeric pairs."},
+      {"  channel:\n    response_by_picture:\n      - {picture: 1}\n",
+       "laserdisc.channel.response_by_picture[] must set both of: picture, "
+       "response_db."},
+      {"  channel:\n    field2_offset: {}\n",
+       "laserdisc.channel.field2_offset must set at least one of: x_samples, "
+       "y_lines."},
+      {"  channel:\n    field2_offset: { x_samples: left }\n",
+       "laserdisc.channel.field2_offset.x_samples must be a number."},
+      {"  colour: true\n", "laserdisc contains unsupported field: 'colour'."},
+  };
+  for (const auto& test_case : cases) {
+    const ParseResult result = YamlProjectParser().ParseString(
+        MakeProjectWithLaserdiscBlock(test_case.body));
+    ASSERT_FALSE(result.ok) << test_case.body;
+    ASSERT_FALSE(result.errors.empty());
+    EXPECT_EQ(result.errors[0], test_case.error) << test_case.body;
+  }
+}
+
+TEST(YamlProjectParserTest, RejectsMalformedSectionLaserdiscBlocks) {
+  const std::string head =
+      "cvbs_presets:\n"
+      "  video_standard_preset: PAL\n"
+      "output:\n"
+      "  video_path: out.cvbs\n"
+      "laserdisc:\n"
+      "  disc_type: CAV\n"
+      "sections:\n"
+      "  - name: S\n"
+      "    type: progressive\n"
+      "    source: fixture.exr\n"
+      "    duration_frames: 4\n"
+      "    laserdisc:\n";
+  const struct {
+    const char* body;
+    const char* error;
+  } cases[] = {
+      {"      {}\n",
+       "section.laserdisc must set at least one of: area, codes."},
+      {"      area: [lead_in]\n", "section.laserdisc.area must be a string."},
+      {"      codes: picture_number\n",
+       "section.laserdisc.codes must be a list/sequence."},
+      {"      codes:\n        - start_value: 1\n",
+       "laserdisc.codes[] is missing required field: 'code_type'."},
+      {"      codes:\n        - code_type: picture_number\n"
+       "          start_value: one\n",
+       "laserdisc.codes[].start_value must be an integer."},
+      {"      target_lines: [16]\n",
+       "section.laserdisc contains unsupported field: 'target_lines'."},
+  };
+  for (const auto& test_case : cases) {
+    const ParseResult result =
+        YamlProjectParser().ParseString(head + test_case.body);
+    ASSERT_FALSE(result.ok) << test_case.body;
+    ASSERT_FALSE(result.errors.empty());
+    EXPECT_EQ(result.errors[0], test_case.error) << test_case.body;
+  }
+}
+
+TEST(YamlProjectParserTest, ParsesDifferentialAndCrosstalk) {
+  const std::string yaml =
+      "cvbs_presets:\n"
+      "  video_standard_preset: PAL\n"
+      "output:\n"
+      "  video_path: out.cvbs\n"
+      "chroma_error:\n"
+      "  differential:\n"
+      "    gain: [[0, 1.0], [100, 0.95]]\n"
+      "    phase_deg: [[0, 0.0], [100, 2.5]]\n"
+      "  crosstalk: { v_to_u: 0.3, alternate_with_switch: true }\n"
+      "sections:\n"
+      "  - name: S\n"
+      "    type: progressive\n"
+      "    source: fixture.exr\n"
+      "    duration_frames: 4\n";
+  const ParseResult result = YamlProjectParser().ParseString(yaml);
+  ASSERT_TRUE(result.ok) << result.errors[0];
+  const ChromaErrorParameters& chroma_error = result.project.chroma_error;
+  EXPECT_TRUE(chroma_error.enabled);
+  EXPECT_DOUBLE_EQ(chroma_error.gain, 1.0);
+  ASSERT_EQ(chroma_error.differential.gain.size(), 2U);
+  EXPECT_DOUBLE_EQ(chroma_error.differential.gain[1].level_ire, 100.0);
+  EXPECT_DOUBLE_EQ(chroma_error.differential.phase_deg[1].value, 2.5);
+  EXPECT_TRUE(chroma_error.crosstalk.enabled);
+  EXPECT_DOUBLE_EQ(chroma_error.crosstalk.v_to_u, 0.3);
+  EXPECT_DOUBLE_EQ(chroma_error.crosstalk.u_to_v, 0.0);
+  EXPECT_TRUE(chroma_error.crosstalk.alternate_with_switch);
 }
 
 }  // namespace

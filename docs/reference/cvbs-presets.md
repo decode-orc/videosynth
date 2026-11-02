@@ -7,7 +7,6 @@ cvbs_presets:
   video_standard_preset: PAL
   sample_encoding_preset: CVBS_S16_4FSC
   signal_state_preset: STANDARD_STABLE_LOCKED
-  pal_laserdisc_pilot_burst: true
 ```
 
 ## Keys
@@ -17,12 +16,10 @@ cvbs_presets:
 | `video_standard_preset` | string | Yes | `PAL`, `NTSC`, `PAL_M`, `SECAM` | — |
 | `sample_encoding_preset` | string | No | See below | `CVBS_U10_4FSC` |
 | `signal_state_preset` | string | No | `STANDARD_STABLE_LOCKED`; `STANDARD_STABLE_UNLOCKED` for `SECAM` | Per standard (see below) |
-| `pal_laserdisc_pilot_burst` | bool | No | `true`, `false` | `false` |
-| `ntsc_laserdisc_vbi_burst` | bool | No | `true`, `false` | `false` |
 | `ntsc_black_setup_ire` | float | No | `7.5`, `0.0` | `7.5` |
 | `secam_field_identification` | bool | No | `true`, `false` | `true` |
 
-No other key is accepted. In particular there are no `mode`, `field_order`, `field_dominance` or `endianness` keys — field order and dominance follow the standard, and sample data is little-endian.
+No other key is accepted. In particular there are no `mode`, `field_order`, `field_dominance` or `endianness` keys — field order and dominance follow the standard, and sample data is little-endian. The LaserDisc signal options — the PAL pilot burst and the NTSC VBI burst — are in the [`laserdisc`](laserdisc.md) block.
 
 ## `video_standard_preset`
 
@@ -54,9 +51,7 @@ Only one standard per project. The output resolution follows from it and must no
 
 **Rule**: 4fsc generation requires a 4fsc encoding *and* the `signal_state_preset` the standard requires (see below).
 
-**Warning**: enabling `pal_laserdisc_pilot_burst` with `CVBS_U10_4FSC`, `CVBS_U16_4FSC` or `CVBS_TPG21_4FSC` clips the burst trough at −300 mV, where the waveform reaches −600 mV. Use `CVBS_S16_4FSC` or a raw preset.
-
-**Warning**: enabling `ntsc_laserdisc_vbi_burst` with `CVBS_U10_4FSC`, `CVBS_U16_4FSC` or `CVBS_TPG21_4FSC` clips the colour burst on the broad field-sync pulses at sync tip (−40 IRE), where the waveform reaches −60 IRE. Use `CVBS_S16_4FSC` or a raw preset.
+The LaserDisc [pilot burst](laserdisc.md#pilot_burst) and [VBI burst](laserdisc.md#vbi_burst) reach below sync tip, so they need `CVBS_S16_4FSC` or a raw preset to survive unclipped.
 
 ## `signal_state_preset`
 
@@ -72,18 +67,6 @@ SECAM chrominance is frequency modulated, so its subcarrier phase depends on pic
 When the key is omitted, the required value for the standard is used. Any other value is rejected: the remaining presets describe captures that are unstable or at a non-standard rate, which videosynth never produces.
 
 Because the generated signal is one unbroken sequence — subcarrier phase and colour field sequence advance continuously with the output frame position — the metadata file always declares `sequence_continuous = TRUE` (see [outputs](../user-manual/outputs.md)).
-
-## `pal_laserdisc_pilot_burst`
-
-Superimposes a 3.75 MHz (240 × f_H) sinusoidal burst at ±300 mV on every sync pulse in the luma channel — IEC 60856 §9.1.2.
-
-**PAL only.** Enabling it on an NTSC, PAL-M or SECAM project is a validation error.
-
-## `ntsc_laserdisc_vbi_burst`
-
-Keeps the colour burst on every line of the vertical interval, including the equalising and broad field-sync lines (lines 1–9 and 264–272) where standard NTSC suppresses it — IEC 60857 §9.1.2 and Figure 6a. Each burst is the normal NTSC burst: same gate position after 0H, amplitude and continuous subcarrier phase. On the broad field-sync lines the gate falls inside the broad pulse, so the burst is centred on sync tip.
-
-**NTSC only.** Enabling it on a PAL, PAL-M or SECAM project is a validation error.
 
 ## `ntsc_black_setup_ire`
 

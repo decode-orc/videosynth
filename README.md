@@ -33,16 +33,19 @@ The project ships two front ends built from the same pipeline:
 - **Composite or Y/C output** (`output.signal_type: composite | yc`).
 - **Frame content** from validated progressive source profiles (EXR stills and
   MKV/MP4 video in any FFmpeg-decodable codec, colour-normalised to BT.601).
-- **Line injections** for VBI content: VITS test signals, and laserdisc
-  biphase and FM codes (IEC 60856/60857).
-- **Laserdisc disc simulation**: CAV/CLV picture numbers, chapters, programme
-  status codes, lead-in/out, picture stop, PAL pilot burst.
+- **VITS test signals** on the VBI lines, project-wide.
 - **Impairments**: two-component Gaussian noise (floor plus proportional)
   with optional spectral shaping and a shared pressing layer; dropout
   injection (random surface dropouts and persistent scratches) with a SQLite
   dropout sidecar, flagged or unflagged; pressing channel effects (sub-sample
-  timing offset, edge smear, PAL FM-beat herringbone); chroma gain and phase
-  error; and a per-section luma bandwidth limit.
+  timing offset, edge smear); chroma gain, phase, differential gain and
+  phase, and U/V crosstalk error; and a per-section luma bandwidth limit.
+- **LaserDisc simulation**, all in optional `laserdisc:` blocks: CAV/CLV
+  biphase and FM codes (IEC 60856/60857) — picture numbers, chapters,
+  programme status, lead-in/out, picture stop; the PAL pilot burst and NTSC
+  VBI burst; EFM digital audio; and the LaserVision channel (PAL FM-beat
+  herringbone, IEC 60856 group delay, replay response by disc position,
+  field-2 misregistration).
 - **Multi-track audio**: up to eight stereo channel pairs at 48 kHz/24-bit,
   each carrying test tones, a WAV/FLAC file or the source video's soundtrack,
   plus EFM audio for laserdisc projects.
@@ -201,7 +204,7 @@ nix develop "path:$PWD" --command ./build/videosynth-gui
 `videosynth-gui` accepts the same `--log-level` and `--log-file` options, which
 override the persisted preferences for the session. It opens on a welcome page:
 create a project (the video standard is fixed at creation time), add sections,
-edit line injections, impairments and audio, preview frames in the preview
+edit VITS, LaserDisc codes, impairments and audio, preview frames in the preview
 dock, then generate. Validation runs continuously in the background
 and reports into the issues dock.
 
@@ -209,8 +212,8 @@ and reports into the issues dock.
 
 ## Projects
 
-A project is a YAML file describing the output, the global line injections and
-an ordered list of sections. A minimal example:
+A project is a YAML file describing the output, the project-wide VITS set,
+optional LaserDisc settings and an ordered list of sections. A minimal example:
 
 ```yaml
 project:
@@ -238,9 +241,11 @@ sections:
     duration_frames: 1
 ```
 
-The full schema is documented in
-[docs-tech/design/high-level-design.md](docs-tech/design/high-level-design.md) §7–§11;
-laserdisc biphase authoring is covered in
+The full schema is documented in the project file reference
+([docs/reference/overview.md](docs/reference/overview.md)); everything
+LaserDisc-specific is in its `laserdisc:` blocks
+([docs/reference/laserdisc.md](docs/reference/laserdisc.md)). Laserdisc biphase
+authoring is covered in
 [docs-tech/user/biphase-design.md](docs-tech/user/biphase-design.md).
 
 ### Logical asset roots
@@ -270,7 +275,7 @@ All artefacts are colocated with `output.video_path`:
 | `<name>.meta` | SQLite metadata sidecar |
 | `<name>.dropouts.meta` | SQLite dropout sidecar (schema v5), when any section injects dropouts |
 | `<name>_audio_<pair>.wav` | 48 kHz/24-bit stereo audio per channel pair |
-| `<name>.efm` / `<name>.efm.meta` | LaserDisc digital audio channel stream and its frame index, when `output.efm_audio` is set |
+| `<name>.efm` / `<name>.efm.meta` | LaserDisc digital audio channel stream and its frame index, when `laserdisc.efm_audio` is set |
 | `<name>.truth` / `<name>.truth.meta` | Picture truth (planar float32 Y/U/V at 4fsc over the active window) and its SQLite sidecar, when `output.truth` is set |
 
 ---

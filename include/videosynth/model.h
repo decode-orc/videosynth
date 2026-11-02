@@ -137,8 +137,6 @@ struct CvbsPresets {
   Standard video_standard_preset = Standard::kUnknown;
   std::string sample_encoding_preset = "CVBS_U10_4FSC";
   std::string signal_state_preset = "STANDARD_STABLE_LOCKED";
-  bool pal_laserdisc_pilot_burst = false;
-  bool ntsc_laserdisc_vbi_burst = false;
   double ntsc_black_setup_ire = 7.5;
   bool ntsc_black_setup_ire_specified = false;
   // SECAM only: emit the field identification signals on lines 7-15 and
@@ -714,7 +712,6 @@ struct OutputTargets {
   std::string metadata_path;
   // "composite" (default) or "yc" (dual-file luma+chroma).
   std::string signal_type = "composite";
-  EfmAudioOutput efm_audio = {};
   // When true, the component picture (Y, U, V at 4fsc over the active window)
   // that went into the modulator is written beside the video output, before
   // any impairment. See picture_truth_writer.h.
@@ -729,13 +726,10 @@ struct VitsInjection {
   std::vector<int> target_lines;
 };
 
-// Project-wide line-injection configuration. `disc_type` selects the laserdisc
-// format ("CAV"/"CLV", empty for a non-laserdisc project) shared by every
-// section's laserdisc code injections. `vits` is the VITS test-signal set
-// applied across the whole project. Both are project-wide decisions: the disc
-// format and the VITS complement do not vary per section.
+// Project-wide VITS configuration: the test-signal set applied across the
+// whole project and the placement policy the validator holds it to. The VITS
+// complement does not vary per section.
 struct ProjectLineInjections {
-  std::string disc_type;
   // Placement policy for the VITS set (see VitsPlacement). Defaults to
   // kStandard so projects that omit the field keep the strict broadcast-line
   // policy they were authored under.
@@ -755,6 +749,20 @@ struct EdgeSmearParameters {
   double tau_samples = 1.0;
 };
 
+// Project-wide channel impairments: properties of the pressing rather than of
+// one capture, so every project of one pressing uses the same settings. When
+// `enabled` is false the channel stage is skipped entirely. The LaserVision
+// replay channel (FM beat, group delay, replay response, field-2 offset) is
+// LaserdiscChannelParameters.
+struct ChannelParameters {
+  // Present when the project declares a `channel:` block.
+  bool enabled = false;
+  // Sub-sample timing offset in 4fsc samples. Positive values make the signal
+  // arrive later. Range [-8.0, 8.0].
+  double timing_offset_samples = 0.0;
+  EdgeSmearParameters edge_smear;
+};
+
 // Default FM video carrier at black, in Hz: the reference model's bars fit
 // on PAL LaserDisc pressings (deherring.py F0_HZ).
 constexpr double kFmBeatCarrierBlackDefaultHz = 7.088e6;
@@ -762,7 +770,7 @@ constexpr double kFmBeatCarrierBlackDefaultHz = 7.088e6;
 // PAL FM-beat herringbone: the beat between the FM video carrier and the
 // colour signal, recorded on the master (625-line PAL only).
 struct FmBeatParameters {
-  // Present when the channel block declares `fm_beat:`.
+  // Present when the laserdisc channel declares `fm_beat:`.
   bool enabled = false;
   // FM video carrier at black, in Hz. Range [6.9e6, 7.3e6].
   double carrier_black_hz = kFmBeatCarrierBlackDefaultHz;
@@ -771,18 +779,108 @@ struct FmBeatParameters {
   double level_db = 0.0;
 };
 
-// Project-wide channel impairments: properties of the pressing rather than of
-// one capture, so every project of one pressing uses the same settings. When
-// `enabled` is false the channel stage is skipped entirely.
-struct ChannelParameters {
-  // Present when the project declares a `channel:` block.
-  bool enabled = false;
-  // Sub-sample timing offset in 4fsc samples. Positive values make the signal
-  // arrive later. Range [-8.0, 8.0].
-  double timing_offset_samples = 0.0;
-  EdgeSmearParameters edge_smear;
-  FmBeatParameters fm_beat;
+// One breakpoint of a group-delay curve: the delay at frequency_mhz relative
+// to the low-frequency reference, in ns. Negative values arrive early.
+struct GroupDelayPoint {
+  double frequency_mhz = 0.0;
+  double delay_ns = 0.0;
 };
+
+enum class GroupDelayPreset {
+  // The curve is the project's own `points_ns` table.
+  kCustom,
+  // The nominal LaserVision pre-distortion of IEC 60856 §9.1.6.
+  kIec60856Nominal,
+};
+
+// LaserVision group-delay pre-distortion: an all-pass element whose group
+// delay follows a curve of breakpoints joined by straight lines, scaled by
+// `scale` (the fraction of the recorded pre-distortion left in the signal).
+struct GroupDelayParameters {
+  // Present when the laserdisc channel declares `group_delay:`.
+  bool enabled = false;
+  GroupDelayPreset preset = GroupDelayPreset::kCustom;
+  // The custom curve; empty unless preset is kCustom.
+  std::vector<GroupDelayPoint> points_ns;
+  // Range [-2, 2].
+  double scale = 1.0;
+};
+
+// The IEC 60856 §9.1.6 nominal group-delay pre-distortion of PAL LaserVision
+// video, relative to 0.5 MHz.
+inline std::vector<GroupDelayPoint> Iec60856NominalGroupDelay() {
+  return {{0.5, 0.0},   {2.0, -10.0},   {3.0, -35.0},
+          {4.0, -85.0}, {4.43, -135.0}, {4.8, -200.0}};
+}
+
+// The breakpoints a group-delay element applies, before `scale`.
+inline std::vector<GroupDelayPoint> GroupDelayCurve(
+    const GroupDelayParameters& group_delay) {
+  return group_delay.preset == GroupDelayPreset::kIec60856Nominal
+             ? Iec60856NominalGroupDelay()
+             : group_delay.points_ns;
+}
+
+// The replay amplitude response at one disc position: the response that
+// applies to the picture numbered `picture`.
+struct ResponseByPictureEntry {
+  int picture = 0;
+  std::vector<NoiseSpectrumPoint> response_db;
+};
+
+// Picture-domain misregistration of field 2 against field 1, applied to the
+// source picture rows that field 2 carries before encoding.
+struct Field2OffsetParameters {
+  // Present when the laserdisc channel declares `field2_offset:`.
+  bool enabled = false;
+  // Horizontal offset in 4fsc samples; positive moves field 2 right.
+  // Range [-8, 8].
+  double x_samples = 0.0;
+  // Vertical offset in frame lines (picture rows); positive moves field 2
+  // down. Range [-4, 4].
+  double y_lines = 0.0;
+};
+
+// The LaserVision pressing and replay channel: what the master, the disc and
+// a player's replay path do to the video signal. Like ChannelParameters, it
+// belongs to the pressing, so every project of one pressing uses the same
+// settings.
+struct LaserdiscChannelParameters {
+  // Present when the laserdisc block declares `channel:`.
+  bool enabled = false;
+  FmBeatParameters fm_beat;
+  GroupDelayParameters group_delay;
+  // Linear-phase replay amplitude response, [MHz, dB] breakpoints. Empty when
+  // absent. Mutually exclusive with response_by_picture.
+  std::vector<NoiseSpectrumPoint> response_db;
+  // Responses at two or more disc positions, interpolated by picture number.
+  // Empty when absent.
+  std::vector<ResponseByPictureEntry> response_by_picture;
+  Field2OffsetParameters field2_offset;
+};
+
+// LaserDisc (LaserVision) properties of the project. `enabled` is true when
+// the project declares a `laserdisc:` block; every key in it is optional.
+struct LaserdiscParameters {
+  bool enabled = false;
+  // "CAV" or "CLV"; empty when the project carries no disc addressing.
+  std::string disc_type;
+  // PAL: the 3.75 MHz pilot burst on every sync pulse (IEC 60856 §9.1.2).
+  bool pilot_burst = false;
+  // NTSC: the colour burst kept on every vertical-interval line (IEC 60857
+  // §9.1.2).
+  bool vbi_burst = false;
+  EfmAudioOutput efm_audio = {};
+  LaserdiscChannelParameters channel;
+};
+
+// True when the project carries a laserdisc block: `enabled`, or any of its
+// settings (a project built in code may set a setting without `enabled`).
+inline bool LaserdiscBlockPresent(const LaserdiscParameters& laserdisc) {
+  return laserdisc.enabled || !laserdisc.disc_type.empty() ||
+         laserdisc.pilot_burst || laserdisc.vbi_burst ||
+         laserdisc.efm_audio.enabled || laserdisc.channel.enabled;
+}
 
 // Per-line Gaussian jitter of the chroma error. Values are standard
 // deviations.
@@ -800,6 +898,39 @@ struct ChromaJitterParameters {
   int64_t seed = 0;
 };
 
+// One breakpoint of a differential gain or phase curve: the value at a luma
+// level in IRE (0 at blanking, 100 at white).
+struct LevelCurvePoint {
+  double level_ire = 0.0;
+  double value = 0.0;
+};
+
+// Differential gain and phase: chroma gain and phase that depend on the luma
+// level the chroma sits on. Each curve is a set of breakpoints joined by
+// straight lines and held beyond its ends; an empty curve is the identity.
+struct DifferentialParameters {
+  // Present when the chroma_error block declares `differential:`.
+  bool enabled = false;
+  // [IRE, gain] breakpoints. Gains in [0.5, 1.5].
+  std::vector<LevelCurvePoint> gain;
+  // [IRE, degrees] breakpoints. Phases in [-30, 30].
+  std::vector<LevelCurvePoint> phase_deg;
+};
+
+// Chroma crosstalk: a 2x2 mixing of the decoded U and V,
+//   U' = U + a * v_to_u * V,  V' = V + a * u_to_v * U,
+// where a is the line's PAL V-switch sign when alternate_with_switch is set,
+// and 1 otherwise.
+struct CrosstalkParameters {
+  // Present when the chroma_error block declares `crosstalk:`.
+  bool enabled = false;
+  // Range [-0.5, 0.5].
+  double v_to_u = 0.0;
+  // Range [-0.5, 0.5].
+  double u_to_v = 0.0;
+  bool alternate_with_switch = false;
+};
+
 // Project-wide chroma gain and phase error of one capture: the player's
 // chroma path, applied to picture chroma only (burst, VITS and VBI lines are
 // untouched).
@@ -811,6 +942,8 @@ struct ChromaErrorParameters {
   // Chroma phase advance in degrees. Range [-180, 180].
   double phase_deg = 0.0;
   ChromaJitterParameters line_jitter;
+  DifferentialParameters differential;
+  CrosstalkParameters crosstalk;
   // Apply the error to the colour burst as well as the picture chroma: a
   // whole chroma path (or an FM/MTF loss) rather than a mis-adjusted picture
   // chroma path that leaves the burst alone.
@@ -825,6 +958,7 @@ struct Project {
   CvbsPresets cvbs_presets;
   OutputTargets output;
   ProjectLineInjections line_injections;
+  LaserdiscParameters laserdisc;
   ChannelParameters channel;
   ChromaErrorParameters chroma_error;
   std::vector<Section> sections;
@@ -842,8 +976,6 @@ inline bool operator==(const CvbsPresets& a, const CvbsPresets& b) {
   return a.video_standard_preset == b.video_standard_preset &&
          a.sample_encoding_preset == b.sample_encoding_preset &&
          a.signal_state_preset == b.signal_state_preset &&
-         a.pal_laserdisc_pilot_burst == b.pal_laserdisc_pilot_burst &&
-         a.ntsc_laserdisc_vbi_burst == b.ntsc_laserdisc_vbi_burst &&
          a.ntsc_black_setup_ire == b.ntsc_black_setup_ire &&
          a.ntsc_black_setup_ire_specified == b.ntsc_black_setup_ire_specified &&
          a.secam_field_identification == b.secam_field_identification &&
@@ -971,8 +1103,7 @@ inline bool operator==(const VitsInjection& a, const VitsInjection& b) {
 
 inline bool operator==(const ProjectLineInjections& a,
                        const ProjectLineInjections& b) {
-  return a.disc_type == b.disc_type && a.placement == b.placement &&
-         a.vits == b.vits;
+  return a.placement == b.placement && a.vits == b.vits;
 }
 
 inline bool operator==(const CadenceParameters& a, const CadenceParameters& b) {
@@ -1002,8 +1133,7 @@ inline bool operator==(const EfmAudioOutput& a, const EfmAudioOutput& b) {
 
 inline bool operator==(const OutputTargets& a, const OutputTargets& b) {
   return a.video_path == b.video_path && a.metadata_path == b.metadata_path &&
-         a.signal_type == b.signal_type && a.efm_audio == b.efm_audio &&
-         a.truth == b.truth;
+         a.signal_type == b.signal_type && a.truth == b.truth;
 }
 
 inline bool operator==(const EdgeSmearParameters& a,
@@ -1020,7 +1150,60 @@ inline bool operator==(const FmBeatParameters& a, const FmBeatParameters& b) {
 inline bool operator==(const ChannelParameters& a, const ChannelParameters& b) {
   return a.enabled == b.enabled &&
          a.timing_offset_samples == b.timing_offset_samples &&
-         a.edge_smear == b.edge_smear && a.fm_beat == b.fm_beat;
+         a.edge_smear == b.edge_smear;
+}
+
+inline bool operator==(const GroupDelayPoint& a, const GroupDelayPoint& b) {
+  return a.frequency_mhz == b.frequency_mhz && a.delay_ns == b.delay_ns;
+}
+
+inline bool operator==(const GroupDelayParameters& a,
+                       const GroupDelayParameters& b) {
+  return a.enabled == b.enabled && a.preset == b.preset &&
+         a.points_ns == b.points_ns && a.scale == b.scale;
+}
+
+inline bool operator==(const ResponseByPictureEntry& a,
+                       const ResponseByPictureEntry& b) {
+  return a.picture == b.picture && a.response_db == b.response_db;
+}
+
+inline bool operator==(const Field2OffsetParameters& a,
+                       const Field2OffsetParameters& b) {
+  return a.enabled == b.enabled && a.x_samples == b.x_samples &&
+         a.y_lines == b.y_lines;
+}
+
+inline bool operator==(const LaserdiscChannelParameters& a,
+                       const LaserdiscChannelParameters& b) {
+  return a.enabled == b.enabled && a.fm_beat == b.fm_beat &&
+         a.group_delay == b.group_delay && a.response_db == b.response_db &&
+         a.response_by_picture == b.response_by_picture &&
+         a.field2_offset == b.field2_offset;
+}
+
+inline bool operator==(const LaserdiscParameters& a,
+                       const LaserdiscParameters& b) {
+  return a.enabled == b.enabled && a.disc_type == b.disc_type &&
+         a.pilot_burst == b.pilot_burst && a.vbi_burst == b.vbi_burst &&
+         a.efm_audio == b.efm_audio && a.channel == b.channel;
+}
+
+inline bool operator==(const LevelCurvePoint& a, const LevelCurvePoint& b) {
+  return a.level_ire == b.level_ire && a.value == b.value;
+}
+
+inline bool operator==(const DifferentialParameters& a,
+                       const DifferentialParameters& b) {
+  return a.enabled == b.enabled && a.gain == b.gain &&
+         a.phase_deg == b.phase_deg;
+}
+
+inline bool operator==(const CrosstalkParameters& a,
+                       const CrosstalkParameters& b) {
+  return a.enabled == b.enabled && a.v_to_u == b.v_to_u &&
+         a.u_to_v == b.u_to_v &&
+         a.alternate_with_switch == b.alternate_with_switch;
 }
 
 inline bool operator==(const ChromaJitterParameters& a,
@@ -1034,6 +1217,7 @@ inline bool operator==(const ChromaErrorParameters& a,
                        const ChromaErrorParameters& b) {
   return a.enabled == b.enabled && a.gain == b.gain &&
          a.phase_deg == b.phase_deg && a.line_jitter == b.line_jitter &&
+         a.differential == b.differential && a.crosstalk == b.crosstalk &&
          a.include_burst == b.include_burst;
 }
 
@@ -1041,8 +1225,8 @@ inline bool operator==(const Project& a, const Project& b) {
   return a.name == b.name && a.version == b.version &&
          a.description == b.description && a.cvbs_presets == b.cvbs_presets &&
          a.output == b.output && a.line_injections == b.line_injections &&
-         a.channel == b.channel && a.chroma_error == b.chroma_error &&
-         a.sections == b.sections;
+         a.laserdisc == b.laserdisc && a.channel == b.channel &&
+         a.chroma_error == b.chroma_error && a.sections == b.sections;
 }
 
 inline bool operator!=(const Project& a, const Project& b) { return !(a == b); }
@@ -1101,7 +1285,7 @@ inline bool StandardHasLaserdiscDigitalAudio(Standard standard) {
 // (StandardHasLaserdiscDigitalAudio). The project validator reports the
 // rejected combinations.
 inline int ProjectEfmAudioPair(const Project& project) {
-  if (!project.output.efm_audio.enabled) {
+  if (!project.laserdisc.efm_audio.enabled) {
     return -1;
   }
   if (!StandardHasLaserdiscDigitalAudio(
@@ -1109,11 +1293,11 @@ inline int ProjectEfmAudioPair(const Project& project) {
     return -1;
   }
   const std::vector<int> pairs = ProjectAudioChannelPairs(project);
-  if (std::find(pairs.begin(), pairs.end(), project.output.efm_audio.pair) ==
+  if (std::find(pairs.begin(), pairs.end(), project.laserdisc.efm_audio.pair) ==
       pairs.end()) {
     return -1;
   }
-  return project.output.efm_audio.pair;
+  return project.laserdisc.efm_audio.pair;
 }
 
 // First non-empty description recorded for `pair` in section order, or an empty

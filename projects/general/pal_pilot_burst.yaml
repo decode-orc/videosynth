@@ -7,10 +7,12 @@ cvbs_presets:
   video_standard_preset: PAL
   sample_encoding_preset: CVBS_S16_4FSC
   signal_state_preset: STANDARD_STABLE_LOCKED
-  pal_laserdisc_pilot_burst: true
 
 output:
   video_path: "{output}/videosynth_pal_pilot_burst.cvbs"
+
+laserdisc:
+  pilot_burst: true
 
 sections:
   - name: PalPilotBurst100Bars

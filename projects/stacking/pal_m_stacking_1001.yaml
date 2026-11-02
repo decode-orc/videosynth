@@ -28,10 +28,12 @@ output:
   video_path: "{output}/videosynth_pal_m_stacking_1001.cvbs"
 
 line_injections:
-  disc_type: CAV
   vits:
     - vits_type: virs
       target_lines: [19, 282]
+
+laserdisc:
+  disc_type: CAV
 
 sections:
 
@@ -42,16 +44,15 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x486/TARTAN.exr"
     duration_frames: 8
-    section_type: programme_area
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 1
-          - code_type: programme_status
-            programme_status: "0x8DC001"
-          - code_type: fm_picture_number
-          - code_type: fm_white_flag
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 1
+        - code_type: programme_status
+          programme_status: "0x8DC001"
+        - code_type: fm_picture_number
+        - code_type: fm_white_flag
   # ---------------------------------------------------------------------------
   # Section 2: near-quantisation noise, minimal dropout
   # ---------------------------------------------------------------------------
@@ -59,7 +60,15 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x486/TARTAN.exr"
     duration_frames: 8
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 9
+        - code_type: programme_status
+          programme_status: "0x8DC001"
+        - code_type: fm_picture_number
+        - code_type: fm_white_flag
     noise:
       noise_db: 58.0
       noise_spread_db: 4.0
@@ -71,15 +80,6 @@ sections:
       scratch:
         scale: 2
         seed: 1001
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 9
-          - code_type: programme_status
-            programme_status: "0x8DC001"
-          - code_type: fm_picture_number
-          - code_type: fm_white_flag
   # ---------------------------------------------------------------------------
   # Section 3: excellent source quality
   # ---------------------------------------------------------------------------
@@ -87,7 +87,15 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x486/TARTAN.exr"
     duration_frames: 8
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 17
+        - code_type: programme_status
+          programme_status: "0x8DC001"
+        - code_type: fm_picture_number
+        - code_type: fm_white_flag
     noise:
       noise_db: 53.0
       noise_spread_db: 4.0
@@ -99,15 +107,6 @@ sections:
       scratch:
         scale: 4
         seed: 1001
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 17
-          - code_type: programme_status
-            programme_status: "0x8DC001"
-          - code_type: fm_picture_number
-          - code_type: fm_white_flag
   # ---------------------------------------------------------------------------
   # Section 4: good source quality
   # ---------------------------------------------------------------------------
@@ -115,7 +114,15 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x486/TARTAN.exr"
     duration_frames: 8
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 25
+        - code_type: programme_status
+          programme_status: "0x8DC001"
+        - code_type: fm_picture_number
+        - code_type: fm_white_flag
     noise:
       noise_db: 48.0
       noise_spread_db: 4.0
@@ -127,15 +134,6 @@ sections:
       scratch:
         scale: 6
         seed: 1001
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 25
-          - code_type: programme_status
-            programme_status: "0x8DC001"
-          - code_type: fm_picture_number
-          - code_type: fm_white_flag
   # ---------------------------------------------------------------------------
   # Section 5: fair source quality
   # ---------------------------------------------------------------------------
@@ -143,7 +141,15 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x486/TARTAN.exr"
     duration_frames: 8
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 33
+        - code_type: programme_status
+          programme_status: "0x8DC001"
+        - code_type: fm_picture_number
+        - code_type: fm_white_flag
     noise:
       noise_db: 43.0
       noise_spread_db: 4.0
@@ -155,15 +161,6 @@ sections:
       scratch:
         scale: 8
         seed: 1001
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 33
-          - code_type: programme_status
-            programme_status: "0x8DC001"
-          - code_type: fm_picture_number
-          - code_type: fm_white_flag
   # ---------------------------------------------------------------------------
   # Section 6: typical VHS quality
   # ---------------------------------------------------------------------------
@@ -171,7 +168,15 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x486/TARTAN.exr"
     duration_frames: 8
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 41
+        - code_type: programme_status
+          programme_status: "0x8DC001"
+        - code_type: fm_picture_number
+        - code_type: fm_white_flag
     noise:
       noise_db: 38.0
       noise_spread_db: 4.0
@@ -183,15 +188,6 @@ sections:
       scratch:
         scale: 10
         seed: 1001
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 41
-          - code_type: programme_status
-            programme_status: "0x8DC001"
-          - code_type: fm_picture_number
-          - code_type: fm_white_flag
   # ---------------------------------------------------------------------------
   # Section 7: poor tape
   # ---------------------------------------------------------------------------
@@ -199,7 +195,15 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x486/TARTAN.exr"
     duration_frames: 8
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 49
+        - code_type: programme_status
+          programme_status: "0x8DC001"
+        - code_type: fm_picture_number
+        - code_type: fm_white_flag
     noise:
       noise_db: 33.0
       noise_spread_db: 4.0
@@ -211,15 +215,6 @@ sections:
       scratch:
         scale: 12
         seed: 1001
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 49
-          - code_type: programme_status
-            programme_status: "0x8DC001"
-          - code_type: fm_picture_number
-          - code_type: fm_white_flag
   # ---------------------------------------------------------------------------
   # Section 8: very poor tape
   # ---------------------------------------------------------------------------
@@ -227,7 +222,15 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x486/TARTAN.exr"
     duration_frames: 8
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 57
+        - code_type: programme_status
+          programme_status: "0x8DC001"
+        - code_type: fm_picture_number
+        - code_type: fm_white_flag
     noise:
       noise_db: 28.0
       noise_spread_db: 4.0
@@ -239,15 +242,6 @@ sections:
       scratch:
         scale: 14
         seed: 1001
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 57
-          - code_type: programme_status
-            programme_status: "0x8DC001"
-          - code_type: fm_picture_number
-          - code_type: fm_white_flag
   # ---------------------------------------------------------------------------
   # Section 9: barely watchable
   # ---------------------------------------------------------------------------
@@ -255,7 +249,15 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x486/TARTAN.exr"
     duration_frames: 8
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 65
+        - code_type: programme_status
+          programme_status: "0x8DC001"
+        - code_type: fm_picture_number
+        - code_type: fm_white_flag
     noise:
       noise_db: 24.0
       noise_spread_db: 4.0
@@ -267,15 +269,6 @@ sections:
       scratch:
         scale: 17
         seed: 1001
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 65
-          - code_type: programme_status
-            programme_status: "0x8DC001"
-          - code_type: fm_picture_number
-          - code_type: fm_white_flag
   # ---------------------------------------------------------------------------
   # Section 10: sync-borderline — maximum noise and dropout
   # ---------------------------------------------------------------------------
@@ -283,7 +276,15 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x486/TARTAN.exr"
     duration_frames: 8
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 73
+        - code_type: programme_status
+          programme_status: "0x8DC001"
+        - code_type: fm_picture_number
+        - code_type: fm_white_flag
     noise:
       noise_db: 20.0
       noise_spread_db: 0.0
@@ -295,12 +296,3 @@ sections:
       scratch:
         scale: 20
         seed: 1001
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 73
-          - code_type: programme_status
-            programme_status: "0x8DC001"
-          - code_type: fm_picture_number
-          - code_type: fm_white_flag

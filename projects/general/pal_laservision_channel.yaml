@@ -1,0 +1,80 @@
+# PAL LaserVision Replay Channel Example
+#
+# Exercises the LaserVision channel model of laserdisc.channel and the
+# player's chroma path of chroma_error on the decoder-stress card, with the
+# picture truth written beside it so a decoder or a channel equaliser can be
+# scored against the source:
+#   - group_delay: the IEC 60856 section 9.1.6 nominal pre-distortion, all of
+#     it left in the signal (-135 ns at 4.43 MHz);
+#   - response_by_picture: the replay response at the outer and inner edge of
+#     a CAV side, interpolated by picture number (placeholder values until
+#     measured figures replace them);
+#   - field2_offset: field 2 a quarter sample right of field 1;
+#   - chroma_error: differential gain and phase, and V-into-U crosstalk that
+#     alternates with the PAL V-switch.
+# The UK national VITS on lines 19 and 332 go through the same channel, so the
+# response can be measured from them as on a real disc. The values here are
+# illustrative: decode-orc measures the real ones from Domesday, Volcanoes and
+# EcoDisc captures.
+
+project:
+  name: PalLaserVisionChannel
+  version: "1.0"
+  description: PAL decoder-stress card through the LaserVision replay channel, with its picture truth
+
+cvbs_presets:
+  video_standard_preset: PAL
+  sample_encoding_preset: CVBS_S16_4FSC
+  signal_state_preset: STANDARD_STABLE_LOCKED
+
+output:
+  video_path: "{output}/videosynth_pal_laservision_channel.cvbs"
+  truth: true
+
+line_injections:
+  placement: laserdisc
+  vits:
+    - vits_type: uk-national
+      target_lines: [19, 332]
+
+laserdisc:
+  disc_type: CAV
+  pilot_burst: true
+  channel:
+    group_delay:
+      preset: iec60856_nominal
+      scale: 1.0
+    response_by_picture:
+      - picture: 1
+        response_db: [[0.0, 0.0], [3.0, -0.5], [4.4, -2.0], [5.0, -6.0], [5.5, -20.0]]
+      - picture: 54000
+        response_db: [[0.0, 0.0], [3.0, -1.0], [4.4, -3.5], [5.0, -9.0], [5.5, -24.0]]
+    field2_offset:
+      x_samples: 0.25
+
+chroma_error:
+  differential:
+    gain: [[0, 1.0], [50, 0.98], [100, 0.95]]
+    phase_deg: [[0, 0.0], [50, 1.0], [100, 2.5]]
+  crosstalk:
+    v_to_u: 0.05
+    alternate_with_switch: true
+
+sections:
+  - name: PalStress
+    type: progressive
+    source: "{bundled}/exr/720x576/PAL_STRESS.exr"
+    duration_frames: 4
+    horizontal_resample: bandlimited
+    chroma_line_sign:
+      - region: {x: 26, y: 16, width: 38, height: 544}
+        v: follow_switch
+      - region: {x: 656, y: 16, width: 38, height: 544}
+        u: follow_switch
+      - region: {x: 0, y: 100, width: 24, height: 40}
+        v: follow_switch
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 27000
