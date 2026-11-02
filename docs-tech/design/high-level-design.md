@@ -1402,7 +1402,7 @@ video_path: "{output}/pal_test_video.cvbs" # run output directory (defaults to t
 
 - **Implemented**: `progressive` frame-based sections in Section 8.1.
 - **Implemented**: Section 8.2 parser/validator constraints for VITS line-injection schema, VITS/line-allocation compatibility checks, and generation-stage VITS line application for all supported built-in PAL and NTSC VITS patterns.
-- **Implemented**: Full laserdisc biphase injection for PAL, NTSC and PAL-M (CAV and CLV; PAL-M follows the System M/NTSC rules — 1800 frames/min and 30 fps CLV picture numbers, colour time error correction, 79 999 maximum CAV picture number, and the NTSC line placement), including 24-bit biphase signal generation, 40-bit FM signal generation (NTSC/PAL-M), all code types (lead_in, lead_out, picture_number, picture_stop, chapter_number, programme_status, users_code, programme_time_code, clv_code, clv_picture_number, fm_picture_number, fm_programme_time, fm_white_flag), field-aware line placement, timecode continuity, chapter stop-bit logic, NTSC frozen values, System M CLV colour time error correction, and biphase/VITS line-conflict validation.
+- **Implemented**: Full laserdisc biphase injection for PAL, NTSC and PAL-M (CAV and CLV; PAL-M follows the System M/NTSC rules — 1800 frames/min and 30 fps CLV picture numbers, colour time error correction, 79 999 maximum CAV picture number, and the NTSC line placement), including 24-bit biphase signal generation, 40-bit FM signal generation (NTSC/PAL-M), all code types (lead_in, lead_out, picture_number, picture_stop, chapter_number, programme_status, users_code, programme_time_code, clv_code, clv_picture_number, fm_picture_number, fm_programme_time, fm_white_flag), field-aware line placement, timecode continuity, BCD chapter numbers with the chapter stop-bit rules (including the first-chapter-after-lead-in and short-chapter exceptions, CAV only for the latter), NTSC frozen values, System M CLV colour time error correction, and biphase/VITS line-conflict validation.
 - **Not yet implemented**: runtime synthesis/application for VITC and custom per-line content. Every section-level `line_injections` entry is therefore rejected, so a project cannot silently generate a file that lacks the content it declares: `type: laserdisc` is a parse error naming the section's `laserdisc.codes`; `vitc` is a validation error ("line injection type 'vitc' is not implemented in the current runtime"); `vits` is a validation error (VITS are declared project-wide); anything else is a validation error ("unsupported injection type").
 
 For VITC and custom per-line content paths, Section 8.2 remains the intended design contract for later implementation work.
@@ -1618,7 +1618,7 @@ Lines are assigned per code type and the field's role in the picture sequence (`
 | 17 / 330 / 280 | `picture_number` | `picture_stop` > `chapter_number` |
 | 18 / 331 / 281 | `picture_number` | `chapter_number` |
 
-Codes: picture number `FX₁X₂X₃X₄X₅` (max 99 999 PAL, 79 999 NTSC/PAL-M; auto-increments each picture); picture stop `82CFFF`; chapter `8X₁X₂DDD` (max 79); programme status `8DC/BAX₃X₄X₅` (Appendix C).
+Codes: picture number `FX₁X₂X₃X₄X₅` (max 99 999 PAL, 79 999 NTSC/PAL-M; auto-increments each picture); picture stop `82CFFF`; chapter `8X₁X₂DDD` (two BCD digits, max 79; stop-bit in the MSB of X₁); programme status `8DC/BAX₃X₄X₅` (Appendix C).
 
 **CLV programme area** — the picture field is field 1 when the section carries `programme_time_code` or `clv_picture_number`:
 

@@ -205,10 +205,9 @@ Every chapter code carries a **stop-bit** telling the player whether it may stop
 | Tracks 0–399 | 0 — search passes through |
 | Track 400 onwards | 1 — search may stop |
 
-videosynth computes and encodes this for you from the chapter number and the track position; you only ever supply the chapter number.
+The stop-bit is 1 on every track instead for the first chapter after the lead-in, and for every chapter of a CAV disc on which any chapter is shorter than 800 tracks (IEC 60856/60857 §10.1.5).
 
-!!! note
-    IEC 60856/60857 §10.1.5 also sets the stop-bit to 1 throughout a chapter shorter than 800 tracks and throughout the first chapter after the lead-in. videosynth does not apply these exceptions: every chapter starts with 400 tracks of stop-bit 0.
+videosynth computes and encodes this for you from the chapter lengths and the track position; you only ever supply the chapter number. See [the stop-bit](../reference/laserdisc-codes.md#the-stop-bit) for the details, including CLV.
 
 ## Programme status
 

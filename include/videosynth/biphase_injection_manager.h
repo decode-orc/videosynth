@@ -12,6 +12,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -107,6 +108,30 @@ class VbiWaveformRenderer {
   mutable int white_flag_pulse_length_ = -1;
 };
 
+// A run of consecutive scheduled frames that all show one section.
+struct ScheduledSectionSpan {
+  const Section* section = nullptr;
+  int frames = 0;
+};
+
+// Decides, for each chapter in the order the chapters start, whether its
+// chapter_number stop-bit is 1 on every track (IEC 60856/60857 §10.1.5). A
+// chapter starts at the first section carrying chapter_number and at each
+// section that sets `chapter`; later sections carrying chapter_number without
+// `chapter` continue it, and its length counts only the frames of sections
+// that carry chapter_number. The stop-bit is 1 throughout:
+//   - for the first chapter whose section directly follows a lead_in section;
+//   - for every chapter of a CAV disc on which any chapter is shorter than 800
+//     tracks (one track per frame). A CLV track holds a varying number of
+//     frames, so this rule is not applied to CLV.
+// Every other chapter starts with 400 tracks of stop-bit 0.
+//
+// Args:
+//   spans:     The frame schedule, as consecutive section spans.
+//   disc_type: The project's disc format.
+std::vector<bool> ResolveChapterStopBitOne(
+    const std::vector<ScheduledSectionSpan>& spans, DiscType disc_type);
+
 // Orchestrates biphase and 40-bit FM VBI injection for LaserDisc authoring.
 //
 // The manager maintains stateful code generators across frames and sections.
@@ -173,6 +198,11 @@ class BiphaseInjectionManager {
   // that carries laserdisc code injections only produces biphase output when a
   // known disc_type has been set here.
   void SetProjectDiscType(DiscType disc_type);
+
+  // Sets, per chapter in start order, whether the chapter's stop-bit is 1 on
+  // every track (see ResolveChapterStopBitOne). A chapter beyond the end of
+  // the list uses the normal 400-track rule. Call after Reset().
+  void SetChapterStopBitOne(std::vector<bool> chapter_stop_bit_one);
 
   // Resolves the VBI injection payload for one frame without writing samples.
   //
@@ -300,6 +330,11 @@ class BiphaseInjectionManager {
 
   // Snapshot populated at the end of each ProcessFrame() call.
   PerFrameContext last_context_ = {};
+  // Per-chapter always-one stop-bit decisions, and the number of chapters
+  // started so far in this pass (indexes the list).
+  std::vector<bool> chapter_stop_bit_one_;
+  std::size_t chapters_started_ = 0;
+
   // Monotone frame counter; resets to 0 on Reset(). Used to derive
   // colour_frame_index without needing access to the timing model here.
   int frame_count_ = 0;
@@ -317,6 +352,10 @@ class BiphaseInjectionManager {
   bool InitializeSection(const Section& section, Standard standard,
                          double sample_rate_hz,
                          std::vector<std::string>* errors);
+
+  // Returns the always-one stop-bit decision for the chapter starting now,
+  // and counts the chapter as started.
+  bool NextChapterStopBitOne();
 
   // Advances all stateful code generators by one frame, except
   // fm_picture_number, which ResolveFmPictureNumber advances per picture

@@ -596,6 +596,121 @@ TEST(BiphaseInjectionManagerPalCavTest,
 }
 
 // ---------------------------------------------------------------------------
+// Chapter stop-bit exceptions (IEC 60856/60857 §10.1.5).
+// ---------------------------------------------------------------------------
+
+namespace {
+
+Section MakeChapterSection(SectionType section_type, int chapter,
+                           bool chapter_specified) {
+  Section::LineInjectionCode code;
+  code.code_type = "chapter_number";
+  code.chapter = chapter;
+  code.chapter_specified = chapter_specified;
+  return MakeLaserdiscSection(section_type, DiscType::kCAV, {code});
+}
+
+Section MakeLeadInSection() {
+  Section::LineInjectionCode code;
+  code.code_type = "lead_in";
+  return MakeLaserdiscSection(SectionType::kLeadIn, DiscType::kCAV, {code});
+}
+
+// Processes one PAL CAV frame of `section` and returns the stop-bit of the
+// chapter code stamped on it.
+bool ProcessCavFrameGetStopBit(BiphaseInjectionManager* manager,
+                               const Section& section) {
+  std::vector<int> offsets, counts;
+  BuildLineLayout(Standard::kPal, &offsets, &counts);
+  const auto frame_lines = BuildFrameTimingPrimitives(Standard::kPal);
+  const TimingConstants timing = GetTimingConstants(Standard::kPal);
+  auto y = MakeBlankingBuffer(Standard::kPal);
+  std::vector<std::string> errors;
+  EXPECT_TRUE(manager->ProcessFrame(&y, 0, offsets, counts, section,
+                                    Standard::kPal, timing.sample_rate_4fsc_hz,
+                                    frame_lines, 177,
+                                    ActiveWindowEnd(Standard::kPal), &errors));
+  for (const uint32_t word : manager->GetLastFrameContext().biphase_words) {
+    if ((word & 0x000FFFu) == ChapterNumberGenerator::kDddPattern) {
+      return ChapterNumberGenerator::DecodeStopBit(word);
+    }
+  }
+  ADD_FAILURE() << "No chapter code on the frame";
+  return false;
+}
+
+}  // namespace
+
+TEST(ChapterStopBitResolutionTest, FirstChapterAfterLeadInIsAlwaysOne) {
+  const Section lead_in = MakeLeadInSection();
+  const Section first =
+      MakeChapterSection(SectionType::kProgrammeArea, 1, true);
+  const Section second =
+      MakeChapterSection(SectionType::kProgrammeArea, 2, true);
+  const std::vector<bool> result = ResolveChapterStopBitOne(
+      {{&lead_in, 100}, {&first, 1000}, {&second, 1000}}, DiscType::kCAV);
+  EXPECT_EQ(result, (std::vector<bool>{true, false}));
+}
+
+TEST(ChapterStopBitResolutionTest, FirstChapterWithoutLeadInFollowsNormalRule) {
+  const Section first =
+      MakeChapterSection(SectionType::kProgrammeArea, 1, true);
+  const Section second =
+      MakeChapterSection(SectionType::kProgrammeArea, 2, true);
+  const std::vector<bool> result = ResolveChapterStopBitOne(
+      {{&first, 1000}, {&second, 1000}}, DiscType::kCAV);
+  EXPECT_EQ(result, (std::vector<bool>{false, false}));
+}
+
+TEST(ChapterStopBitResolutionTest, ShortCavChapterMakesEveryChapterOne) {
+  const Section first =
+      MakeChapterSection(SectionType::kProgrammeArea, 1, true);
+  const Section second =
+      MakeChapterSection(SectionType::kProgrammeArea, 2, true);
+  const Section third =
+      MakeChapterSection(SectionType::kProgrammeArea, 3, true);
+  const std::vector<bool> result = ResolveChapterStopBitOne(
+      {{&first, 5000}, {&second, 799}, {&third, 5000}}, DiscType::kCAV);
+  EXPECT_EQ(result, (std::vector<bool>{true, true, true}));
+}
+
+TEST(ChapterStopBitResolutionTest, ContinuedChapterCountsAllItsSections) {
+  // 500 + 300 frames of one chapter is 800 tracks: not short.
+  const Section start =
+      MakeChapterSection(SectionType::kProgrammeArea, 1, true);
+  const Section continued =
+      MakeChapterSection(SectionType::kProgrammeArea, 0, false);
+  const Section next = MakeChapterSection(SectionType::kProgrammeArea, 2, true);
+  const std::vector<bool> result = ResolveChapterStopBitOne(
+      {{&start, 500}, {&continued, 300}, {&next, 800}}, DiscType::kCAV);
+  EXPECT_EQ(result, (std::vector<bool>{false, false}));
+}
+
+TEST(ChapterStopBitResolutionTest, ShortChapterRuleIsNotAppliedToClv) {
+  const Section first =
+      MakeChapterSection(SectionType::kProgrammeArea, 1, true);
+  const Section second =
+      MakeChapterSection(SectionType::kProgrammeArea, 2, true);
+  const std::vector<bool> result =
+      ResolveChapterStopBitOne({{&first, 100}, {&second, 100}}, DiscType::kCLV);
+  EXPECT_EQ(result, (std::vector<bool>{false, false}));
+}
+
+TEST(BiphaseInjectionManagerPalCavTest, ChapterStopBitFollowsResolvedList) {
+  const Section first =
+      MakeChapterSection(SectionType::kProgrammeArea, 1, true);
+  const Section second =
+      MakeChapterSection(SectionType::kProgrammeArea, 2, true);
+
+  BiphaseInjectionManager manager;
+  manager.SetProjectDiscType(DiscType::kCAV);
+  manager.SetChapterStopBitOne({true, false});
+
+  EXPECT_TRUE(ProcessCavFrameGetStopBit(&manager, first));
+  EXPECT_FALSE(ProcessCavFrameGetStopBit(&manager, second));
+}
+
+// ---------------------------------------------------------------------------
 // PAL CLV programme area: programme_time_code appears on correct lines.
 // ---------------------------------------------------------------------------
 

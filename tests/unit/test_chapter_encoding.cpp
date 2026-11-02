@@ -3,7 +3,7 @@
  * Module:      chapter_encoding_tests
  * Purpose:     Tests for chapter number encoding and decoding per IEC formula.
  *              IEC 60856/60857 §10.1.5:
- *                Chapter = (X₁ & 7) × 16 + X₂
+ *                Chapter = (X₁ & 7) × 10 + X₂  (two BCD digits)
  *                Stop-bit = (X₁ & 8) >> 3
  *              Task 6.15: Tests for chapter encoding/decoding.
  *
@@ -48,38 +48,33 @@ TEST(ChapterEncodingTest, Chapter1StopBitFalseProducesCorrectCode) {
 }
 
 TEST(ChapterEncodingTest, Chapter15StopBitFalseProducesCorrectCode) {
-  // Chapter 15: (X₁&7) = 0, X₂ = 0xF → 8 0 F D D D = 0x80FDDDu
+  // Chapter 15: BCD digits 1 and 5 → 8 1 5 D D D = 0x815DDD
   const uint32_t code = ChapterNumberGenerator::EncodeChapterCode(15, false);
-  EXPECT_EQ(code, 0x80FDDDu);
+  EXPECT_EQ(code, 0x815DDDu);
 }
 
 TEST(ChapterEncodingTest, Chapter16StopBitFalseProducesCorrectCode) {
-  // Chapter 16: (X₁&7) = 1, X₂ = 0 → X₁_nibble = 1
-  //   8 1 0 D D D = 0x810DDD
+  // Chapter 16: BCD digits 1 and 6 → 8 1 6 D D D = 0x816DDD
   const uint32_t code = ChapterNumberGenerator::EncodeChapterCode(16, false);
-  EXPECT_EQ(code, 0x810DDDu);
+  EXPECT_EQ(code, 0x816DDDu);
 }
 
 TEST(ChapterEncodingTest, Chapter16StopBitTrueProducesCorrectCode) {
-  // Chapter 16: stop-bit 1, X₁_nibble = 8|1 = 9
-  //   8 9 0 D D D = 0x890DDD
+  // Chapter 16, stop-bit 1: X₁_nibble = 8|1 = 9 → 8 9 6 D D D = 0x896DDD
   const uint32_t code = ChapterNumberGenerator::EncodeChapterCode(16, true);
-  EXPECT_EQ(code, 0x890DDDu);
+  EXPECT_EQ(code, 0x896DDDu);
 }
 
 TEST(ChapterEncodingTest, Chapter79StopBitFalseProducesCorrectCode) {
-  // Chapter 79: 79 = 4×16 + 15 → (X₁&7) = 4, X₂ = 0xF
-  //   X₁_nibble = 0<<3 | 4 = 4
-  //   8 4 F D D D = 0x84FDDDu
+  // Chapter 79: BCD digits 7 and 9 → 8 7 9 D D D = 0x879DDD
   const uint32_t code = ChapterNumberGenerator::EncodeChapterCode(79, false);
-  EXPECT_EQ(code, 0x84FDDDu);
+  EXPECT_EQ(code, 0x879DDDu);
 }
 
 TEST(ChapterEncodingTest, Chapter79StopBitTrueProducesCorrectCode) {
-  // Chapter 79: stop-bit 1 → X₁_nibble = 8|4 = 0xC
-  //   8 C F D D D = 0x8CFDDDu
+  // Chapter 79, stop-bit 1: X₁_nibble = 8|7 = 0xF → 8 F 9 D D D = 0x8F9DDD
   const uint32_t code = ChapterNumberGenerator::EncodeChapterCode(79, true);
-  EXPECT_EQ(code, 0x8CFDDDu);
+  EXPECT_EQ(code, 0x8F9DDDu);
 }
 
 // ---------------------------------------------------------------------------
@@ -102,19 +97,18 @@ TEST(ChapterEncodingTest, DecodeChapterNumberFromCode0x801DDD) {
 }
 
 TEST(ChapterEncodingTest, DecodeChapterNumberFromCode0x810DDD) {
-  // 0x810DDD → X₁_nibble=1, X₂=0 → chapter = 1×16 + 0 = 16
-  EXPECT_EQ(ChapterNumberGenerator::DecodeChapterNumber(0x810DDDu), 16);
+  // 0x810DDD → X₁_nibble=1, X₂=0 → chapter = 1×10 + 0 = 10
+  EXPECT_EQ(ChapterNumberGenerator::DecodeChapterNumber(0x810DDDu), 10);
 }
 
-TEST(ChapterEncodingTest, DecodeChapterNumberFromCode0x84FDDD) {
-  // 0x84FDDD → X₁_nibble=4, X₂=F → chapter = 4×16 + 15 = 79
-  EXPECT_EQ(ChapterNumberGenerator::DecodeChapterNumber(0x84FDDDu), 79);
+TEST(ChapterEncodingTest, DecodeChapterNumberFromCode0x879DDD) {
+  // 0x879DDD → X₁_nibble=7, X₂=9 → chapter = 7×10 + 9 = 79
+  EXPECT_EQ(ChapterNumberGenerator::DecodeChapterNumber(0x879DDDu), 79);
 }
 
-TEST(ChapterEncodingTest, DecodeChapterNumberFromCode0x8CFDDD) {
-  // 0x8CFDDD → X₁_nibble=C=12, X₂=F=15 → chapter = (12&7)×16 + 15 = 4×16+15 =
-  // 79
-  EXPECT_EQ(ChapterNumberGenerator::DecodeChapterNumber(0x8CFDDDu), 79);
+TEST(ChapterEncodingTest, DecodeChapterNumberFromCode0x8F9DDD) {
+  // 0x8F9DDD → X₁_nibble=F, X₂=9 → chapter = (15&7)×10 + 9 = 79
+  EXPECT_EQ(ChapterNumberGenerator::DecodeChapterNumber(0x8F9DDDu), 79);
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +161,18 @@ TEST(ChapterEncodingTest, EncodeDecodeRoundTripAllChaptersStopBitTrue) {
   }
 }
 
+TEST(ChapterEncodingTest, ChapterDigitsAreBcdLikeRealDiscs) {
+  // The Apple Visual Almanac (NTSC CAV, stop-bit 1 throughout) carries
+  // 0x889DDD for chapter 9 and 0x890DDD for chapter 10: X₂ never exceeds 9.
+  EXPECT_EQ(ChapterNumberGenerator::EncodeChapterCode(9, true), 0x889DDDu);
+  EXPECT_EQ(ChapterNumberGenerator::EncodeChapterCode(10, true), 0x890DDDu);
+  for (int ch = 0; ch <= 79; ++ch) {
+    const uint32_t code = ChapterNumberGenerator::EncodeChapterCode(ch, false);
+    EXPECT_LE((code >> 12) & 0x0Fu, 9u) << "Chapter " << ch;
+    EXPECT_LE((code >> 16) & 0x0Fu, 7u) << "Chapter " << ch;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // ChapterEncodingTest — code structure invariants
 // ---------------------------------------------------------------------------
@@ -201,7 +207,7 @@ TEST(ChapterEncodingTest, DddPatternConstantIs0xDDD) {
 
 TEST(ChapterEncodingTest, X1NibbleIsAtBits19To16) {
   // Chapter 16 with stop-bit=0: X₁_nibble should be at bits 19-16.
-  // Chapter 16 = 1×16 + 0, so X₁_low = 1, stop_bit = 0 → X₁_nibble = 1.
+  // Chapter 16 has tens digit 1, stop_bit = 0 → X₁_nibble = 1.
   const uint32_t code = ChapterNumberGenerator::EncodeChapterCode(16, false);
   const uint8_t x1 = (code >> 16) & 0x0Fu;
   EXPECT_EQ(x1, 1u);
@@ -289,35 +295,32 @@ TEST(ChapterEncodingTest, GeneratorResetRestoresInitialStopBitState) {
 // ---------------------------------------------------------------------------
 
 TEST(ChapterEncodingTest, IecFormulaSpotCheckChapter32) {
-  // Chapter 32 = 2×16 + 0 → X₁_low=2, X₂=0, stop=0 → X₁_nibble=2
-  // Code: 8 2 0 D D D = 0x820DDD
+  // Chapter 32: BCD digits 3 and 2 → 8 3 2 D D D = 0x832DDD
   const uint32_t code = ChapterNumberGenerator::EncodeChapterCode(32, false);
-  EXPECT_EQ(code, 0x820DDDu);
+  EXPECT_EQ(code, 0x832DDDu);
   EXPECT_EQ(ChapterNumberGenerator::DecodeChapterNumber(code), 32);
 }
 
 TEST(ChapterEncodingTest, IecFormulaSpotCheckChapter63) {
-  // Chapter 63 = 3×16 + 15 → X₁_low=3, X₂=0xF, stop=0 → X₁_nibble=3
-  // Code: 8 3 F D D D = 0x83FDDD
+  // Chapter 63: BCD digits 6 and 3 → 8 6 3 D D D = 0x863DDD
   const uint32_t code = ChapterNumberGenerator::EncodeChapterCode(63, false);
-  EXPECT_EQ(code, 0x83FDDDu);
+  EXPECT_EQ(code, 0x863DDDu);
   EXPECT_EQ(ChapterNumberGenerator::DecodeChapterNumber(code), 63);
 }
 
 TEST(ChapterEncodingTest, IecFormulaSpotCheckChapter63StopBitTrue) {
-  // Chapter 63, stop-bit=1: X₁_nibble = 8|3 = 0xB
-  // Code: 8 B F D D D = 0x8BFDDD
+  // Chapter 63, stop-bit=1: X₁_nibble = 8|6 = 0xE → 8 E 3 D D D = 0x8E3DDD
   const uint32_t code = ChapterNumberGenerator::EncodeChapterCode(63, true);
-  EXPECT_EQ(code, 0x8BFDDDu);
+  EXPECT_EQ(code, 0x8E3DDDu);
   EXPECT_TRUE(ChapterNumberGenerator::DecodeStopBit(code));
   EXPECT_EQ(ChapterNumberGenerator::DecodeChapterNumber(code), 63);
 }
 
 TEST(ChapterEncodingTest, IecFormulaSpotCheckChapter48) {
-  // Chapter 48 = 3×16 + 0 → X₁_nibble=3, X₂=0
-  // Code: 8 3 0 D D D = 0x830DDD
+  // Chapter 48: BCD digits 4 and 8 → 8 4 8 D D D = 0x848DDD
   const uint32_t code = ChapterNumberGenerator::EncodeChapterCode(48, false);
-  EXPECT_EQ(code, 0x830DDDu);
+  EXPECT_EQ(code, 0x848DDDu);
+  EXPECT_EQ(ChapterNumberGenerator::DecodeChapterNumber(code), 48);
 }
 
 }  // namespace

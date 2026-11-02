@@ -103,17 +103,19 @@ class CavPictureNumberGenerator final : public CodeGenerator {
 // Chapter number generator with IEC-compliant stop-bit logic.
 //
 // Format: 8X₁X₂DDD, where:
-//   Chapter = (X₁ & 7) × 16 + X₂       (IEC 60856/60857 §10.1.5)
-//   Stop-bit = (X₁ & 8) >> 3             (MSB of X₁ nibble)
-//   DDD = constant pattern 0xDDD
+//   Chapter = (X₁ & 7) × 10 + X₂       (two BCD digits, IEC 60856/60857
+//   §10.1.5) Stop-bit = (X₁ & 8) >> 3             (MSB of X₁ nibble) DDD =
+//   constant pattern 0xDDD
 //
 // Stop-bit rules (IEC 60856/60857 §10.1.5):
 //   1. Stop-bit = 0 for the first 400 tracks of the chapter.
 //   2. Stop-bit = 1 for all subsequent tracks.
 //   3. The first chapter directly after the lead-in MUST have stop-bit = 1
 //      (no zero stop-bit period).
-//   4. When always_stop_bit_one is true (covering case 3 and the case where
-//      the chapter is shorter than 800 tracks), stop-bit = 1 for all tracks.
+//   4. On a disc with any chapter shorter than 800 tracks, every chapter has
+//      stop-bit = 1 on all tracks.
+//   always_stop_bit_one selects stop-bit = 1 on all tracks (cases 3 and 4);
+//   ResolveChapterStopBitOne decides it from the schedule.
 //
 // Valid for both CAV and CLV discs, programme_area only. Maximum chapter: 79.
 //
@@ -126,14 +128,17 @@ class ChapterNumberGenerator final : public CodeGenerator {
   static constexpr int kMinimumChapterTracks = 30;
   // IEC 60856/60857 §10.1.5: tracks with stop-bit = 0.
   static constexpr int kStopBitTransitionTrack = 400;
+  // IEC 60856/60857 §10.1.5: on a disc with a chapter shorter than this many
+  // tracks, every chapter has stop-bit 1 throughout.
+  static constexpr int kShortChapterTracks = 800;
   // IEC 60856/60857 §10.1.5: value of the constant DDD pattern in the code.
   static constexpr uint32_t kDddPattern = 0x000DDDu;
 
   // Constructs the generator.
   // chapter_num: Chapter number, 0–79.
   // always_stop_bit_one: When true, stop-bit is 1 for every track. Required
-  //   for (a) the first chapter after lead-in, and (b) chapters shorter than
-  //   800 tracks (IEC 60856/60857 §10.1.5).
+  //   for (a) the first chapter after lead-in, and (b) every chapter of a disc
+  //   with a chapter shorter than 800 tracks (IEC 60856/60857 §10.1.5).
   explicit ChapterNumberGenerator(int chapter_num,
                                   bool always_stop_bit_one = false);
 
@@ -144,12 +149,13 @@ class ChapterNumberGenerator final : public CodeGenerator {
   // Returns true if chapter_num is in the valid IEC range [0, 79].
   static bool IsValidChapterNumber(int chapter_num);
 
-  // Encodes chapter_num and stop_bit into the 24-bit code 8X₁X₂DDD.
+  // Encodes chapter_num (as two BCD digits) and stop_bit into the 24-bit code
+  // 8X₁X₂DDD.
   // chapter_num must be [0, 79].
   static uint32_t EncodeChapterCode(int chapter_num, bool stop_bit);
 
   // Decodes the chapter number from a 24-bit code value.
-  // Returns Chapter = (X₁ & 7) × 16 + X₂.
+  // Returns Chapter = (X₁ & 7) × 10 + X₂.
   static int DecodeChapterNumber(uint32_t code_value);
 
   // Decodes the stop-bit from a 24-bit code value.

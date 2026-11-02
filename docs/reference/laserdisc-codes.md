@@ -165,22 +165,28 @@ lasts 25 frames; IEC 60856/60857 requires at least 30.
 
 ### The stop-bit
 
-Encoded in the MSB of X₁, and computed for you:
+Encoded in the MSB of X₁, and computed for you. By default:
 
 | Position within the chapter | Stop-bit |
 |-----------------------------|----------|
 | Tracks 0–399 | 0 — the player's search passes through |
 | Track 400 onwards | 1 — search may stop here |
 
-!!! note
-    IEC 60856/60857 §10.1.5 also sets the stop-bit to 1 throughout a chapter shorter than 800 tracks and throughout the first chapter after the lead-in. videosynth does not apply these exceptions: every chapter starts with 400 tracks of stop-bit 0.
+Two IEC 60856/60857 §10.1.5 exceptions set the stop-bit to 1 on every track of a chapter:
+
+- **The first chapter after the lead-in** — the chapter that starts in the section directly after a `lead_in` section.
+- **Every chapter of a disc with a short chapter** — when any chapter on a CAV disc is shorter than 800 tracks, all of its chapters are 1 throughout. Real discs with short chapters do this.
+
+A CAV track is one frame, and chapter lengths follow the same definition as the 30-frame check above. On CLV the counter counts frames rather than tracks, so the 400-track change comes early and the short-chapter exception is not applied.
+
+The chapter number is two BCD digits, as the picture number is:
 
 ```text
-X₁ = (stop_bit << 3) | (chapter / 16)
-X₂ = chapter % 16
+X₁ = (stop_bit << 3) | (chapter / 10)
+X₂ = chapter % 10
 ```
 
-Chapter 5 with stop-bit 1 encodes as `885DDD`.
+Chapter 5 with stop-bit 1 encodes as `885DDD`; chapter 42 with stop-bit 0 as `842DDD`.
 
 ## `programme_status` (CAV and CLV)
 

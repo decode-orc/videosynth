@@ -1527,6 +1527,18 @@ bool GenerationStage::BuildFrameSchedule(
   const int active_window_start =
       std::max(0, std::min(synth.active.active_window_start_samples,
                            synth.max_line_samples - 1));
+  // Chapter stop-bit exceptions depend on chapter lengths, which are only
+  // known once the whole schedule exists (IEC 60856/60857 §10.1.5).
+  std::vector<ScheduledSectionSpan> spans;
+  for (const FrameScheduleItem& item : *out_schedule) {
+    if (spans.empty() || spans.back().section != item.section) {
+      spans.push_back({.section = item.section});
+    }
+    ++spans.back().frames;
+  }
+  biphase_manager_.SetChapterStopBitOne(ResolveChapterStopBitOne(
+      spans, DiscTypeFromString(project.laserdisc.disc_type)));
+
   // The {timecode} OSD token is a continuous CLV programme timecode; it is only
   // meaningful on CLV discs, where it runs from the start of the output.
   const bool disc_is_clv =
