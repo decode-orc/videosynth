@@ -162,6 +162,47 @@ void RemoveNoiseSpectrumPoint(std::vector<NoiseSpectrumPoint>* spectrum,
   spectrum->erase(spectrum->begin() + row);
 }
 
+int SourceRasterHeight(Standard standard) {
+  return Is625LineStandard(standard) ? 576 : 486;
+}
+
+bool SupportsChromaLineSign(Standard standard) {
+  return standard == Standard::kPal || standard == Standard::kPalM;
+}
+
+void AddChromaLineSignRegion(std::vector<ChromaLineSignRegion>* regions,
+                             int raster_height) {
+  constexpr int kRasterWidth = 720;
+  constexpr int kDefaultRegionSize = 48;
+  if (regions->empty()) {
+    regions->push_back(ChromaLineSignRegion{
+        .x = 0,
+        .y = 0,
+        .width = kDefaultRegionSize,
+        .height = std::min(kDefaultRegionSize, raster_height),
+        .v = ChromaLineSignMode::kFollowSwitch});
+    return;
+  }
+  ChromaLineSignRegion next = regions->back();
+  next.x += next.width;
+  if (next.x + next.width > kRasterWidth) {
+    next.x = 0;
+    next.y += next.height;
+  }
+  if (next.y + next.height > raster_height) {
+    return;
+  }
+  regions->push_back(next);
+}
+
+void RemoveChromaLineSignRegion(std::vector<ChromaLineSignRegion>* regions,
+                                int row) {
+  if (row < 0 || row >= static_cast<int>(regions->size())) {
+    return;
+  }
+  regions->erase(regions->begin() + row);
+}
+
 void AddNoiseLevelPoint(std::vector<NoiseLevelPoint>* curve) {
   if (curve->empty()) {
     curve->push_back(NoiseLevelPoint{});
@@ -596,6 +637,12 @@ Section ApplySectionEditDelta(const Section& before, const Section& after,
   }
   if (!(after.luma_bandwidth == before.luma_bandwidth)) {
     target.luma_bandwidth = after.luma_bandwidth;
+  }
+  if (after.horizontal_resample != before.horizontal_resample) {
+    target.horizontal_resample = after.horizontal_resample;
+  }
+  if (!(after.chroma_line_sign == before.chroma_line_sign)) {
+    target.chroma_line_sign = after.chroma_line_sign;
   }
   // Random and scratch dropouts are independent blocks in the editor; diff
   // them separately so toggling one never overwrites the other on targets.

@@ -11,8 +11,10 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <array>
 #include <exception>
 #include <set>
+#include <utility>
 
 #include "videosynth/biphase_types.h"
 #include "videosynth/path_resolution.h"
@@ -478,6 +480,127 @@ bool ParseCadence(const YAML::Node& node, CadenceParameters* cadence,
                         text + "'. Expected one of: restart, continue.");
       return false;
     }
+  }
+  return true;
+}
+
+// Parses `section.horizontal_resample:`.
+bool ParseHorizontalResample(const YAML::Node& section_node,
+                             HorizontalResample* resample,
+                             std::vector<std::string>* errors) {
+  const std::string context = "section";
+  std::string text;
+  if (!ParseScalarString(section_node, "horizontal_resample", context, &text,
+                         errors)) {
+    return false;
+  }
+  if (text == "nearest") {
+    *resample = HorizontalResample::kNearest;
+  } else if (text == "bandlimited") {
+    *resample = HorizontalResample::kBandlimited;
+  } else {
+    errors->push_back(context +
+                      ".horizontal_resample has unrecognised value '" + text +
+                      "'. Expected one of: nearest, bandlimited.");
+    return false;
+  }
+  return true;
+}
+
+// Reads one integer key into *value. Returns false, with an error naming the
+// key, when the value is not an integer.
+bool ParseInteger(const YAML::Node& node, const std::string& key,
+                  const std::string& context, int* value,
+                  std::vector<std::string>* errors) {
+  try {
+    *value = node[key].as<int>();
+  } catch (const YAML::Exception&) {
+    errors->push_back(context + "." + key + " must be an integer.");
+    return false;
+  }
+  return true;
+}
+
+// Parses `section.chroma_line_sign:`, the list of regions whose U or V
+// follows the PAL V-switch. Geometry and standard rules are the validator's.
+bool ParseChromaLineSign(const YAML::Node& node,
+                         std::vector<ChromaLineSignRegion>* regions,
+                         std::vector<std::string>* errors) {
+  const std::string context = "section.chroma_line_sign";
+  if (!node.IsSequence()) {
+    errors->push_back(context + " must be a list/sequence.");
+    return false;
+  }
+  for (const YAML::Node& entry : node) {
+    const std::string entry_context = context + "[]";
+    if (!entry.IsMap()) {
+      errors->push_back(entry_context + " must be a map/object.");
+      return false;
+    }
+    const std::set<std::string> keys = {"region", "u", "v"};
+    ValidateAllowedKeys(entry, keys, entry_context, errors);
+    if (!errors->empty()) {
+      return false;
+    }
+    const YAML::Node region_node = entry["region"];
+    if (!region_node) {
+      errors->push_back(entry_context +
+                        " is missing required field: 'region'.");
+      return false;
+    }
+    const std::string region_context = entry_context + ".region";
+    if (!region_node.IsMap()) {
+      errors->push_back(region_context + " must be a map/object.");
+      return false;
+    }
+    const std::set<std::string> region_keys = {"x", "y", "width", "height"};
+    ValidateAllowedKeys(region_node, region_keys, region_context, errors);
+    if (!errors->empty()) {
+      return false;
+    }
+
+    ChromaLineSignRegion region;
+    const std::array<std::pair<const char*, int*>, 4> geometry = {{
+        {"x", &region.x},
+        {"y", &region.y},
+        {"width", &region.width},
+        {"height", &region.height},
+    }};
+    for (const auto& [key, value] : geometry) {
+      if (!region_node[key]) {
+        errors->push_back(region_context + " is missing required field: '" +
+                          key + "'.");
+        return false;
+      }
+      if (!ParseInteger(region_node, key, region_context, value, errors)) {
+        return false;
+      }
+    }
+
+    const std::array<std::pair<const char*, ChromaLineSignMode*>, 2> axes = {{
+        {"u", &region.u},
+        {"v", &region.v},
+    }};
+    for (const auto& [key, mode] : axes) {
+      if (!entry[key]) {
+        continue;
+      }
+      std::string text;
+      if (!ParseScalarString(entry, key, entry_context, &text, errors)) {
+        return false;
+      }
+      if (text == "normal") {
+        *mode = ChromaLineSignMode::kNormal;
+      } else if (text == "follow_switch") {
+        *mode = ChromaLineSignMode::kFollowSwitch;
+      } else {
+        errors->push_back(entry_context + "." + key +
+                          " has unrecognised value '" + text +
+                          "'. Expected one of: normal, follow_switch.");
+        return false;
+      }
+    }
+    regions->push_back(region);
   }
   return true;
 }
@@ -1023,7 +1146,7 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
 
     const YAML::Node output = root["output"];
     const std::set<std::string> output_keys = {"video_path", "signal_type",
-                                               "efm_audio"};
+                                               "efm_audio", "truth"};
     ValidateAllowedKeys(output, output_keys, "output", &result.errors);
     if (!result.errors.empty()) {
       return result;
@@ -1036,6 +1159,14 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
         DeriveMetadataPath(result.project.output.video_path);
     result.project.output.signal_type =
         output["signal_type"].as<std::string>("composite");
+    if (output["truth"]) {
+      try {
+        result.project.output.truth = output["truth"].as<bool>();
+      } catch (const YAML::Exception&) {
+        result.errors.push_back("output.truth must be true or false.");
+        return result;
+      }
+    }
 
     // Presence of the output.efm_audio map enables LaserDisc digital audio
     // output for the single channel pair it names.
@@ -1089,6 +1220,8 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
                                                   "end_frame",
                                                   "cadence",
                                                   "luma_bandwidth",
+                                                  "horizontal_resample",
+                                                  "chroma_line_sign",
                                                   "noise",
                                                   "dropouts",
                                                   "osd",
@@ -1206,6 +1339,18 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
       if (section_node["luma_bandwidth"] &&
           !ParseLumaBandwidth(section_node["luma_bandwidth"],
                               &section.luma_bandwidth, &result.errors)) {
+        return result;
+      }
+
+      if (section_node["horizontal_resample"] &&
+          !ParseHorizontalResample(section_node, &section.horizontal_resample,
+                                   &result.errors)) {
+        return result;
+      }
+
+      if (section_node["chroma_line_sign"] &&
+          !ParseChromaLineSign(section_node["chroma_line_sign"],
+                               &section.chroma_line_sign, &result.errors)) {
         return result;
       }
 

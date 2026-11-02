@@ -32,6 +32,7 @@ enum class IssueField {
   kChannel,
   kChromaError,
   kCadence,
+  kPicture,
 };
 
 // One validation finding presented in the issues dock.

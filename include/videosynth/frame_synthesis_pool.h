@@ -32,6 +32,9 @@ struct SynthesizedFrame {
   // Output sample codes for this frame, encoded on the worker so the consumer
   // thread only issues the write. Empty when the job does not encode.
   EncodedFrame encoded;
+  // The frame's picture truth (one entry) when the run writes output.truth;
+  // empty otherwise.
+  std::vector<PictureTruthFrame> truth;
   // Dropout sidecar rows produced inside the frame job; committed in frame
   // order at the reassembly point so the sidecar stays byte-identical to a
   // sequential run.

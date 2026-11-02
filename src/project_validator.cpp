@@ -1566,6 +1566,92 @@ void ValidateLumaBandwidth(const videosynth::Section& section,
   }
 }
 
+// Source raster height for a standard: 576 rows on 625-line systems, 486 on
+// 525-line systems (the raster RasterMatchesStandard requires).
+int SourceRasterHeight(videosynth::Standard standard) {
+  return videosynth::Is625LineStandard(standard) ? 576 : 486;
+}
+
+// Source raster width, shared by every supported standard.
+constexpr int kSourceRasterWidth = 720;
+
+// Checks `chroma_line_sign:`: PAL or PAL-M only, every region inside the
+// source raster and following the V-switch on at least one component.
+void ValidateChromaLineSign(const videosynth::Section& section,
+                            const videosynth::Project& project,
+                            videosynth::ValidationResult* result) {
+  if (result == nullptr || section.chroma_line_sign.empty()) {
+    return;
+  }
+  const std::string context =
+      "Picture validation error in section '" + section.name + "': ";
+  const videosynth::Standard standard =
+      project.cvbs_presets.video_standard_preset;
+  if (standard != videosynth::Standard::kPal &&
+      standard != videosynth::Standard::kPalM) {
+    result->is_valid = false;
+    result->errors.push_back(
+        context +
+        "chroma_line_sign requires a PAL or PAL-M project; the V-switch it "
+        "follows exists only in PAL colour encoding.");
+    return;
+  }
+  const int raster_height = SourceRasterHeight(standard);
+  for (std::size_t index = 0; index < section.chroma_line_sign.size();
+       ++index) {
+    const videosynth::ChromaLineSignRegion& region =
+        section.chroma_line_sign[index];
+    const std::string entry = "chroma_line_sign[" + std::to_string(index) + "]";
+    if (region.width <= 0 || region.height <= 0 || region.x < 0 ||
+        region.y < 0 || region.x + region.width > kSourceRasterWidth ||
+        region.y + region.height > raster_height) {
+      result->is_valid = false;
+      result->errors.push_back(
+          context + entry + ".region must have a positive width and height " +
+          "and lie inside the " + std::to_string(kSourceRasterWidth) + "x" +
+          std::to_string(raster_height) + " source raster; got x=" +
+          std::to_string(region.x) + " y=" + std::to_string(region.y) +
+          " width=" + std::to_string(region.width) +
+          " height=" + std::to_string(region.height) + ".");
+      return;
+    }
+    if (region.u != videosynth::ChromaLineSignMode::kFollowSwitch &&
+        region.v != videosynth::ChromaLineSignMode::kFollowSwitch) {
+      result->is_valid = false;
+      result->errors.push_back(
+          context + entry +
+          " changes nothing; set u or v (or both) to follow_switch.");
+      return;
+    }
+  }
+}
+
+// Checks `output.truth:`. The truth carries the quadrature colour-difference
+// components, which SECAM does not transmit; OSD text is drawn after the
+// truth is taken, so a project with overlays gets a warning.
+void ValidateTruthOutput(const videosynth::Project& project,
+                         videosynth::ValidationResult* result) {
+  if (result == nullptr || !project.output.truth) {
+    return;
+  }
+  if (project.cvbs_presets.video_standard_preset ==
+      videosynth::Standard::kSecam) {
+    result->is_valid = false;
+    result->errors.push_back(
+        "Project configuration error: output.truth requires a PAL, NTSC or "
+        "PAL-M project; SECAM has no U/V quadrature components.");
+    return;
+  }
+  for (const videosynth::Section& section : project.sections) {
+    if (!section.osd.overlays.empty()) {
+      result->warnings.push_back(
+          "Section '" + section.name +
+          "': output.truth excludes OSD overlays, which are drawn after the "
+          "truth is taken.");
+    }
+  }
+}
+
 // Valid scale range for both random and scratch dropout.
 constexpr int kDropoutScaleMin = 0;
 constexpr int kDropoutScaleMax = 20;
@@ -2545,6 +2631,7 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
   }
 
   ValidateEfmAudioOutput(project, &result);
+  ValidateTruthOutput(project, &result);
 
   if (project.sections.empty()) {
     result.is_valid = false;
@@ -2609,6 +2696,11 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
       }
 
       ValidateLumaBandwidth(section, project, &result);
+      if (!result.is_valid) {
+        break;
+      }
+
+      ValidateChromaLineSign(section, project, &result);
       if (!result.is_valid) {
         break;
       }

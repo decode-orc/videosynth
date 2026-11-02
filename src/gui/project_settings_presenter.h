@@ -99,6 +99,10 @@ struct ProjectSettingsFormState {
   // the matching translated sentence; the reasons mirror ProjectValidator's
   // diagnostics and ProjectEfmAudioPair's predicate for the same conditions.
   EfmOutputStatus efm_status = EfmOutputStatus::kDisabled;
+
+  // The picture truth (output.truth) carries the quadrature U/V components,
+  // so it is offered for PAL, NTSC and PAL-M but not SECAM.
+  bool truth_editable = true;
 };
 
 // Builds the form state (catalogues + enablement) for the given project.
@@ -114,8 +118,9 @@ CvbsPresets NormalizeCvbsPresetsForStandard(CvbsPresets presets);
 
 // Clears output selections the given standard cannot carry, mirroring
 // ProjectValidator: LaserDisc digital audio (EFM) exists only for PAL and
-// NTSC, so the selection is disabled for any other standard. Returns the
-// adjusted targets.
+// NTSC, so the selection is disabled for any other standard; the picture
+// truth carries quadrature U/V components, so it is cleared for SECAM.
+// Returns the adjusted targets.
 OutputTargets NormalizeOutputTargetsForStandard(OutputTargets output,
                                                 Standard standard);
 

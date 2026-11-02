@@ -258,11 +258,23 @@ void ProjectSettingsEditor::BuildUi() {
   efm_hint_ = new QLabel(output_group);
   efm_hint_->setWordWrap(true);
 
+  // The component picture that went into the modulator, for scoring
+  // decoders against the source rather than against their own decode.
+  truth_check_ =
+      new QCheckBox(tr("Write the component picture (Y, U, V)"), output_group);
+  truth_check_->setToolTip(
+      tr("Writes “.truth” and its “.truth.meta” sidecar beside the video "
+         "output: the Y, U and V that went into the composite at 4fsc over "
+         "the active window, after the horizontal mapping, luma bandwidth "
+         "limit, chroma low-pass and chroma line sign, and before any "
+         "channel, chroma error, noise or dropout impairment."));
+
   output_form->addRow(tr("Signal type:"), signal_type_combo_);
   output_form->addRow(tr("Video path:"), video_row);
   output_form->addRow(QString(), video_path_hint_);
   output_form->addRow(tr("Digital audio:"), efm_row);
   output_form->addRow(QString(), efm_hint_);
+  output_form->addRow(tr("Picture truth:"), truth_check_);
   output_form->addRow(QString(), outputs_note_);
   layout->addWidget(output_group);
 
@@ -281,6 +293,11 @@ void ProjectSettingsEditor::BuildUi() {
   });
   connect(efm_pair_combo_, &QComboBox::activated, this,
           &ProjectSettingsEditor::CommitOutputTargets);
+  connect(truth_check_, &QCheckBox::toggled, this, [this] {
+    if (!updating_) {
+      CommitOutputTargets();
+    }
+  });
 }
 
 QWidget* ProjectSettingsEditor::BuildChannelGroup() {
@@ -585,6 +602,7 @@ void ProjectSettingsEditor::LoadFromDocument() {
       efm_pair_combo_->findData(project.output.efm_audio.pair);
   efm_pair_combo_->setCurrentIndex(efm_pair_index >= 0 ? efm_pair_index : 0);
   efm_check_->setChecked(project.output.efm_audio.enabled);
+  truth_check_->setChecked(project.output.truth);
 
   LoadChannelAndChromaError(project);
 
@@ -712,6 +730,7 @@ void ProjectSettingsEditor::ApplyEnablement() {
   efm_check_->setEnabled(state.efm_output_editable);
   efm_pair_combo_->setEnabled(state.efm_pair_editable);
   efm_hint_->setText(EfmStatusText(state.efm_status));
+  truth_check_->setEnabled(state.truth_editable || truth_check_->isChecked());
 }
 
 // Renders the presenter's EFM outcome as the sentence shown beneath the
@@ -942,6 +961,7 @@ void ProjectSettingsEditor::CommitOutputTargets() {
   output.metadata_path = DeriveMetadataPath(output.video_path);
   output.efm_audio.enabled = efm_check_->isChecked();
   output.efm_audio.pair = efm_pair_combo_->currentData().toInt();
+  output.truth = truth_check_->isChecked();
   output = NormalizeOutputTargetsForStandard(
       std::move(output),
       document_->project().cvbs_presets.video_standard_preset);

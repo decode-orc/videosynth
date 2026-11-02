@@ -34,6 +34,10 @@ struct VideoDecodeRequest {
   // Video stream start minus container start, in seconds (see
   // ProgressiveFrameSourceProfile::container_start_time_seconds).
   double video_start_offset_seconds = 0.0;
+  // The source's own frame rate, which converts first_frame to a seek time.
+  // A 24000/1001 film clip in a 2:3 pulldown section differs from the
+  // standard's rate. 0 (unknown) falls back to the standard's frame rate.
+  double frame_rate_hz = 0.0;
   // Normalisation to BT.601 yuv422p10le studio swing; empty for pass-through.
   std::string filter_chain;
 };

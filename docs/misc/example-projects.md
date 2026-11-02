@@ -6,7 +6,7 @@ The repository ships a set of hand-authored projects under `projects/`, covering
 
 | Directory | Contents |
 |-----------|----------|
-| `projects/general/` | Feature examples — audio, EFM audio, VITS, progressive EXR and MKV sources, the PAL pilot burst, the NTSC VBI burst, NTSC film with 2:3 pulldown |
+| `projects/general/` | Feature examples — audio, EFM audio, VITS, progressive EXR and MKV sources, the PAL pilot burst, the NTSC VBI burst, NTSC film with 2:3 pulldown, the PAL decoder-stress card and zone plates with their picture truth |
 | `projects/general-yc/` | PAL and NTSC audio examples with Y/C output |
 | `projects/stacking/` | Laserdisc disc simulation and multi-source stacking sets for PAL, PAL-M and NTSC |
 | `projects/long-form/` | Three-hour capture-sized PAL and NTSC examples, for testing against realistic file sizes |
@@ -69,6 +69,10 @@ The `<standard>_discsim_A`–`_D` projects are four captures of one 40-frame CAV
 
 `pal_bandlimited.yaml`, `ntsc_bandlimited.yaml` and `pal_m_bandlimited.yaml` are 16-frame CAV discs that play the multi-burst at full bandwidth, then at two [`luma_bandwidth`](../reference/sections.md#luma_bandwidth) cutoffs (5.0 and 3.0 MHz on PAL, 4.2 and 3.0 MHz on NTSC and PAL-M), and finish with a sharp-edged picture at the lower cutoff. Nothing else is impaired, so the luma low-pass is the only difference between sections.
 
+### Decoder stress and zone plates
+
+`pal_decoder_stress.yaml` plays the [`PAL_STRESS.exr`](../user-manual/sources.md#stills-exr) card for 8 frames (two full PAL colour sequences) with its two [`chroma_line_sign`](../reference/sections.md#chroma_line_sign) regions — line-alternating V on the left bar, anti-PAL U on the right — then the static luma and chroma zone plates for 4 frames each. `ntsc_zone_plates.yaml` plays the two zone plates on NTSC. Every section uses the [band-limited mapping](../reference/sections.md#horizontal_resample), and both projects write the [picture truth](../reference/output.md#truth), so a decoder's output can be scored against the component picture that was encoded.
+
 ## Running a suite
 
 `scripts/run-projects.sh` runs whole suites through the CLI. It re-execs itself inside the Nix development shell when needed (the MKV fixtures need `ffprobe`), and writes everything into `build/project-output/<suite>/` via the `{output}` root, so nothing lands in the source tree.
@@ -115,7 +119,7 @@ scripts/benchmark.sh --threads "1"
 
 ## Comparing output between builds
 
-`scripts/output-hashes.sh` records and compares SHA-256 manifests of the generated media — `.cvbs`, `.cvbsy`, `.cvbsc`, the audio `.wav` files, and the `.meta` sidecar as its canonical `sqlite3 .dump` — so a change can be asserted byte-identical to a recorded baseline. It regenerates the suites through `run-projects.sh` unless `--skip-run` is given; manifests live in `build/output-hashes/`.
+`scripts/output-hashes.sh` records and compares SHA-256 manifests of the generated media — `.cvbs`, `.cvbsy`, `.cvbsc`, the audio `.wav` files, the picture truth `.truth`, and the `.meta` sidecars (including `.truth.meta`) as their canonical `sqlite3 .dump` — so a change can be asserted byte-identical to a recorded baseline. It regenerates the suites through `run-projects.sh` unless `--skip-run` is given; manifests live in `build/output-hashes/`.
 
 ```bash
 # On a known-good build: record the baseline

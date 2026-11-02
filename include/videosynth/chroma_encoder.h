@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -19,6 +20,23 @@
 #include "videosynth/progressive_frame_source.h"
 
 namespace videosynth {
+
+// Colour-difference axis samples are Q20 fixed point: a BT.601 Cb or Cr code
+// offset from 512, scaled so the nominal ±448-code excursion spans ±2^20.
+constexpr int kChromaAxisFractionBits = 20;
+constexpr std::int64_t kChromaAxisScale = (1LL << kChromaAxisFractionBits);
+
+// Converts a 10-bit Cb or Cr code to a Q20 colour-difference axis sample. The
+// code is first clamped to the BT.601 chroma range [64, 960], so the result
+// never exceeds ±kChromaAxisScale. The integer division truncates toward
+// zero, so codes mirrored about 512 give exactly negated samples.
+//
+// Thread-safety: Stateless; safe to call concurrently.
+inline std::int32_t ChromaAxisFromCode(int code) {
+  const int clamped = std::max(64, std::min(code, 960));
+  return static_cast<std::int32_t>(static_cast<std::int64_t>(clamped - 512) *
+                                   kChromaAxisScale / 448);
+}
 
 // Thread-safety: Implementations of IChromaEncoder are NOT thread-safe.
 // Callers must ensure sequential access. Concurrent calls to
@@ -35,6 +53,25 @@ class IChromaEncoder {
       const std::vector<YCbCr444Pixel>& source_samples,
       double carrier_phase_start_rad,
       std::vector<SampleFixed>* out_chroma_mv) const = 0;
+
+  // Encodes a line from colour-difference axes the caller has already built
+  // (see ChromaAxisFromCode): sin_axis is modulated onto the sin carrier axis
+  // (U, or NTSC b-y) and cos_axis onto the cos axis (V, or NTSC r-y). Both
+  // vectors have one entry per output sample. Each axis sample must lie in
+  // [-2 kChromaAxisScale, 2 kChromaAxisScale], which leaves room for the
+  // overshoot of a band-limited resampler.
+  virtual void EncodeAxesFromPhaseStart(
+      const std::vector<std::int32_t>& sin_axis,
+      const std::vector<std::int32_t>& cos_axis, double carrier_phase_start_rad,
+      std::vector<SampleFixed>* out_chroma_mv) const = 0;
+
+  // The low-pass filtered Q20 axes of the most recent encode, exactly as they
+  // were modulated, and the peak millivolts per unit of each. Valid until the
+  // next encode call.
+  virtual const std::vector<std::int32_t>& filtered_sin_axis() const = 0;
+  virtual const std::vector<std::int32_t>& filtered_cos_axis() const = 0;
+  virtual double sin_scale_mv() const = 0;
+  virtual double cos_scale_mv() const = 0;
 };
 
 // Shared implementation of the quadrature-modulated chroma encoders.
@@ -70,6 +107,20 @@ class QuadratureChromaEncoder : public IChromaEncoder {
       const std::vector<YCbCr444Pixel>& source_samples,
       double carrier_phase_start_rad,
       std::vector<SampleFixed>* out_chroma_mv) const override;
+
+  void EncodeAxesFromPhaseStart(
+      const std::vector<std::int32_t>& sin_axis,
+      const std::vector<std::int32_t>& cos_axis, double carrier_phase_start_rad,
+      std::vector<SampleFixed>* out_chroma_mv) const override;
+
+  const std::vector<std::int32_t>& filtered_sin_axis() const override {
+    return filtered_sin_fixed_;
+  }
+  const std::vector<std::int32_t>& filtered_cos_axis() const override {
+    return filtered_cos_fixed_;
+  }
+  double sin_scale_mv() const override { return sin_scale_mv_; }
+  double cos_scale_mv() const override { return cos_scale_mv_; }
 
  protected:
   // Args:

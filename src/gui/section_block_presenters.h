@@ -112,6 +112,23 @@ void SetScratchDropoutsEnabled(Section* section, bool enabled);
 void SetRandomDropoutAnchor(Section* section, DropoutAnchor anchor);
 void SetScratchDropoutAnchor(Section* section, DropoutAnchor anchor);
 
+// Source raster height for a standard: 576 rows on 625-line systems, 486 on
+// 525-line systems. Bounds the chroma_line_sign region editor.
+int SourceRasterHeight(Standard standard);
+// True when a standard carries the PAL V-switch that chroma_line_sign
+// follows (PAL and PAL-M).
+bool SupportsChromaLineSign(Standard standard);
+
+// Appends a chroma_line_sign region: the first is a 48x48 block at the
+// raster origin with V following the switch; later ones copy the last
+// region's size and modes, moved one region-width right (wrapping to the next
+// band down at the right edge, and stopping at the bottom of the raster).
+void AddChromaLineSignRegion(std::vector<ChromaLineSignRegion>* regions,
+                             int raster_height);
+// Removes region `row`; out-of-range rows change nothing.
+void RemoveChromaLineSignRegion(std::vector<ChromaLineSignRegion>* regions,
+                                int row);
+
 // Enabling the luma bandwidth limit seeds a 3.0 MHz cutoff with the default
 // transition; disabling resets the block so it is not emitted.
 void SetLumaBandwidthEnabled(Section* section, bool enabled);

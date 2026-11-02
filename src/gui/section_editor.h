@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "audio_channel_pairs_editor.h"
+#include "chroma_line_sign_editor.h"
 #include "line_injections_editor.h"
 #include "noise_level_curve_editor.h"
 #include "noise_spectrum_editor.h"
@@ -85,6 +86,7 @@ class SectionEditor : public QWidget {
   QWidget* BuildProbeGroup();
   QWidget* BuildAudioGroup();
   QWidget* BuildLumaBandwidthGroup();
+  QWidget* BuildPictureGroup();
   QWidget* BuildNoiseGroup();
   QWidget* BuildDropoutsGroup();
   QWidget* BuildOsdGroup();
@@ -237,6 +239,12 @@ class SectionEditor : public QWidget {
   QGroupBox* luma_bandwidth_group_ = nullptr;
   QDoubleSpinBox* luma_cutoff_spin_ = nullptr;
   QDoubleSpinBox* luma_transition_spin_ = nullptr;
+
+  // Picture mapping: horizontal resampling and chroma_line_sign regions.
+  QGroupBox* picture_group_ = nullptr;
+  QComboBox* horizontal_resample_combo_ = nullptr;
+  QLabel* chroma_line_sign_note_ = nullptr;
+  ChromaLineSignEditor* chroma_line_sign_editor_ = nullptr;
 
   // Noise: the capture layer (noise_group_) and the shared pressing layer.
   QGroupBox* noise_group_ = nullptr;

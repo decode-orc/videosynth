@@ -237,6 +237,22 @@ The ranges model a mis-adjusted but working player: half to one and a half times
 
 SECAM carries its colour as frequency-modulated subcarriers, with no quadrature chroma to rotate. Remove the `chroma_error:` block from SECAM projects.
 
+### `chroma_line_sign requires a PAL or PAL-M project`
+
+The regions follow the PAL V-switch, which NTSC and SECAM do not have. Remove the `chroma_line_sign:` block, or use a PAL or PAL-M project. See [chroma_line_sign](../reference/sections.md#chroma_line_sign).
+
+### `chroma_line_sign[N].region must have a positive width and height and lie inside the … source raster`
+
+Regions are in source pixels and rows: x + width at most 720, y + height at most 576 (PAL) or 486 (PAL-M).
+
+### `chroma_line_sign[N] changes nothing`
+
+A region with both `u` and `v` left `normal` has no effect. Set `v: follow_switch` (line-alternating V) or `u: follow_switch` (anti-PAL U), or remove the region.
+
+### A `chroma_line_sign` bar still shows colour in the decoded picture
+
+That is what the bar is for. A correct PAL delay-line decoder averages the alternating component to grey; colour or "Venetian blinds" in the bar point at the decoder's delay line or demodulator, and a 2D decoder that separates by position alone will leave it coloured.
+
 ### `noise_spread_db requires noise_db to be specified`
 
 `noise_spread_db` is relative to the floor, so it needs one. Add `noise_db`.
@@ -322,6 +338,14 @@ A soundtrack comes from the section's own video, so an EXR still has none. Use a
 ### No `.efm` file is written
 
 A warning will say that no section declares the pair named in `output.efm_audio`. Add an `audio:` block declaring that pair to at least one section.
+
+### `output.truth requires a PAL, NTSC or PAL-M project`
+
+SECAM carries its colour as frequency-modulated subcarriers, with no U/V quadrature components for the truth to record. Remove `truth: true` from SECAM projects.
+
+### `output.truth excludes OSD overlays`
+
+OSD text is drawn after the truth is taken, so the truth shows the picture under the text. Remove the overlays from projects whose decoded picture will be scored against the truth.
 
 ### EFM track warnings
 

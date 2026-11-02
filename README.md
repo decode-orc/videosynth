@@ -271,6 +271,7 @@ All artefacts are colocated with `output.video_path`:
 | `<name>.dropouts.meta` | SQLite dropout sidecar (schema v5), when any section injects dropouts |
 | `<name>_audio_<pair>.wav` | 48 kHz/24-bit stereo audio per channel pair |
 | `<name>.efm` / `<name>.efm.meta` | LaserDisc digital audio channel stream and its frame index, when `output.efm_audio` is set |
+| `<name>.truth` / `<name>.truth.meta` | Picture truth (planar float32 Y/U/V at 4fsc over the active window) and its SQLite sidecar, when `output.truth` is set |
 
 ---
 

@@ -129,6 +129,20 @@ TEST(VideoFrameDecoderTest, SeekLandsHalfAFrameBeforeTheWantedFrame) {
       std::string::npos);
 }
 
+TEST(VideoFrameDecoderTest, SeekUsesTheSourceFrameRate) {
+  // A 24000/1001 film clip on an NTSC project: frame 40 starts at
+  // (40 - 0.5) / (24000 / 1001) = 1.647479 s. The NTSC rate would seek to
+  // 1.317983 s, film frame 32.
+  VideoDecodeRequest request;
+  request.source = "film.mkv";
+  request.standard = Standard::kNtsc;
+  request.first_frame = 40;
+  request.frame_rate_hz = 24000.0 / 1001.0;
+  EXPECT_NE(
+      FfmpegVideoFrameDecoder::BuildCommand(request).find("-ss 1.647479 -i"),
+      std::string::npos);
+}
+
 TEST(VideoFrameDecoderTest, SeekIncludesVideoStartOffset) {
   VideoDecodeRequest request;
   request.source = "clip.mp4";

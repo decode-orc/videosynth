@@ -20,6 +20,7 @@
 #include "videosynth/fixed_point.h"
 #include "videosynth/model.h"
 #include "videosynth/path_resolution.h"
+#include "videosynth/picture_truth.h"
 #include "videosynth/results.h"
 
 namespace videosynth {
@@ -285,6 +286,24 @@ class IGenerationStage {
       std::size_t start_frame, std::size_t frame_count,
       std::vector<SampleFixed>* out_y_mv, std::vector<SampleFixed>* out_c_mv,
       std::vector<std::string>* errors) = 0;
+
+  // As GenerateFrameBatch, additionally filling out_truth with one picture
+  // truth frame per generated frame: the component Y, U and V that went into
+  // the modulator (see picture_truth.h). The default implementation reports
+  // that the stage cannot produce a truth.
+  //
+  // Ownership: every pointer is an output parameter owned by the caller.
+  virtual bool GenerateFrameBatchWithTruth(
+      const Project& /*project*/,
+      const std::vector<FrameScheduleItem>& /*schedule*/,
+      std::size_t /*start_frame*/, std::size_t /*frame_count*/,
+      std::vector<SampleFixed>* /*out_y_mv*/,
+      std::vector<SampleFixed>* /*out_c_mv*/,
+      std::vector<PictureTruthFrame>* /*out_truth*/,
+      std::vector<std::string>* errors) {
+    errors->push_back("This generation stage cannot produce a truth output.");
+    return false;
+  }
 
   // Ownership: out_y_mv, out_c_mv, and errors are output parameters. The caller
   // owns the pointed-to vectors and must ensure the pointers are valid

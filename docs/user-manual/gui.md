@@ -67,7 +67,7 @@ Every dock can be hidden, floated or rearranged; **View → Panels** toggles the
 
 - **Project** — name, version, description.
 - **CVBS Presets** — video standard, sample encoding, signal state, and the standard-specific options (PAL pilot burst, NTSC VBI burst, NTSC black setup override, SECAM field identification). The signal state follows the standard: `STANDARD_STABLE_UNLOCKED` for [SECAM](video-signal.md#secam-chroma), `STANDARD_STABLE_LOCKED` otherwise. Options that do not apply to the selected standard are disabled rather than hidden.
-- **Output** — video path and signal type, plus the optional EFM digital audio channel-pair selection.
+- **Output** — video path and signal type, the optional EFM digital audio channel-pair selection, and **Picture truth**, which writes the [component picture](../reference/output.md#truth) beside the video (not offered for SECAM).
 - **Laserdisc & VITS** — disc format (CAV/CLV), VITS placement policy and the VITS set. SECAM projects have no laserdisc format, so the disc format and laserdisc placement are disabled.
 - **Channel (pressing)** — the [`channel:` block](../reference/channel.md): a sub-sample **timing offset**, plus optional **Edge smear** (fraction and time constant) and **FM beat (herringbone)** (carrier at black and level). These describe the pressing, so every project of one pressing should use the same values. The FM beat is modelled for PAL only and is disabled for other standards.
 - **Chroma error (capture)** — the [`chroma_error:` block](../reference/chroma-error.md): chroma **gain** and **phase**, **Include burst**, plus optional **Per-line jitter** (phase and gain deviations, with an optional fixed seed). It is not available for SECAM.
@@ -123,6 +123,8 @@ Choosing *Video* removes the `cadence` block from the project file. Choosing an 
 **Line injections** — the laserdisc code checklist for this section. See [Laserdisc discs](laserdisc.md).
 
 **Luma bandwidth limit** — a low-pass on the picture luma, set by its **cutoff** (the −6 dB point) and **transition width**. The cutoff's upper limit follows the standard and the transition width. See [Luma bandwidth](impairments.md#luma-bandwidth).
+
+**Picture mapping** — **Horizontal resampling** chooses between **Nearest pixel** (the default zero-order hold) and **Band-limited** [interpolation](video-signal.md#horizontal-mapping). The **Chroma line sign** table lists the [decoder-stress regions](video-signal.md#pal-decoder-stress-regions): each row is a source rectangle (X, Y, Width, Height in pixels and rows) and how its **U** and **V** are carried (**Normal** or **Follow switch**). **Add region** places a 48×48 block after the last one; **Remove region** removes the selected row. The table is available for PAL and PAL-M projects; on other standards it stays enabled only while it holds regions, so they can be removed.
 
 **Noise injection** — two independent layers. See [Impairments](impairments.md).
 
@@ -182,7 +184,7 @@ Frames are cached, so scrubbing back and forth is cheap. When a project edit inv
 
 Validation runs continuously in the background, debounced so typing does not trigger a run per keystroke. The Issues dock lists every error and warning; the status bar summarises as *Project valid* or *n error(s), m warning(s)*.
 
-Double-clicking an issue selects the section it relates to and scrolls to the group the issue names: cadence, luma bandwidth, the capture or shared noise layer, or random or scratch dropouts. For a project-level issue it opens **Edit Project…**, scrolled to the **Channel** or **Chroma error** group when the issue is about one of them.
+Double-clicking an issue selects the section it relates to and scrolls to the group the issue names: cadence, luma bandwidth, picture mapping, the capture or shared noise layer, or random or scratch dropouts. For a project-level issue it opens **Edit Project…**, scrolled to the **Channel** or **Chroma error** group when the issue is about one of them.
 
 Errors block generation. Warnings do not — they flag things that are legal but probably not what you meant, such as a scratch whose lifespan is longer than the section it lives in.
 

@@ -179,6 +179,16 @@ TEST(ValidationIssuesModelTest, ImpairmentIssuesNavigateToTheirField) {
          p->sections[1].luma_bandwidth.cutoff_mhz = 0.2;
        },
        1, IssueField::kLumaBandwidth},
+      {"chroma line sign",
+       [](Project* p) {
+         p->sections[1].chroma_line_sign.push_back(
+             ChromaLineSignRegion{.x = 700,
+                                  .y = 0,
+                                  .width = 48,
+                                  .height = 48,
+                                  .v = ChromaLineSignMode::kFollowSwitch});
+       },
+       1, IssueField::kPicture},
       {"channel",
        [](Project* p) {
          p->channel.enabled = true;

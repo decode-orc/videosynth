@@ -99,6 +99,13 @@ Unknown keys are rejected outright, at every level, naming the offending key and
 - `luma_bandwidth.transition_mhz` in 0.1–2.0; `luma_bandwidth.cutoff_mhz` from 0.5 MHz up to 2 f_sc less half the transition.
 - `luma_bandwidth` without `cutoff_mhz`, a non-numeric value or an unknown key is a parse error.
 
+### Picture mapping
+
+- `horizontal_resample` other than `nearest` or `bandlimited` is a parse error.
+- `chroma_line_sign` on an NTSC or SECAM project is an error.
+- Each `chroma_line_sign` region needs a positive `width` and `height` and must lie inside the 720×576 (PAL) or 720×486 (PAL-M) source raster, and must set `u` or `v` (or both) to `follow_switch`.
+- A `chroma_line_sign` that is not a list, an entry without `region` or one of its four coordinates, a non-integer coordinate, a `u`/`v` value other than `normal` or `follow_switch`, or an unknown key is a parse error.
+
 ### Noise and dropouts
 
 - `noise_db` in 20.0–61.0; `noise_spread_db` ≥ 0; `noise_db − noise_spread_db` ≥ 20.0.
@@ -120,6 +127,7 @@ Unknown keys are rejected outright, at every level, naming the offending key and
 - `file`: `path` set, ending in `.wav` or `.flac`; the file exists, can be read, and has one or two channels.
 - `video_audio`: `stream` ≥ 0; the section source is a video, not an EXR still, and has an audio stream at that index.
 - EFM requires PAL, NTSC or PAL-M (not SECAM), at most 79 programme-area sections.
+- `output.truth` requires PAL, NTSC or PAL-M (not SECAM); with OSD overlays in any section it is a warning, as the truth does not carry the text. A value other than `true` or `false` is a parse error.
 - *Warnings*: a non-repeating audio file shorter than its section (the rest is silent); EFM pair not declared by any section; a programme track under 4 s (6 s for the first); no lead-in, so no table of contents.
 - *Log notes* (information, not warnings): an audio file or soundtrack that is resampled to 48 kHz, and a soundtrack with more than two channels that is downmixed to stereo.
 

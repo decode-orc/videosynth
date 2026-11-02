@@ -128,10 +128,13 @@ std::string FfmpegVideoFrameDecoder::BuildCommand(
   std::ostringstream command;
   command << "ffmpeg -v error -nostdin";
   if (request.first_frame > 0) {
+    const double frame_rate_hz = request.frame_rate_hz > 0.0
+                                     ? request.frame_rate_hz
+                                     : FrameRateForStandard(request.standard);
     const double seek_seconds =
         request.video_start_offset_seconds +
         ((static_cast<double>(request.first_frame) - kSeekLeadFrames) /
-         FrameRateForStandard(request.standard));
+         frame_rate_hz);
     command << " -ss " << std::fixed << std::setprecision(6) << seek_seconds;
   }
   command << " -i '" << EscapeForSingleQuotedShell(request.source) << "'"

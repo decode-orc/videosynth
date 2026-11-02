@@ -318,6 +318,23 @@ TEST(ProjectSettingsPresenterTest, NormalizeOutputClearsEfmForeignToStandard) {
   EXPECT_EQ(cleared.efm_audio.pair, 0);
 }
 
+TEST(ProjectSettingsPresenterTest, TruthIsOfferedForQuadratureStandardsOnly) {
+  OutputTargets output;
+  output.truth = true;
+  for (const Standard standard :
+       {Standard::kPal, Standard::kNtsc, Standard::kPalM}) {
+    EXPECT_TRUE(NormalizeOutputTargetsForStandard(output, standard).truth);
+    Project project;
+    project.cvbs_presets.video_standard_preset = standard;
+    EXPECT_TRUE(BuildProjectSettingsFormState(project).truth_editable);
+  }
+  EXPECT_FALSE(
+      NormalizeOutputTargetsForStandard(output, Standard::kSecam).truth);
+  Project secam;
+  secam.cvbs_presets.video_standard_preset = Standard::kSecam;
+  EXPECT_FALSE(BuildProjectSettingsFormState(secam).truth_editable);
+}
+
 // Normalized output targets must never trip the validator's standard rule for
 // EFM (the enablement mirrors validation).
 TEST(ProjectSettingsPresenterTest, NormalizedOutputPassesValidatorEfmRule) {

@@ -90,6 +90,15 @@ class GenerationStage final : public IGenerationStage {
                           std::vector<SampleFixed>* out_c_mv,
                           std::vector<std::string>* errors) override;
 
+  // As GenerateFrameBatch, additionally producing one picture truth frame per
+  // generated frame. Thread-safety as GenerateFrameBatch.
+  bool GenerateFrameBatchWithTruth(
+      const Project& project, const std::vector<FrameScheduleItem>& schedule,
+      std::size_t start_frame, std::size_t frame_count,
+      std::vector<SampleFixed>* out_y_mv, std::vector<SampleFixed>* out_c_mv,
+      std::vector<PictureTruthFrame>* out_truth,
+      std::vector<std::string>* errors) override;
+
   // Convenience wrapper that builds the schedule and generates all frames.
   //
   // Args:
@@ -146,10 +155,23 @@ class GenerationStage final : public IGenerationStage {
   // in clean synthesis depends only on that residue. Fills the buffers
   // completely (blanking / zero) before writing, so callers need not clear
   // them. Uses (and mutates) the worker-private workspaces in resources.
+  // When truth is non-null it is filled with the frame's picture truth
+  // (sized by the caller to the resources' truth layout).
   static void SynthesiseTemplate(
       SynthesisResources& resources, const Section& section,
       const std::array<const FrameSourceImage*, 2>& field_sources,
-      std::size_t sequence_phase, SampleFixed* y_out, SampleFixed* c_out);
+      std::size_t sequence_phase, SampleFixed* y_out, SampleFixed* c_out,
+      PictureTruthFrame* truth);
+
+  // Shared body of GenerateFrameBatch and GenerateFrameBatchWithTruth;
+  // out_truth may be null.
+  bool GenerateFrames(const Project& project,
+                      const std::vector<FrameScheduleItem>& schedule,
+                      std::size_t start_frame, std::size_t frame_count,
+                      std::vector<SampleFixed>* out_y_mv,
+                      std::vector<SampleFixed>* out_c_mv,
+                      std::vector<PictureTruthFrame>* out_truth,
+                      std::vector<std::string>* errors);
 
   ILogger* logger_;
   // Keyed by section: the schedule index where the next section's run starts.

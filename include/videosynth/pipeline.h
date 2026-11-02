@@ -18,6 +18,7 @@
 #include "videosynth/dropout_injection_stage.h"
 #include "videosynth/interfaces.h"
 #include "videosynth/noise_injection_stage.h"
+#include "videosynth/picture_truth_writer.h"
 
 namespace videosynth {
 
@@ -115,6 +116,9 @@ class VideoSynthPipeline {
   AudioTrackGenerator* audio_generator_;
   ChannelStage channel_;
   ChromaErrorStage chroma_error_;
+  // Writes output.truth beside the video output; used only from the thread
+  // that runs the pipeline.
+  PictureTruthWriter truth_writer_;
 };
 
 }  // namespace videosynth

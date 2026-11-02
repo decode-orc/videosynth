@@ -51,6 +51,9 @@ IssueField ClassifyIssueField(const std::string& message) {
   if (StartsWith(message, "Luma bandwidth validation error")) {
     return IssueField::kLumaBandwidth;
   }
+  if (StartsWith(message, "Picture validation error")) {
+    return IssueField::kPicture;
+  }
   // Keys follow the quoted section name; looking only past it keeps a section
   // name such as 'shared.intro' from steering the classification.
   const std::size_t name_end = message.find("': ");

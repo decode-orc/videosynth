@@ -156,6 +156,7 @@ class ProjectSettingsEditor : public QWidget {
   QCheckBox* efm_check_ = nullptr;
   QComboBox* efm_pair_combo_ = nullptr;
   QLabel* efm_hint_ = nullptr;
+  QCheckBox* truth_check_ = nullptr;
 };
 
 }  // namespace videosynth::gui

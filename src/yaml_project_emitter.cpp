@@ -13,6 +13,7 @@
 
 #include <fstream>
 #include <limits>
+#include <vector>
 
 #include "videosynth/biphase_types.h"
 
@@ -119,6 +120,9 @@ void EmitOutputTargets(YAML::Emitter& out, const OutputTargets& output) {
     out << YAML::Key << "efm_audio" << YAML::Value << YAML::BeginMap;
     out << YAML::Key << "pair" << YAML::Value << output.efm_audio.pair;
     out << YAML::EndMap;
+  }
+  if (output.truth) {
+    out << YAML::Key << "truth" << YAML::Value << true;
   }
   out << YAML::EndMap;
 }
@@ -336,6 +340,40 @@ void EmitLumaBandwidth(YAML::Emitter& out,
   out << YAML::EndMap;
 }
 
+// Writes `horizontal_resample:` unless it is the nearest-pixel default.
+void EmitHorizontalResample(YAML::Emitter& out, HorizontalResample resample) {
+  if (resample == HorizontalResample::kNearest) {
+    return;
+  }
+  out << YAML::Key << "horizontal_resample" << YAML::Value << "bandlimited";
+}
+
+// Writes `chroma_line_sign:`; a component left normal is omitted.
+void EmitChromaLineSign(YAML::Emitter& out,
+                        const std::vector<ChromaLineSignRegion>& regions) {
+  if (regions.empty()) {
+    return;
+  }
+  out << YAML::Key << "chroma_line_sign" << YAML::Value << YAML::BeginSeq;
+  for (const ChromaLineSignRegion& region : regions) {
+    out << YAML::BeginMap;
+    out << YAML::Key << "region" << YAML::Value << YAML::Flow << YAML::BeginMap;
+    out << YAML::Key << "x" << YAML::Value << region.x;
+    out << YAML::Key << "y" << YAML::Value << region.y;
+    out << YAML::Key << "width" << YAML::Value << region.width;
+    out << YAML::Key << "height" << YAML::Value << region.height;
+    out << YAML::EndMap;
+    if (region.u == ChromaLineSignMode::kFollowSwitch) {
+      out << YAML::Key << "u" << YAML::Value << "follow_switch";
+    }
+    if (region.v == ChromaLineSignMode::kFollowSwitch) {
+      out << YAML::Key << "v" << YAML::Value << "follow_switch";
+    }
+    out << YAML::EndMap;
+  }
+  out << YAML::EndSeq;
+}
+
 template <typename DropoutBlock>
 void EmitDropoutBlock(YAML::Emitter& out, const char* key,
                       const DropoutBlock& block) {
@@ -518,6 +556,8 @@ void EmitSection(YAML::Emitter& out, const Section& section) {
   EmitCadence(out, section.cadence);
   EmitLineInjections(out, section);
   EmitLumaBandwidth(out, section.luma_bandwidth);
+  EmitHorizontalResample(out, section.horizontal_resample);
+  EmitChromaLineSign(out, section.chroma_line_sign);
   EmitNoise(out, section.noise);
   EmitDropouts(out, section.dropouts);
   EmitOsd(out, section.osd);

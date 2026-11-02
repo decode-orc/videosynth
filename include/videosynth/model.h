@@ -324,6 +324,32 @@ struct LumaBandwidthParameters {
   double transition_mhz = kLumaBandwidthTransitionDefaultMhz;
 };
 
+// How the source raster's active width is mapped onto the 4fsc active window
+// (YAML `horizontal_resample:`). kNearest holds each source pixel for the
+// samples that fall inside it (a zero-order hold); kBandlimited interpolates
+// with a polyphase Kaiser-windowed sinc, so the mapping adds no images of the
+// source spectrum.
+enum class HorizontalResample { kNearest, kBandlimited };
+
+// How one colour-difference component of a chroma_line_sign region is
+// carried. kNormal leaves it as the encoder would; kFollowSwitch multiplies it
+// by the line's PAL V-switch sign (+1 on lines whose V axis is not inverted,
+// -1 on lines where it is) before modulation.
+enum class ChromaLineSignMode { kNormal, kFollowSwitch };
+
+// One rectangle of a section's `chroma_line_sign:` list, in source pixels.
+// PAL and PAL-M only: with v kFollowSwitch the transmitted V carrier is
+// unswitched, so a PAL decoder sees V alternate line by line; with u
+// kFollowSwitch, U alternates with the switch (an "anti-PAL" field).
+struct ChromaLineSignRegion {
+  int x = 0;
+  int y = 0;
+  int width = 0;
+  int height = 0;
+  ChromaLineSignMode u = ChromaLineSignMode::kNormal;
+  ChromaLineSignMode v = ChromaLineSignMode::kNormal;
+};
+
 // On-screen display foreground level. Only four discrete levels are
 // supported; kUnknown marks an unrecognised YAML value so the validator can
 // reject it with a clear message.
@@ -664,6 +690,8 @@ struct Section {
   bool end_frame_specified = false;
   CadenceParameters cadence = {};
   LumaBandwidthParameters luma_bandwidth = {};
+  HorizontalResample horizontal_resample = HorizontalResample::kNearest;
+  std::vector<ChromaLineSignRegion> chroma_line_sign = {};
   NoiseParameters noise = {};
   DropoutParameters dropouts = {};
   OsdConfig osd = {};
@@ -687,6 +715,10 @@ struct OutputTargets {
   // "composite" (default) or "yc" (dual-file luma+chroma).
   std::string signal_type = "composite";
   EfmAudioOutput efm_audio = {};
+  // When true, the component picture (Y, U, V at 4fsc over the active window)
+  // that went into the modulator is written beside the video output, before
+  // any impairment. See picture_truth_writer.h.
+  bool truth = false;
 };
 
 // One project-wide VITS (vertical interval test signal) injection: a single
@@ -874,6 +906,12 @@ inline bool operator==(const LumaBandwidthParameters& a,
          a.transition_mhz == b.transition_mhz;
 }
 
+inline bool operator==(const ChromaLineSignRegion& a,
+                       const ChromaLineSignRegion& b) {
+  return a.x == b.x && a.y == b.y && a.width == b.width &&
+         a.height == b.height && a.u == b.u && a.v == b.v;
+}
+
 inline bool operator==(const OsdOverlay& a, const OsdOverlay& b) {
   return a.text == b.text && a.x == b.x && a.y == b.y && a.scale == b.scale &&
          a.fg_level == b.fg_level && a.bg_level == b.bg_level;
@@ -952,7 +990,9 @@ inline bool operator==(const Section& a, const Section& b) {
          a.start_frame == b.start_frame && a.end_frame == b.end_frame &&
          a.end_frame_specified == b.end_frame_specified &&
          a.cadence == b.cadence && a.luma_bandwidth == b.luma_bandwidth &&
-         a.noise == b.noise && a.dropouts == b.dropouts && a.osd == b.osd &&
+         a.horizontal_resample == b.horizontal_resample &&
+         a.chroma_line_sign == b.chroma_line_sign && a.noise == b.noise &&
+         a.dropouts == b.dropouts && a.osd == b.osd &&
          a.audio_channel_pairs == b.audio_channel_pairs;
 }
 
@@ -962,7 +1002,8 @@ inline bool operator==(const EfmAudioOutput& a, const EfmAudioOutput& b) {
 
 inline bool operator==(const OutputTargets& a, const OutputTargets& b) {
   return a.video_path == b.video_path && a.metadata_path == b.metadata_path &&
-         a.signal_type == b.signal_type && a.efm_audio == b.efm_audio;
+         a.signal_type == b.signal_type && a.efm_audio == b.efm_audio &&
+         a.truth == b.truth;
 }
 
 inline bool operator==(const EdgeSmearParameters& a,

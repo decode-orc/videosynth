@@ -37,6 +37,7 @@
 #include <utility>
 
 #include "asset_roots.h"
+#include "chroma_line_sign_editor.h"
 #include "form_field_width.h"
 #include "project_templates.h"
 #include "section_block_presenters.h"
@@ -133,6 +134,7 @@ void SectionEditor::BuildUi() {
   layout->addWidget(BuildProbeGroup());
   layout->addWidget(BuildAudioGroup());
   layout->addWidget(BuildLumaBandwidthGroup());
+  layout->addWidget(BuildPictureGroup());
   layout->addWidget(BuildNoiseGroup());
   layout->addWidget(BuildDropoutsGroup());
   layout->addWidget(BuildOsdGroup());
@@ -569,6 +571,42 @@ QWidget* SectionEditor::BuildLumaBandwidthGroup() {
     }
   });
   return luma_bandwidth_group_;
+}
+
+QWidget* SectionEditor::BuildPictureGroup() {
+  picture_group_ = new QGroupBox(tr("Picture mapping"), content_);
+  auto* form = new QFormLayout(picture_group_);
+
+  horizontal_resample_combo_ = new QComboBox(picture_group_);
+  horizontal_resample_combo_->addItem(
+      tr("Nearest pixel"), static_cast<int>(HorizontalResample::kNearest));
+  horizontal_resample_combo_->addItem(
+      tr("Band-limited"), static_cast<int>(HorizontalResample::kBandlimited));
+  horizontal_resample_combo_->setToolTip(
+      tr("How the 720 source pixels map onto the active line. Nearest pixel "
+         "holds each pixel (a zero-order hold, which leaves images of the "
+         "source spectrum, including energy near the colour subcarrier). "
+         "Band-limited interpolates with a windowed-sinc filter at the source "
+         "Nyquist frequency instead."));
+  form->addRow(tr("Horizontal resampling:"), horizontal_resample_combo_);
+
+  chroma_line_sign_note_ = new QLabel(picture_group_);
+  chroma_line_sign_note_->setWordWrap(true);
+  chroma_line_sign_note_->setText(
+      tr("Chroma line sign regions need a PAL or PAL-M project."));
+  form->addRow(chroma_line_sign_note_);
+  chroma_line_sign_editor_ = new ChromaLineSignEditor(picture_group_);
+  form->addRow(tr("Chroma line sign:"), chroma_line_sign_editor_);
+
+  const auto commit = [this] {
+    if (!updating_) {
+      CommitSection();
+    }
+  };
+  connect(horizontal_resample_combo_, &QComboBox::activated, this, commit);
+  connect(chroma_line_sign_editor_, &ChromaLineSignEditor::RegionsEdited, this,
+          commit);
+  return picture_group_;
 }
 
 QWidget* SectionEditor::BuildNoiseGroup() {
@@ -1028,6 +1066,19 @@ void SectionEditor::LoadFromDocument() {
   UpdateLumaCutoffRange();
   luma_cutoff_spin_->setValue(section.luma_bandwidth.cutoff_mhz);
 
+  // Picture mapping. A project that cannot use chroma_line_sign keeps the
+  // table usable only to remove regions it already carries.
+  horizontal_resample_combo_->setCurrentIndex(
+      horizontal_resample_combo_->findData(
+          static_cast<int>(section.horizontal_resample)));
+  const Standard standard = project.cvbs_presets.video_standard_preset;
+  const bool line_sign_supported = SupportsChromaLineSign(standard);
+  chroma_line_sign_note_->setVisible(!line_sign_supported);
+  chroma_line_sign_editor_->setEnabled(line_sign_supported ||
+                                       !section.chroma_line_sign.empty());
+  chroma_line_sign_editor_->SetRegions(section.chroma_line_sign,
+                                       SourceRasterHeight(standard));
+
   // Noise.
   const double spectrum_max_mhz =
       NoiseSpectrumMaxFrequencyMhz(project.cvbs_presets.video_standard_preset);
@@ -1197,6 +1248,10 @@ Section SectionEditor::SectionFromWidgets() const {
   } else {
     SetLumaBandwidthEnabled(&section, false);
   }
+
+  section.horizontal_resample = static_cast<HorizontalResample>(
+      horizontal_resample_combo_->currentData().toInt());
+  section.chroma_line_sign = chroma_line_sign_editor_->regions();
 
   // Noise layers. The capture layer's group owns noise_db/spread/seed and its
   // spectra; the shared layer is independent of it.
@@ -1429,6 +1484,10 @@ void SectionEditor::RevealField(IssueField field) {
     case IssueField::kCadence:
       group = cadence_group_;
       focus = cadence_pattern_combo_;
+      break;
+    case IssueField::kPicture:
+      group = picture_group_;
+      focus = horizontal_resample_combo_;
       break;
     case IssueField::kNone:
     case IssueField::kChannel:

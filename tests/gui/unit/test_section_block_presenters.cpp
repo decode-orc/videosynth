@@ -426,6 +426,89 @@ TEST(SectionBlockPresenterTest, ApplySectionEditDeltaMirrorsLumaBandwidth) {
             limited.luma_bandwidth);
 }
 
+TEST(SectionBlockPresenterTest, ApplySectionEditDeltaMirrorsPictureMapping) {
+  Section before;
+  Section after = before;
+  after.horizontal_resample = HorizontalResample::kBandlimited;
+  AddChromaLineSignRegion(&after.chroma_line_sign, 576);
+  Section target;
+  target.name = "Target";
+  const Section mirrored = ApplySectionEditDelta(before, after, target);
+  EXPECT_EQ(mirrored.horizontal_resample, HorizontalResample::kBandlimited);
+  EXPECT_EQ(mirrored.chroma_line_sign, after.chroma_line_sign);
+
+  // An unrelated edit keeps the target's own picture settings.
+  Section own = target;
+  own.horizontal_resample = HorizontalResample::kBandlimited;
+  AddChromaLineSignRegion(&own.chroma_line_sign, 576);
+  own.chroma_line_sign[0].x = 100;
+  Section renamed = before;
+  renamed.source = "assets/other.exr";
+  const Section kept = ApplySectionEditDelta(before, renamed, own);
+  EXPECT_EQ(kept.horizontal_resample, own.horizontal_resample);
+  EXPECT_EQ(kept.chroma_line_sign, own.chroma_line_sign);
+}
+
+TEST(SectionBlockPresenterTest, ChromaLineSignRegionsTileTheRasterAndStop) {
+  std::vector<ChromaLineSignRegion> regions;
+  AddChromaLineSignRegion(&regions, 486);
+  ASSERT_EQ(regions.size(), 1U);
+  EXPECT_EQ(regions[0].x, 0);
+  EXPECT_EQ(regions[0].width, 48);
+  EXPECT_EQ(regions[0].v, ChromaLineSignMode::kFollowSwitch);
+  EXPECT_EQ(regions[0].u, ChromaLineSignMode::kNormal);
+
+  // 15 regions fill a 720-pixel band; the next wraps to the band below.
+  for (int i = 1; i < 16; ++i) {
+    AddChromaLineSignRegion(&regions, 486);
+  }
+  ASSERT_EQ(regions.size(), 16U);
+  EXPECT_EQ(regions[14].x, 672);
+  EXPECT_EQ(regions[15].x, 0);
+  EXPECT_EQ(regions[15].y, 48);
+
+  // Adding stops once the next region would leave the raster.
+  for (int i = 0; i < 400; ++i) {
+    AddChromaLineSignRegion(&regions, 486);
+  }
+  for (const ChromaLineSignRegion& region : regions) {
+    ASSERT_LE(region.y + region.height, 486);
+  }
+  EXPECT_EQ(regions.size(), 150U);  // 10 bands of 15.
+
+  RemoveChromaLineSignRegion(&regions, 999);
+  RemoveChromaLineSignRegion(&regions, -1);
+  EXPECT_EQ(regions.size(), 150U);
+  RemoveChromaLineSignRegion(&regions, 0);
+  EXPECT_EQ(regions.size(), 149U);
+}
+
+TEST(SectionBlockPresenterTest, AddedChromaLineSignRegionsValidate) {
+  for (const Standard standard : {Standard::kPal, Standard::kPalM}) {
+    ASSERT_TRUE(SupportsChromaLineSign(standard));
+    Project project;
+    project.cvbs_presets.video_standard_preset = standard;
+    project.cvbs_presets.sample_encoding_preset = "CVBS_U10_4FSC";
+    project.cvbs_presets.signal_state_preset = "STANDARD_STABLE_LOCKED";
+    project.output.video_path = "out.cvbs";
+    Section section;
+    section.name = "Card";
+    section.type = "progressive";
+    section.source = "card.exr";
+    section.duration_frames = 1;
+    for (int i = 0; i < 20; ++i) {
+      AddChromaLineSignRegion(&section.chroma_line_sign,
+                              SourceRasterHeight(standard));
+    }
+    project.sections.push_back(section);
+    const ValidationResult result = ProjectValidator().Validate(project);
+    EXPECT_TRUE(result.is_valid)
+        << (result.errors.empty() ? "" : result.errors[0]);
+  }
+  EXPECT_FALSE(SupportsChromaLineSign(Standard::kNtsc));
+  EXPECT_FALSE(SupportsChromaLineSign(Standard::kSecam));
+}
+
 TEST(SectionBlockPresenterTest, ApplySectionEditDeltaMirrorsFlaggedAndAnchor) {
   Section before;
   SetRandomDropoutsEnabled(&before, true);

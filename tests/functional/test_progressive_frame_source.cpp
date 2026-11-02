@@ -15,6 +15,8 @@
 #include <vector>
 
 #include "videosynth/progressive_frame_source.h"
+#include "videosynth/progressive_frame_source_probe.h"
+#include "videosynth/video_frame_decoder.h"
 
 namespace videosynth {
 namespace {
@@ -353,6 +355,44 @@ TEST(FrameSourceTest, TwoSourcesStayCachedAcrossAlternatingRequests) {
   // force a re-decode of the section still in use.
   EXPECT_EQ(first_a.get(), second_a.get());
   EXPECT_NE(first_a.get(), b.get());
+}
+
+// A decoder opened part-way into a 24000/1001 film clip on an NTSC project
+// must seek with the clip's own rate: the standard's 30000/1001 rate would
+// land on frame 0.8 × N. The window capacity of 1 makes the seeked source
+// reopen its decoder at the requested frame.
+TEST(FrameSourceTest, SeekIntoFilmClipReturnsTheRequestedFrame) {
+  Section section;
+  section.type = "progressive";
+  section.source = (std::filesystem::path(VIDEOSYNTH_SOURCE_DIR) /
+                    "videosynth-assets/assets/mkv/720x486/FILM_COUNTER_24P.mkv")
+                       .string();
+  section.cadence.pattern = CadencePattern::kPulldown23;
+  constexpr int kFrame = 40;
+
+  ProgressiveFrameSource sequential;
+  std::string error;
+  std::shared_ptr<const FrameSourceImage> expected;
+  for (int frame = 0; frame <= kFrame; ++frame) {
+    ASSERT_TRUE(sequential.GenerateFrame(section, frame, Standard::kNtsc,
+                                         &expected, &error))
+        << error;
+  }
+
+  ProgressiveFrameSource seeking(
+      std::make_shared<ProgressiveFrameSourceProbe>(),
+      []() { return std::make_unique<FfmpegVideoFrameDecoder>(); }, 1U);
+  section.start_frame = kFrame;
+  std::shared_ptr<const FrameSourceImage> sought;
+  ASSERT_TRUE(
+      seeking.GenerateFrame(section, kFrame, Standard::kNtsc, &sought, &error))
+      << error;
+  ASSERT_EQ(sought->pixels.size(), expected->pixels.size());
+  for (std::size_t i = 0; i < sought->pixels.size(); ++i) {
+    const YCbCr444Pixel& a = sought->pixels[i];
+    const YCbCr444Pixel& b = expected->pixels[i];
+    ASSERT_TRUE(a.y == b.y && a.cb == b.cb && a.cr == b.cr) << "pixel " << i;
+  }
 }
 
 }  // namespace

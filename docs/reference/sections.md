@@ -32,6 +32,8 @@ sections:
 | `cadence` | map | No | [field cadence](#cadence) | video cadence |
 | `line_injections` | list | No | [section line injections](section-line-injections.md) | absent |
 | `luma_bandwidth` | map | No | [luma bandwidth limit](#luma_bandwidth) | absent |
+| `horizontal_resample` | string | No | `nearest`, `bandlimited` ([horizontal mapping](#horizontal_resample)) | `nearest` |
+| `chroma_line_sign` | list | No | [chroma line sign regions](#chroma_line_sign) (PAL and PAL-M) | absent |
 | `noise` | map | No | [noise](section-noise.md) | absent |
 | `dropouts` | map | No | [dropouts](section-dropouts.md) | absent |
 | `osd` | map | No | [osd](section-osd.md) | absent |
@@ -178,13 +180,71 @@ A low-pass on the section's picture luma, as from a player or transfer with a li
 2 f_sc is half the 4fsc sampling rate: 8.867 MHz for PAL and SECAM, 7.159 MHz for NTSC and 7.151 MHz for PAL-M.
 
 - The filter is a Kaiser-windowed-sinc low-pass. The passband runs to `cutoff_mhz` − `transition_mhz` / 2 with a ripple below 0.003 dB; above `cutoff_mhz` + `transition_mhz` / 2 the stopband is at least 70 dB down (designed for 70 dB; the limit promises 60 dB).
-- It filters the luma of each active picture line across the active window, after the source pixels are mapped to 4fsc samples. It therefore also removes the images that the nearest-pixel column mapping leaves at high frequencies.
+- It filters the luma of each active picture line across the active window, after the source pixels are mapped to 4fsc samples. It therefore also removes the images that the nearest-pixel column mapping leaves above the cutoff (the [band-limited mapping](#horizontal_resample) avoids them at any frequency, for chroma too).
 - Each line is filtered on its own. Beyond the ends of the active window the line's first and last samples are repeated, so a flat line passes unchanged and the window edges do not ring.
 - Sync, blanking, the VBI, the [VITS](vits-types.md) lines and the chroma are not filtered and are bit-identical to an unlimited section.
 - [OSD](section-osd.md) text is drawn after the filter, so it stays sharp.
 - The channel impairments, noise and dropouts are applied afterwards and are not band-limited.
 
 Validation: `cutoff_mhz` outside its range, or `transition_mhz` outside 0.1–2.0, is an error. `luma_bandwidth` without `cutoff_mhz`, a non-numeric value or another key is a parse error.
+
+## `horizontal_resample`
+
+How the source raster's 720 active pixels are mapped onto the 4fsc active window (922 samples for PAL and SECAM, 52 µs). Optional.
+
+```yaml
+- name: Photo
+  type: progressive
+  source: "{project}/media/photo.exr"
+  duration_frames: 8
+  horizontal_resample: bandlimited
+```
+
+| Value | Mapping |
+|-------|---------|
+| `nearest` (default) | Each sample takes the source pixel at or to the left of its position (`x · 720 / N`): a zero-order hold. |
+| `bandlimited` | Each sample interpolates the source row with a polyphase Kaiser-windowed sinc. |
+
+- The zero-order hold leaves images of the source spectrum up to the 4fsc Nyquist frequency. A source component at *f* reappears at 13.5 MHz − *f*, which the 4fsc sampling folds down again: a 0.25 MHz detail in a PAL picture leaves an image near 4.5 MHz, beside the colour subcarrier, where a decoder reads it as cross-colour. The hold also droops the in-band response.
+- The `bandlimited` kernel has its −6 dB point at the source Nyquist frequency (0.5 cycles per pixel, 6.75 MHz for a 13.5 MHz raster) with a 0.1 cycle-per-pixel transition and a 70 dB stopband. Every passband frequency's image lands in the stopband; only content within the transition band, right at the source Nyquist frequency, leaves an image (at most −6 dB).
+- Sample *x* reads the source at pixel position *x* · 720 / N − 0.5, so a pixel's value is centred on the span of samples the nearest mapping holds it for, and edges land on the same samples under both mappings.
+- Each phase of the kernel has unit DC gain, so flat areas are bit-identical to `nearest`. Taps that fall outside the raster repeat the edge pixel.
+- The luma, both colour-difference components and the [`chroma_line_sign`](#chroma_line_sign) regions are resampled together; any [`luma_bandwidth`](#luma_bandwidth) limit and the chroma low-pass follow.
+- `nearest` keeps existing projects bit-exact.
+
+Validation: any other value is a parse error. The emitter writes the key only for `bandlimited`.
+
+## `chroma_line_sign`
+
+Rectangles of the source picture whose U or V is multiplied by each line's PAL V-switch sign before modulation. PAL and PAL-M only. This builds the PAL decoder-stress elements of test cards such as the Philips PM5544: a bar of line-alternating ±(R−Y), and the "anti-PAL" fields whose U alternates instead.
+
+```yaml
+- name: PalStress
+  type: progressive
+  source: "{bundled}/exr/720x576/PAL_STRESS.exr"
+  duration_frames: 8
+  chroma_line_sign:
+    - region: {x: 48, y: 96, width: 96, height: 144}
+      v: follow_switch
+    - region: {x: 576, y: 96, width: 96, height: 144}
+      u: follow_switch
+```
+
+| Key | Type | Required | Values | Description |
+|-----|------|----------|--------|-------------|
+| `region.x`, `region.y` | int | Yes | ≥ 0 | Top-left corner, in source pixels and rows |
+| `region.width`, `region.height` | int | Yes | ≥ 1, inside the raster | Size, in source pixels and rows |
+| `u` | string | No (default `normal`) | `normal`, `follow_switch` | How U is carried |
+| `v` | string | No (default `normal`) | `normal`, `follow_switch` | How V is carried |
+
+- The V-switch sign is +1 on lines whose V axis is transmitted as is and −1 on lines where it is inverted (ITU-R BT.1700 Annex 1 Part B Table 1 item 10f). It belongs to the line, and a given frame line's switch flips every frame (625 and 525 are odd), so a still image alone cannot express it.
+- `v: follow_switch` cancels the switch: the transmitted V carrier is unswitched. A PAL decoder, which removes the switch, sees V alternate line by line. A correct delay-line decoder averages it to grey; delay-line amplitude errors show as "Venetian blinds" and a non-orthogonal demodulator colours it. Because the unswitched V lands where U would be in the vertical spectrum, a 2D or Transform PAL decoder cannot tell it from U by position.
+- `u: follow_switch` makes U alternate with the switch (the "+V/±U anti-PAL" field).
+- Regions are tested against source pixels, before the [horizontal mapping](#horizontal_resample). Overlapping regions each apply their sign, so two `follow_switch` regions on one component cancel.
+- Lines outside every region, and every line with a +1 switch sign, are bit-identical to a section without the block.
+- The [picture truth](output.md#truth) includes the alternation.
+
+Validation: the block on an NTSC or SECAM project is an error, as is a region with a zero or negative size, one that leaves the 720×576 (PAL) or 720×486 (PAL-M) raster, or one with neither `u` nor `v` set to `follow_switch`. A missing `region` or coordinate, a non-integer coordinate, an unknown value or key is a parse error. The emitter omits components left `normal`.
 
 ## Section sub-blocks
 
@@ -211,4 +271,5 @@ All are optional, and only blocks that are explicitly set are written back out b
 - A section with a `laserdisc` injection must set `section_type`.
 - `cadence` rules (above).
 - `luma_bandwidth` within its ranges (above).
+- `chroma_line_sign` only on PAL and PAL-M, with every region inside the raster and following the switch on at least one component.
 - CAV lead-in and lead-out minimum durations (warnings).

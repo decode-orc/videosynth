@@ -383,6 +383,7 @@ TEST(ProgressiveFrameSourceWindowTest, OpenCarriesColourPlanAndStartOffset) {
   EXPECT_EQ(request.standard, Standard::kPal);
   EXPECT_EQ(request.first_frame, 2);
   EXPECT_DOUBLE_EQ(request.video_start_offset_seconds, 0.08);
+  EXPECT_DOUBLE_EQ(request.frame_rate_hz, fixture.probe->profile.frame_rate_hz);
   EXPECT_NE(request.filter_chain.find("in_range=pc"), std::string::npos);
 }
 

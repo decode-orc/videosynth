@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <vector>
 
@@ -271,6 +272,56 @@ TEST(ChromaEncoderTest, PhaseStartEncodingIsDeterministic) {
   for (std::size_t i = 0; i < first_run.size(); ++i) {
     EXPECT_EQ(first_run[i], second_run[i]);
   }
+}
+
+TEST(ChromaEncoderTest, MirroredCodesGiveExactlyNegatedAxisSamples) {
+  for (int code = 0; code <= 1024; ++code) {
+    ASSERT_EQ(ChromaAxisFromCode(1024 - code), -ChromaAxisFromCode(code))
+        << code;
+  }
+  EXPECT_EQ(ChromaAxisFromCode(512), 0);
+  EXPECT_EQ(ChromaAxisFromCode(960), kChromaAxisScale);
+  EXPECT_EQ(ChromaAxisFromCode(1023), kChromaAxisScale);
+  EXPECT_EQ(ChromaAxisFromCode(0), -kChromaAxisScale);
+}
+
+TEST(ChromaEncoderTest, AxisEncodingMatchesPixelEncoding) {
+  for (const Standard standard :
+       {Standard::kPal, Standard::kNtsc, Standard::kPalM}) {
+    const auto encoder = CreateChromaEncoder(
+        standard, GetTimingConstants(standard).sample_rate_4fsc_hz);
+    ASSERT_NE(encoder, nullptr);
+    std::vector<YCbCr444Pixel> line(200);
+    std::vector<std::int32_t> sin_axis(line.size());
+    std::vector<std::int32_t> cos_axis(line.size());
+    for (std::size_t i = 0; i < line.size(); ++i) {
+      line[i].cb = static_cast<std::int16_t>(64 + ((i * 37) % 897));
+      line[i].cr = static_cast<std::int16_t>(960 - ((i * 53) % 897));
+      sin_axis[i] = ChromaAxisFromCode(line[i].cb);
+      cos_axis[i] = ChromaAxisFromCode(line[i].cr);
+    }
+    std::vector<SampleFixed> from_pixels;
+    std::vector<SampleFixed> from_axes;
+    encoder->EncodeLineFromPhaseStart(line, 0.3, &from_pixels);
+    const std::vector<std::int32_t> filtered_cos_pixels =
+        encoder->filtered_cos_axis();
+    encoder->EncodeAxesFromPhaseStart(sin_axis, cos_axis, 0.3, &from_axes);
+    EXPECT_EQ(from_pixels, from_axes) << StandardToString(standard);
+    EXPECT_EQ(filtered_cos_pixels, encoder->filtered_cos_axis());
+    EXPECT_EQ(encoder->filtered_sin_axis().size(), line.size());
+  }
+}
+
+TEST(ChromaEncoderTest, AxisEncodingAcceptsResamplerOvershoot) {
+  const auto encoder = CreateChromaEncoder(
+      Standard::kPal, GetTimingConstants(Standard::kPal).sample_rate_4fsc_hz);
+  const std::vector<std::int32_t> sin_axis(64, 2 * kChromaAxisScale);
+  const std::vector<std::int32_t> cos_axis(64, -2 * kChromaAxisScale);
+  std::vector<SampleFixed> chroma;
+  encoder->EncodeAxesFromPhaseStart(sin_axis, cos_axis, 0.0, &chroma);
+  // Flat axes pass the unity-DC-gain low-pass unchanged.
+  EXPECT_EQ(encoder->filtered_sin_axis()[32], 2 * kChromaAxisScale);
+  EXPECT_EQ(encoder->filtered_cos_axis()[32], -2 * kChromaAxisScale);
 }
 
 }  // namespace

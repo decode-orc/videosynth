@@ -106,6 +106,7 @@ ProjectSettingsFormState BuildProjectSettingsFormState(const Project& project) {
     state.efm_pair_options.push_back(pair);
   }
   state.efm_output_editable = StandardHasLaserdiscDigitalAudio(standard);
+  state.truth_editable = standard != Standard::kSecam;
   state.efm_pair_editable =
       state.efm_output_editable && project.output.efm_audio.enabled;
   state.efm_status = ClassifyEfmOutput(project);
@@ -139,6 +140,9 @@ OutputTargets NormalizeOutputTargetsForStandard(OutputTargets output,
                                                 Standard standard) {
   if (!StandardHasLaserdiscDigitalAudio(standard)) {
     output.efm_audio = EfmAudioOutput{};
+  }
+  if (standard == Standard::kSecam) {
+    output.truth = false;
   }
   return output;
 }

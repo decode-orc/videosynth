@@ -95,6 +95,21 @@ The layout is `{bundled}/<type>/<raster>/<file>`, where `<type>` is `exr` or `mk
 | `GREY_5V_STEP.exr`, `GREY_10V_STEP.exr` | Vertical grey staircases |
 | `TARTAN.exr` | Tartan/crosshatch pattern |
 | `TESTCARD-F.exr` | UK Test Card F (PAL raster only) |
+| `PAL_STRESS.exr` | PAL decoder-stress card (PAL raster only), described below |
+| `LUMA_ZONE_PLATE.exr` | Static circular luma zone plate, rising from 0 at the centre to the source Nyquist frequency (0.5 cycles per pixel and per row) at the edges; chroma neutral |
+| `CHROMA_ZONE_PLATE.exr` | Static circular zone plate on B−Y and R−Y in quadrature (amplitude 0.2) at 50 % luma, with the same frequency sweep — shows where a decoder's U/V separation fails |
+
+`PAL_STRESS.exr` is a synthetic card built from the published element parameters of PAL decoder-stress patterns, without any broadcaster's or manufacturer's artwork. On a 50 % grey background with a 3-pixel (about 230 ns) white grid every 48 pixels and rows:
+
+| Element | Source pixels (x) × rows (y) | Content |
+|---------|------------------------------|---------|
+| Left bar | 48–143 × 96–239 | +(R−Y) 0.25 on 50 % grey; made line-alternating by a `chroma_line_sign` region with `v: follow_switch` |
+| Left steady fields | 48–143 × 240–431 | +(R−Y), −(R−Y), +(G−Y), −(G−Y), each 48 rows |
+| Right bar | 576–671 × 96–239 | +(B−Y) 0.25; made line-alternating by a region with `u: follow_switch` (anti-PAL) |
+| Right steady fields | 576–671 × 240–431 | +(B−Y), −(B−Y), +(G−Y), −(G−Y) |
+| Circle | centre (360, 288), 216 rows high | 75 % colour bars, a six-step grey scale, a white bar on black, 0.8/1.8/2.8/3.8/4.8 MHz sinusoidal definition gratings, a 75 % red square on 75 % yellow (chroma/luma delay), and a white/black step |
+
+The colour-difference amplitudes are in normalised E′ units (so 0.25 of R−Y is 0.25 × 0.877 × 700 mV ≈ 153 mV of V for PAL). The alternation itself comes from the project, not the image — see [PAL decoder-stress regions](video-signal.md#pal-decoder-stress-regions). The patterns are rendered by `videosynth-assets/scripts/generate_test_patterns.sh`.
 
 ### Clips (`mkv`)
 

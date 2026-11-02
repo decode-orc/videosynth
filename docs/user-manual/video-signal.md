@@ -141,6 +141,31 @@ NTSC (and PAL-M) place black at 7.5 IRE above blanking by default — the "setup
 
 Only `7.5` and `0.0` are accepted, and only on NTSC or PAL-M projects. Specifying it on a PAL project is a validation error.
 
+## Active picture
+
+Each active line takes one row of the source picture. The upper field (field 1 on 625-line systems, field 2 on 525-line) reads the even rows and the other field the odd rows. The 720 source pixels are mapped onto the 52 µs active window at 4fsc, the luma is painted as millivolts, and the two colour-difference components are low-pass filtered (33-tap Hamming-windowed 1.3 MHz for PAL and PAL-M, 17-tap 1.2 MHz for NTSC) and modulated onto the subcarrier. Two section keys change that path, and one output option records its result.
+
+### Horizontal mapping
+
+By default each 4fsc sample takes the nearest source pixel at or to its left — a zero-order hold, which keeps existing projects bit-exact. The hold leaves images of the source spectrum across the band. A source component at *f* reappears at 13.5 MHz − *f*, folded back by the 4fsc sampling: low-frequency picture detail in a PAL picture leaves energy around 4.4 MHz, which a chroma decoder rightly reads as cross-colour.
+
+[`horizontal_resample: bandlimited`](../reference/sections.md#horizontal_resample) replaces the hold with a polyphase Kaiser-windowed sinc at the source Nyquist frequency. It removes those images and the hold's in-band droop, for luma and chroma alike, and leaves flat areas and edge positions where the hold puts them. Use it for still-image decoder testing, where the cross-colour a decoder produces should come from the picture and not from the mapping.
+
+A [`luma_bandwidth`](../reference/sections.md#luma_bandwidth) limit removes the images above its cutoff, but not the droop, and it does not touch the chroma.
+
+### PAL decoder-stress regions
+
+A PAL decoder removes the V-switch line by line. A [`chroma_line_sign`](../reference/sections.md#chroma_line_sign) region multiplies its U or V by each line's switch sign before modulation, which builds the PAL delay-line and demodulator traps of cards such as the Philips PM5544:
+
+- **`v: follow_switch`** — the transmitted V carrier is unswitched, so the decoded V alternates line by line. A correct delay-line decoder shows grey; delay-line amplitude errors show as "Venetian blinds" and a non-orthogonal demodulator colours the bar. The unswitched V lands where U would be in the vertical spectrum, so a 2D or Transform PAL decoder cannot separate it from U by position alone.
+- **`u: follow_switch`** — U alternates with the switch: the "+V/±U anti-PAL" field.
+
+The switch sign belongs to the line and flips every frame for a given frame line, so this cannot be drawn into a still image. The bundled [`PAL_STRESS.exr`](sources.md#stills-exr) card carries the bars; its regions are set in the `pal_decoder_stress.yaml` [example project](../misc/example-projects.md#decoder-stress-and-zone-plates).
+
+### Picture truth
+
+[`output.truth: true`](../reference/output.md#truth) writes the Y, U and V that went into the modulator — after the horizontal mapping, the luma bandwidth limit, the chroma low-pass and any chroma line sign regions, and before any impairment — as planar `float32` at 4fsc over the active window, with a SQLite sidecar like the other `.meta` files. A decoder's output can then be scored against exactly what was encoded rather than against a re-derivation of videosynth's filters, which could drift silently from them. PAL, NTSC and PAL-M only; OSD text is not included. See [Output files](outputs.md#picture-truth).
+
 ## Field and line structure
 
 Fields are generated in the standard's own order and dominance; there are no project options for field order, dominance or endianness. Sample data is little-endian.
