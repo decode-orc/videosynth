@@ -98,7 +98,9 @@ cd videosynth
 
 Submodules provide the specification documents under [docs-tech/](docs-tech/).
 The media assets in [videosynth-assets/](videosynth-assets/) are vendored
-directly into this repository and need no extra checkout step. If you already
+directly into this repository and need no extra checkout step; the source,
+licence and attribution of each asset are recorded in
+[videosynth-assets/README.md](videosynth-assets/README.md#licence-record). If you already
 cloned without the specification submodules:
 
 ```bash

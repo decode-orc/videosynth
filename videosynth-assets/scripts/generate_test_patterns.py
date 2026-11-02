@@ -29,6 +29,17 @@ Patterns:
   CHROMA_ZONE_PLATE Static circular zone plate on (B-Y, R-Y) in quadrature at
                     constant luma, reaching the source Nyquist frequency at
                     the raster edges.
+  GREEN_MAGENTA_EDGES
+                    Row-to-row (horizontal) edges between green and magenta,
+                    the case where U and V both change across the edge and 2D
+                    PAL decoders leave cross-luminance dots. Three columns
+                    carry 100 % bars, 75 % bars (green brighter than magenta
+                    in both) and 75 % chroma at equal luma: solid blocks,
+                    then stripes 1, 2, 4 and 8 rows tall. Below them, the
+                    same three variants as vertical edges (solid columns and
+                    1, 2, 4 and 8 pixel stripes); at the foot, 2-row red/cyan
+                    and blue/yellow stripes at 100 % and 75 % as controls on
+                    other axes.
 
 Usage: generate_test_patterns.py <out_dir>
 Writes <out_dir>/<NAME>_<width>x<height>.gbrpf32le for every pattern/raster.
@@ -113,6 +124,19 @@ SIDE_SMALL_BOTTOM_ROWS = (436, 518)
 # reference generator. As with the strips, the image holds the + field and the
 # project's chroma_line_sign region makes it alternate.
 BURST_GATE_CELL_ROW = 2
+
+
+# GREEN_MAGENTA_EDGES layout, in frame rows and source pixels.
+EDGE_BLOCK_ROWS = 32  # solid green, magenta, green blocks
+EDGE_STRIPE_BANDS = [(1, 48), (2, 48), (4, 64), (8, 64)]  # (rows, band rows)
+EDGE_VERTICAL_BAND_ROWS = 40  # one band per variant
+EDGE_VERTICAL_ZONE = 144  # pixels: solid columns, then 1/2/4/8 px stripes
+EDGE_VERTICAL_SOLID = 48
+EDGE_VERTICAL_STRIPES = [1, 2, 4, 8]
+EDGE_CONTROL_STRIPE = 2
+# Equal-luma pair: the 75 % green and magenta chroma about this luma. At
+# 100 % chroma no equal luma keeps both inside R'G'B' [0, 1].
+EDGE_EQUAL_LUMA = 0.5
 
 
 def rgb_from_components(y, r_minus_y, b_minus_y):
@@ -353,10 +377,72 @@ def chroma_zone_plate(x, y, width, height):
                                0.2 * math.cos(phase))
 
 
+def bar_pair(level, first, second):
+    """Two bar colours at `level` from 0/1 R'G'B' masks."""
+    return (tuple(level * c for c in first), tuple(level * c for c in second))
+
+
+GREEN = (0.0, 1.0, 0.0)
+MAGENTA = (1.0, 0.0, 1.0)
+GREEN_75_CHROMA = (-0.75 * KG, -0.75 * KG)  # (R-Y, B-Y) of 75 % green
+EDGE_VARIANTS = [
+    bar_pair(1.0, GREEN, MAGENTA),
+    bar_pair(0.75, GREEN, MAGENTA),
+    (rgb_from_components(EDGE_EQUAL_LUMA, *GREEN_75_CHROMA),
+     rgb_from_components(EDGE_EQUAL_LUMA, *(-c for c in GREEN_75_CHROMA))),
+]
+EDGE_CONTROLS = [
+    ((1.0, 0.0, 0.0), (0.0, 1.0, 1.0)),  # red / cyan
+    ((0.0, 0.0, 1.0), (1.0, 1.0, 0.0)),  # blue / yellow
+]
+
+
+def horizontal_edges(y, pair):
+    """Solid blocks then row stripes; None below the horizontal section."""
+    first, second = pair
+    if y < 3 * EDGE_BLOCK_ROWS:
+        return second if (y // EDGE_BLOCK_ROWS) % 2 else first
+    top = 3 * EDGE_BLOCK_ROWS
+    for stripe, rows in EDGE_STRIPE_BANDS:
+        if y < top + rows:
+            return second if ((y - top) // stripe) % 2 else first
+        top += rows
+    return None
+
+
+def vertical_edges(x, pair):
+    first, second = pair
+    zone = x // EDGE_VERTICAL_ZONE
+    offset = x % EDGE_VERTICAL_ZONE
+    stripe = (EDGE_VERTICAL_SOLID if zone == 0
+              else EDGE_VERTICAL_STRIPES[min(zone - 1, 3)])
+    return second if (offset // stripe) % 2 else first
+
+
+def green_magenta_edges(x, y, width, height):
+    horizontal_rows = 3 * EDGE_BLOCK_ROWS + sum(
+        rows for _, rows in EDGE_STRIPE_BANDS)
+    if y < horizontal_rows:
+        column = min(x * len(EDGE_VARIANTS) // width, len(EDGE_VARIANTS) - 1)
+        return horizontal_edges(y, EDGE_VARIANTS[column])
+    y -= horizontal_rows
+    vertical_rows = EDGE_VERTICAL_BAND_ROWS * len(EDGE_VARIANTS)
+    if y < vertical_rows:
+        return vertical_edges(x, EDGE_VARIANTS[y // EDGE_VERTICAL_BAND_ROWS])
+    # Controls: red/cyan left, blue/yellow right; 100 % above 75 %.
+    y -= vertical_rows
+    level = 1.0 if y < (height - horizontal_rows - vertical_rows) // 2 \
+        else 0.75
+    first, second = EDGE_CONTROLS[0 if x < width // 2 else 1]
+    first, second = bar_pair(level, first, second)
+    return second if (y // EDGE_CONTROL_STRIPE) % 2 else first
+
+
 PATTERNS = [
     ("PAL_STRESS", pal_stress, [(720, 576)]),
     ("LUMA_ZONE_PLATE", luma_zone_plate, [(720, 576), (720, 486)]),
     ("CHROMA_ZONE_PLATE", chroma_zone_plate, [(720, 576), (720, 486)]),
+    ("GREEN_MAGENTA_EDGES", green_magenta_edges, [(720, 576), (720, 486)]),
 ]
 
 

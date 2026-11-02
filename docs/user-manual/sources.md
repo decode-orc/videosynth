@@ -98,6 +98,25 @@ The layout is `{bundled}/<type>/<raster>/<file>`, where `<type>` is `exr` or `mk
 | `PAL_STRESS.exr` | PAL decoder-stress card (PAL raster only), described below |
 | `LUMA_ZONE_PLATE.exr` | Static circular luma zone plate, rising from 0 at the centre to the source Nyquist frequency (0.5 cycles per pixel and per row) at the edges; chroma neutral |
 | `CHROMA_ZONE_PLATE.exr` | Static circular zone plate on B−Y and R−Y in quadrature (amplitude 0.2) at 50 % luma, with the same frequency sweep — shows where a decoder's U/V separation fails |
+| `GREEN_MAGENTA_EDGES.exr` | Row-to-row green/magenta edges, where U and V both change across the edge (2D PAL decoders' cross-luminance case), with their vertical-edge counterpart and red/cyan and blue/yellow controls; described below |
+| `OSM_TOWN.exr` | 1980s Ordnance Survey style map of a town centre, rendered from OpenStreetMap data: hatched buildings, cased roads, paths, contours, a grid and dense small lettering (PAL raster only) |
+| `OSM_RURAL.exr` | The same style at 6 km across: large pale fills, woodland dot fill, rivers, main roads, contours and place names (PAL raster only) |
+| `TEXT_CARD.exr` | Hard-edged, pixel-aligned overlay text in three sizes and nine colour pairs, and keyed over a photograph (PAL raster only); described below |
+| `PHOTO_BUTTERFLY.exr` | Photograph: skin tones and smooth gradients next to striped fabric and fine hair |
+| `PHOTO_GALTSTROMS.exr` | Photograph: an aerial view of an ironworks — brickwork, stonework, railings and conifers next to saturated grass |
+
+The maps, photographs and text card stand in for the maps, photographs and text overlays the BBC Domesday discs carry. The maps and photographs carry attribution requirements — "© OpenStreetMap contributors" (data under the ODbL) for the maps, and "Photo © Simon Inns, CC BY 4.0" for the photographs and the text card. The licence record in `videosynth-assets/README.md` lists the source, licence and generator of every bundled asset.
+
+`GREEN_MAGENTA_EDGES.exr` is laid out in frame rows and source pixels:
+
+| Rows | Content |
+|------|---------|
+| 0–95 | Three columns (100 % bars, 75 % bars, 75 % chroma at equal luma 0.5), each green, magenta, green blocks 32 rows deep. In the 100 % and 75 % columns green is the brighter; at 100 % chroma no equal luma keeps both colours inside R′G′B′ [0, 1] |
+| 96–319 | The same three columns as alternating green/magenta stripes 1, 2, 4 and 8 rows tall (bands of 48, 48, 64 and 64 rows) |
+| 320–439 | The vertical-edge counterpart: one 40-row band per variant, with solid 48-pixel columns and then 1, 2, 4 and 8 pixel stripes in 144-pixel zones |
+| 440–end | Controls: 2-row red/cyan stripes (left half) and blue/yellow stripes (right half), 100 % above 75 % |
+
+`TEXT_CARD.exr` has five 64-row bands — white, yellow and cyan on blue; black on white; red and green on black; yellow on red; white and magenta on green — each with one line of text at glyph heights of 8, 16 and 24 rows. The glyphs are an 8-row bitmap font, pixel-replicated at 2× and 3× with no anti-aliasing, in full-level colours as the BBC Micro's RGB overlay gives. Rows 320–575 key the same text in several colours and sizes over a strip of `PHOTO_GALTSTROMS.exr`.
 
 `PAL_STRESS.exr` is a synthetic decoder-stress card. Its layout follows the Philips PM5544, as published in F. Hendil, "Combined colour/monochrome pattern generator PM 5544" (*Philips Electronic Measuring and Microwave Notes* 1970/2), and the public-domain (CC0) Wikimedia Commons recreation of it. It carries no text or marks.
 

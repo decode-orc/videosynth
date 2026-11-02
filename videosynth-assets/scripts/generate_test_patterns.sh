@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # Generates the synthetic still test patterns rendered by
-# generate_test_patterns.py: PAL_STRESS (720x576), and LUMA_ZONE_PLATE and
-# CHROMA_ZONE_PLATE for both rasters.
+# generate_test_patterns.py: PAL_STRESS (720x576), and LUMA_ZONE_PLATE,
+# CHROMA_ZONE_PLATE and GREEN_MAGENTA_EDGES for both rasters.
 #
-# The Python renderer writes planar float32 R'G'B' frames; ffmpeg wraps them as
-# EXR without a colour conversion (gbrpf32le is the EXR encoder's native
-# format), and exrstdattr adds the metadata required by
-# docs/exr-bt601-compliance-requirements.md (FLOAT RGB, no compression, gamma 1,
-# framesPerSecond and pixelAspectRatio for the raster's standard).
+# The Python renderer writes planar float32 R'G'B' frames; write_exr.sh wraps
+# them as EXR stills with the metadata required by
+# docs/exr-bt601-compliance-requirements.md.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT_DIR="${ROOT_DIR}/scripts"
+# shellcheck source=write_exr.sh
+source "${SCRIPT_DIR}/write_exr.sh"
 
 if [[ "${VIDEOSYNTH_PATTERN_EXR_IN_SHELL:-}" != "1" ]]; then
   if ! command -v nix >/dev/null 2>&1; then
@@ -31,24 +31,6 @@ for raw in "${work_dir}"/*.gbrpf32le; do
   stem="$(basename "${raw}" .gbrpf32le)"
   name="${stem%_*}"
   raster="${stem##*_}"
-  width="${raster%x*}"
-  height="${raster#*x}"
-  # ITU-R BT.601-5 Part A: 625-line 128/117 and 525-line 108/119 pixel aspect.
-  if [[ "${height}" == "576" ]]; then
-    fps=(25 1)
-    pixel_aspect=1.094017
-  else
-    fps=(30000 1001)
-    pixel_aspect=0.907563
-  fi
-  encoded="${work_dir}/${stem}.exr"
-  ffmpeg -v error -f rawvideo -pix_fmt gbrpf32le -s:v "${width}x${height}" \
-    -i "${raw}" -frames:v 1 -c:v exr -compression none -format float \
-    -gamma 1 -y "${encoded}"
-
-  out_dir="${ROOT_DIR}/assets/exr/${raster}"
-  mkdir -p "${out_dir}"
-  exrstdattr -framesPerSecond "${fps[0]}" "${fps[1]}" \
-    -pixelAspectRatio "${pixel_aspect}" "${encoded}" "${out_dir}/${name}.exr"
-  echo "Wrote ${out_dir}/${name}.exr"
+  write_exr "${raw}" "${ROOT_DIR}/assets/exr/${raster}/${name}.exr" \
+    "${raster%x*}" "${raster#*x}"
 done
