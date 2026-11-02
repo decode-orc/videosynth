@@ -129,7 +129,7 @@ NoiseInjectionStage::NoiseInjectionStage(ILogger* logger)
     : logger_(logger), run_base_seed_(std::random_device{}()) {}
 
 bool NoiseInjectionStage::NeedsPressingLuma(const Project& project) {
-  if (!ChannelStage::IsActive(project.channel)) {
+  if (!ChannelStage::IsActive(project)) {
     return false;
   }
   return std::any_of(project.sections.begin(), project.sections.end(),
@@ -189,8 +189,8 @@ void NoiseInjectionStage::InjectNoise(
   // timing offset, applied to the picture by the channel stage, delays the
   // shared layer too. The capture layer belongs to the capture alone and stays
   // on the output grid.
-  const bool delay_shared = ChannelStage::IsActive(project.channel) &&
-                            project.channel.timing_offset_samples != 0.0;
+  const bool delay_shared =
+      project.channel.enabled && project.channel.timing_offset_samples != 0.0;
   const TimingOffsetFilter shared_delay(
       delay_shared ? project.channel.timing_offset_samples : 0.0);
   std::vector<SampleFixed> shared_delayed;

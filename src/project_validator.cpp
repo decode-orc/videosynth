@@ -19,6 +19,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "videosynth/biphase_types.h"
@@ -441,42 +442,42 @@ void ValidateDeferredLaserdiscPresetFlags(
     return;
   }
 
-  if (project.cvbs_presets.pal_laserdisc_pilot_burst &&
+  if (project.laserdisc.pilot_burst &&
       project.cvbs_presets.video_standard_preset !=
           videosynth::Standard::kPal) {
     result->is_valid = false;
     result->errors.push_back(
-        "Project configuration error: pal_laserdisc_pilot_burst can only be "
+        "Project configuration error: laserdisc.pilot_burst can only be "
         "enabled for PAL projects.");
     return;
   }
 
-  if (project.cvbs_presets.pal_laserdisc_pilot_burst &&
+  if (project.laserdisc.pilot_burst &&
       !videosynth::IsSubSyncCapableSampleEncodingPreset(
           project.cvbs_presets.sample_encoding_preset)) {
     result->warnings.push_back(
-        "pal_laserdisc_pilot_burst warning: preset '" +
+        "laserdisc.pilot_burst warning: preset '" +
         project.cvbs_presets.sample_encoding_preset +
         "' clips sub-sync excursions below -300 mV; the pilot burst trough "
         "reaches -600 mV. Use CVBS_S16_4FSC or RAW_S16_28M/RAW_S16_40M to "
         "preserve the full burst waveform.");
   }
 
-  if (project.cvbs_presets.ntsc_laserdisc_vbi_burst &&
+  if (project.laserdisc.vbi_burst &&
       project.cvbs_presets.video_standard_preset !=
           videosynth::Standard::kNtsc) {
     result->is_valid = false;
     result->errors.push_back(
-        "Project configuration error: ntsc_laserdisc_vbi_burst can only be "
+        "Project configuration error: laserdisc.vbi_burst can only be "
         "enabled for NTSC projects.");
     return;
   }
 
-  if (project.cvbs_presets.ntsc_laserdisc_vbi_burst &&
+  if (project.laserdisc.vbi_burst &&
       !videosynth::IsSubSyncCapableSampleEncodingPreset(
           project.cvbs_presets.sample_encoding_preset)) {
     result->warnings.push_back(
-        "ntsc_laserdisc_vbi_burst warning: preset '" +
+        "laserdisc.vbi_burst warning: preset '" +
         project.cvbs_presets.sample_encoding_preset +
         "' clips sub-sync excursions below sync tip; the colour burst on the "
         "broad field-sync pulses reaches -60 IRE. Use CVBS_S16_4FSC or "
@@ -624,9 +625,9 @@ bool ValidateLaserdiscSectionTypeAndCodes(
     if (section.section_type == videosynth::SectionType::kUnknown) {
       result->is_valid = false;
       result->errors.push_back(
-          "Laserdisc injection validation error: section_type must be set to "
-          "'lead_in', 'programme_area', or 'lead_out' when disc_type is "
-          "specified.");
+          "Laserdisc validation error: section '" + section.name +
+          "' carries laserdisc codes, so its laserdisc.area must be set to "
+          "'lead_in', 'programme_area' or 'lead_out'.");
       return false;
     }
 
@@ -853,9 +854,8 @@ bool ValidateLineInjectionsForSection(const videosynth::Section& section,
 }
 
 // SECAM preset rules. There is no SECAM LaserVision format (IEC 60856 defines
-// PAL discs only), so laserdisc codes, disc_type and laserdisc VITS placement
-// are rejected; the pilot burst and EFM audio are rejected by their own
-// PAL-only rules. VITS fall back to the 625-line PAL catalogue.
+// PAL discs only), so the laserdisc blocks and laserdisc VITS placement are
+// rejected. VITS fall back to the 625-line PAL catalogue.
 void ValidateSecamPreset(const videosynth::Project& project,
                          videosynth::ValidationResult* result) {
   if (result == nullptr) {
@@ -875,18 +875,20 @@ void ValidateSecamPreset(const videosynth::Project& project,
   const videosynth::ProjectLineInjections& li = project.line_injections;
   bool any_laserdisc_section = false;
   for (const videosynth::Section& section : project.sections) {
-    if (SectionHasLaserdiscInjection(section)) {
+    if (SectionHasLaserdiscInjection(section) ||
+        section.section_type != videosynth::SectionType::kUnknown) {
       any_laserdisc_section = true;
       break;
     }
   }
-  if (any_laserdisc_section || !li.disc_type.empty() ||
+  if (any_laserdisc_section ||
+      videosynth::LaserdiscBlockPresent(project.laserdisc) ||
       li.placement == videosynth::VitsPlacement::kLaserdisc) {
     result->is_valid = false;
     result->errors.push_back(
-        "Project configuration error: laserdisc line injections, "
-        "line_injections.disc_type and laserdisc VITS placement are not "
-        "available for SECAM projects.");
+        "Project configuration error: there is no SECAM LaserVision format, "
+        "so the laserdisc block, section laserdisc blocks and laserdisc VITS "
+        "placement are not available for SECAM projects.");
   }
 
   if (!li.vits.empty()) {
@@ -920,23 +922,24 @@ bool ValidateProjectLineInjections(const videosynth::Project& project,
 
   // disc_type: required when any section declares laserdisc codes; when set it
   // must be a recognised value.
+  const std::string& disc_type_text = project.laserdisc.disc_type;
   videosynth::DiscType disc_type = videosynth::DiscType::kUnknown;
-  if (li.disc_type.empty()) {
+  if (disc_type_text.empty()) {
     if (any_laserdisc_section) {
       result->is_valid = false;
       result->errors.push_back(
-          "Line injection validation error: a section declares laserdisc "
-          "codes but line_injections.disc_type is not set. Set disc_type to "
-          "'CAV' or 'CLV' at the project level.");
+          "Laserdisc validation error: a section declares laserdisc codes but "
+          "laserdisc.disc_type is not set. Set laserdisc.disc_type to 'CAV' or "
+          "'CLV'.");
       return false;
     }
   } else {
-    disc_type = videosynth::DiscTypeFromString(li.disc_type);
+    disc_type = videosynth::DiscTypeFromString(disc_type_text);
     if (disc_type == videosynth::DiscType::kUnknown) {
       result->is_valid = false;
-      result->errors.push_back("Line injection validation error: disc_type '" +
-                               li.disc_type +
-                               "' is not recognised. Expected 'CAV' or 'CLV'.");
+      result->errors.push_back(
+          "Laserdisc validation error: laserdisc.disc_type '" + disc_type_text +
+          "' is not recognised. Expected 'CAV' or 'CLV'.");
       return false;
     }
   }
@@ -1299,6 +1302,169 @@ void ValidateChannelParameters(const videosynth::Project& project,
           std::to_string(edge_smear.tau_samples) + ".");
     }
   }
+}
+
+// One breakpoint curve's bounds: x must be strictly ascending inside
+// [x_min, x_max] and every y inside [y_min, y_max].
+struct CurveBounds {
+  const char* x_name;
+  double x_min;
+  double x_max;
+  const char* y_name;
+  double y_min;
+  double y_max;
+};
+
+template <typename Point, typename Fields>
+void ValidateCurve(const std::vector<Point>& points, const std::string& prefix,
+                   const CurveBounds& bounds, Fields fields,
+                   videosynth::ValidationResult* result) {
+  if (points.empty()) {
+    result->is_valid = false;
+    result->errors.push_back(prefix + " must have at least one breakpoint.");
+    return;
+  }
+  for (std::size_t i = 0; i < points.size(); ++i) {
+    const auto [x, y] = fields(points[i]);
+    if (!std::isfinite(x) || x < bounds.x_min || x > bounds.x_max) {
+      result->is_valid = false;
+      result->errors.push_back(
+          prefix + " " + bounds.x_name + " must be in the range [" +
+          std::to_string(bounds.x_min) + ", " + std::to_string(bounds.x_max) +
+          "]; got " + std::to_string(x) + ".");
+      return;
+    }
+    if (i > 0 && x <= fields(points[i - 1]).first) {
+      result->is_valid = false;
+      result->errors.push_back(
+          prefix + " " + bounds.x_name +
+          " values must be strictly ascending; got " + std::to_string(x) +
+          " after " + std::to_string(fields(points[i - 1]).first) + ".");
+      return;
+    }
+    if (!std::isfinite(y) || y < bounds.y_min || y > bounds.y_max) {
+      result->is_valid = false;
+      result->errors.push_back(
+          prefix + " " + bounds.y_name + " must be in the range [" +
+          std::to_string(bounds.y_min) + ", " + std::to_string(bounds.y_max) +
+          "]; got " + std::to_string(y) + ".");
+      return;
+    }
+  }
+}
+
+std::pair<double, double> ResponseCurveFields(
+    const videosynth::NoiseSpectrumPoint& point) {
+  return {point.frequency_mhz, point.relative_db};
+}
+
+// The LaserVision pressing and replay channel.
+void ValidateLaserdiscChannel(const videosynth::Project& project,
+                              videosynth::ValidationResult* result) {
+  const videosynth::LaserdiscChannelParameters& channel =
+      project.laserdisc.channel;
+  if (!channel.enabled) {
+    return;
+  }
+  const videosynth::Standard standard =
+      project.cvbs_presets.video_standard_preset;
+  const double nyquist_mhz =
+      videosynth::GetTimingConstants(standard).sample_rate_4fsc_hz / 2.0e6;
+  const std::string prefix = "Laserdisc channel validation error: ";
+
+  const videosynth::GroupDelayParameters& group_delay = channel.group_delay;
+  if (group_delay.enabled) {
+    if (group_delay.preset == videosynth::GroupDelayPreset::kIec60856Nominal &&
+        standard != videosynth::Standard::kPal) {
+      result->is_valid = false;
+      result->errors.push_back(
+          prefix +
+          "group_delay.preset iec60856_nominal is the 625-line PAL "
+          "pre-distortion of IEC 60856; give a points_ns curve for other "
+          "standards.");
+    }
+    if (group_delay.preset == videosynth::GroupDelayPreset::kCustom) {
+      // A microsecond either way is far beyond any recorded pre-distortion.
+      ValidateCurve(
+          group_delay.points_ns, prefix + "group_delay.points_ns",
+          {"frequency_mhz", 0.0, nyquist_mhz, "delay_ns", -1000.0, 1000.0},
+          [](const videosynth::GroupDelayPoint& point) {
+            return std::pair{point.frequency_mhz, point.delay_ns};
+          },
+          result);
+    }
+    if (!std::isfinite(group_delay.scale) || group_delay.scale < -2.0 ||
+        group_delay.scale > 2.0) {
+      result->is_valid = false;
+      result->errors.push_back(
+          prefix + "group_delay.scale must be in the range [-2.0, 2.0]; got " +
+          std::to_string(group_delay.scale) + ".");
+    }
+  }
+
+  // A replay response may fall far but rises only modestly: no player
+  // boosts the chroma band by more than a few dB.
+  const CurveBounds response_bounds = {"frequency_mhz", 0.0,   nyquist_mhz,
+                                       "relative_db",   -60.0, 20.0};
+  if (!channel.response_db.empty() && !channel.response_by_picture.empty()) {
+    result->is_valid = false;
+    result->errors.push_back(prefix +
+                             "response_db and response_by_picture cannot both "
+                             "be set; response_by_picture already gives the "
+                             "response at every disc position.");
+  }
+  if (!channel.response_db.empty()) {
+    ValidateCurve(channel.response_db, prefix + "response_db", response_bounds,
+                  ResponseCurveFields, result);
+  }
+  const auto& by_picture = channel.response_by_picture;
+  if (!by_picture.empty()) {
+    if (by_picture.size() < 2U) {
+      result->is_valid = false;
+      result->errors.push_back(prefix +
+                               "response_by_picture needs at least two "
+                               "entries to interpolate between; use "
+                               "response_db for a single response.");
+    }
+    for (std::size_t i = 0; i < by_picture.size(); ++i) {
+      const std::string entry =
+          "response_by_picture[" + std::to_string(i) + "]";
+      if (by_picture[i].picture < 1) {
+        result->is_valid = false;
+        result->errors.push_back(prefix + entry +
+                                 ".picture must be at least 1; got " +
+                                 std::to_string(by_picture[i].picture) + ".");
+      } else if (i > 0 && by_picture[i].picture <= by_picture[i - 1].picture) {
+        result->is_valid = false;
+        result->errors.push_back(
+            prefix + entry +
+            ".picture must be greater than the previous "
+            "entry's; got " +
+            std::to_string(by_picture[i].picture) + " after " +
+            std::to_string(by_picture[i - 1].picture) + ".");
+      }
+      ValidateCurve(by_picture[i].response_db, prefix + entry + ".response_db",
+                    response_bounds, ResponseCurveFields, result);
+    }
+  }
+
+  const videosynth::Field2OffsetParameters& offset = channel.field2_offset;
+  if (offset.enabled) {
+    if (!std::isfinite(offset.x_samples) || std::abs(offset.x_samples) > 8.0) {
+      result->is_valid = false;
+      result->errors.push_back(
+          prefix +
+          "field2_offset.x_samples must be in the range [-8.0, 8.0]; got " +
+          std::to_string(offset.x_samples) + ".");
+    }
+    if (!std::isfinite(offset.y_lines) || std::abs(offset.y_lines) > 4.0) {
+      result->is_valid = false;
+      result->errors.push_back(
+          prefix +
+          "field2_offset.y_lines must be in the range [-4.0, 4.0]; got " +
+          std::to_string(offset.y_lines) + ".");
+    }
+  }
 
   const videosynth::FmBeatParameters& fm_beat = channel.fm_beat;
   if (fm_beat.enabled) {
@@ -1306,7 +1472,8 @@ void ValidateChannelParameters(const videosynth::Project& project,
         videosynth::Standard::kPal) {
       result->is_valid = false;
       result->errors.push_back(
-          "Channel validation error: fm_beat is supported for 625-line PAL "
+          "Laserdisc channel validation error: fm_beat is supported for "
+          "625-line PAL "
           "only; the beat model is fitted to PAL LaserDisc pressings.");
       return;
     }
@@ -1316,7 +1483,8 @@ void ValidateChannelParameters(const videosynth::Project& project,
         fm_beat.carrier_black_hz < 6.9e6 || fm_beat.carrier_black_hz > 7.3e6) {
       result->is_valid = false;
       result->errors.push_back(
-          "Channel validation error: fm_beat.carrier_black_hz must be in the "
+          "Laserdisc channel validation error: fm_beat.carrier_black_hz must "
+          "be in the "
           "range [6900000, 7300000]; got " +
           std::to_string(fm_beat.carrier_black_hz) + ".");
     }
@@ -1324,11 +1492,32 @@ void ValidateChannelParameters(const videosynth::Project& project,
         fm_beat.level_db > 0.0) {
       result->is_valid = false;
       result->errors.push_back(
-          "Channel validation error: fm_beat.level_db must be in the range "
+          "Laserdisc channel validation error: fm_beat.level_db must be in the "
+          "range "
           "[-60.0, 0.0]; got " +
           std::to_string(fm_beat.level_db) + ".");
     }
   }
+}
+
+// The project-wide laserdisc block and the sections' laserdisc blocks.
+void ValidateLaserdiscParameters(const videosynth::Project& project,
+                                 videosynth::ValidationResult* result) {
+  if (!videosynth::LaserdiscBlockPresent(project.laserdisc)) {
+    for (const videosynth::Section& section : project.sections) {
+      if (section.section_type != videosynth::SectionType::kUnknown ||
+          SectionHasLaserdiscInjection(section)) {
+        result->is_valid = false;
+        result->errors.push_back(
+            "Laserdisc validation error: section '" + section.name +
+            "' has a laserdisc block, but the project has no top-level "
+            "laserdisc block. Add one (with disc_type for biphase codes).");
+        return;
+      }
+    }
+    return;
+  }
+  ValidateLaserdiscChannel(project, result);
 }
 
 // Project-wide chroma gain and phase error (one capture's player).
@@ -1364,6 +1553,10 @@ void ValidateChromaErrorParameters(const videosynth::Project& project,
       {"phase_deg", chroma_error.phase_deg, -180.0, 180.0, "[-180.0, 180.0]"},
       {"line_jitter.phase_deg", jitter.phase_deg, 0.0, 10.0, "[0.0, 10.0]"},
       {"line_jitter.gain", jitter.gain, 0.0, 0.1, "[0.0, 0.1]"},
+      {"crosstalk.v_to_u", chroma_error.crosstalk.v_to_u, -0.5, 0.5,
+       "[-0.5, 0.5]"},
+      {"crosstalk.u_to_v", chroma_error.crosstalk.u_to_v, -0.5, 0.5,
+       "[-0.5, 0.5]"},
   };
   for (const RangeCheck& check : checks) {
     if (!std::isfinite(check.value) || check.value < check.min ||
@@ -1374,6 +1567,39 @@ void ValidateChromaErrorParameters(const videosynth::Project& project,
                                check.range + "; got " +
                                std::to_string(check.value) + ".");
     }
+  }
+
+  const videosynth::DifferentialParameters& differential =
+      chroma_error.differential;
+  if (differential.enabled) {
+    // Levels from below blanking to beyond white; differential errors past
+    // these bounds are no longer a working composite path.
+    const auto fields = [](const videosynth::LevelCurvePoint& point) {
+      return std::pair{point.level_ire, point.value};
+    };
+    const std::string prefix = "Chroma error validation error: differential.";
+    if (!differential.gain.empty()) {
+      ValidateCurve(differential.gain, prefix + "gain",
+                    {"level_ire", -50.0, 150.0, "gain", 0.5, 1.5}, fields,
+                    result);
+    }
+    if (!differential.phase_deg.empty()) {
+      ValidateCurve(differential.phase_deg, prefix + "phase_deg",
+                    {"level_ire", -50.0, 150.0, "phase_deg", -30.0, 30.0},
+                    fields, result);
+    }
+  }
+
+  if (chroma_error.crosstalk.enabled &&
+      chroma_error.crosstalk.alternate_with_switch &&
+      project.cvbs_presets.video_standard_preset !=
+          videosynth::Standard::kPal &&
+      project.cvbs_presets.video_standard_preset !=
+          videosynth::Standard::kPalM) {
+    result->is_valid = false;
+    result->errors.push_back(
+        "Chroma error validation error: crosstalk.alternate_with_switch "
+        "follows the PAL V-switch, so it needs a PAL or PAL-M project.");
   }
 }
 
@@ -1392,7 +1618,7 @@ void ValidateNoiseParameters(const videosynth::Section& section,
   const double nyquist_mhz =
       videosynth::GetTimingConstants(standard).sample_rate_4fsc_hz / 2.0e6;
 
-  ValidateSharedNoiseParameters(section, project.line_injections.disc_type,
+  ValidateSharedNoiseParameters(section, project.laserdisc.disc_type,
                                 nyquist_mhz, result);
   if (!result->is_valid || !section.noise.enabled) {
     return;
@@ -1563,6 +1789,92 @@ void ValidateLumaBandwidth(const videosynth::Section& section,
                              std::to_string(cutoff_max_mhz) +
                              "] (2 f_sc less half the transition); got " +
                              std::to_string(bandwidth.cutoff_mhz) + ".");
+  }
+}
+
+// Source raster height for a standard: 576 rows on 625-line systems, 486 on
+// 525-line systems (the raster RasterMatchesStandard requires).
+int SourceRasterHeight(videosynth::Standard standard) {
+  return videosynth::Is625LineStandard(standard) ? 576 : 486;
+}
+
+// Source raster width, shared by every supported standard.
+constexpr int kSourceRasterWidth = 720;
+
+// Checks `chroma_line_sign:`: PAL or PAL-M only, every region inside the
+// source raster and following the V-switch on at least one component.
+void ValidateChromaLineSign(const videosynth::Section& section,
+                            const videosynth::Project& project,
+                            videosynth::ValidationResult* result) {
+  if (result == nullptr || section.chroma_line_sign.empty()) {
+    return;
+  }
+  const std::string context =
+      "Picture validation error in section '" + section.name + "': ";
+  const videosynth::Standard standard =
+      project.cvbs_presets.video_standard_preset;
+  if (standard != videosynth::Standard::kPal &&
+      standard != videosynth::Standard::kPalM) {
+    result->is_valid = false;
+    result->errors.push_back(
+        context +
+        "chroma_line_sign requires a PAL or PAL-M project; the V-switch it "
+        "follows exists only in PAL colour encoding.");
+    return;
+  }
+  const int raster_height = SourceRasterHeight(standard);
+  for (std::size_t index = 0; index < section.chroma_line_sign.size();
+       ++index) {
+    const videosynth::ChromaLineSignRegion& region =
+        section.chroma_line_sign[index];
+    const std::string entry = "chroma_line_sign[" + std::to_string(index) + "]";
+    if (region.width <= 0 || region.height <= 0 || region.x < 0 ||
+        region.y < 0 || region.x + region.width > kSourceRasterWidth ||
+        region.y + region.height > raster_height) {
+      result->is_valid = false;
+      result->errors.push_back(
+          context + entry + ".region must have a positive width and height " +
+          "and lie inside the " + std::to_string(kSourceRasterWidth) + "x" +
+          std::to_string(raster_height) + " source raster; got x=" +
+          std::to_string(region.x) + " y=" + std::to_string(region.y) +
+          " width=" + std::to_string(region.width) +
+          " height=" + std::to_string(region.height) + ".");
+      return;
+    }
+    if (region.u != videosynth::ChromaLineSignMode::kFollowSwitch &&
+        region.v != videosynth::ChromaLineSignMode::kFollowSwitch) {
+      result->is_valid = false;
+      result->errors.push_back(
+          context + entry +
+          " changes nothing; set u or v (or both) to follow_switch.");
+      return;
+    }
+  }
+}
+
+// Checks `output.truth:`. The truth carries the quadrature colour-difference
+// components, which SECAM does not transmit; OSD text is drawn after the
+// truth is taken, so a project with overlays gets a warning.
+void ValidateTruthOutput(const videosynth::Project& project,
+                         videosynth::ValidationResult* result) {
+  if (result == nullptr || !project.output.truth) {
+    return;
+  }
+  if (project.cvbs_presets.video_standard_preset ==
+      videosynth::Standard::kSecam) {
+    result->is_valid = false;
+    result->errors.push_back(
+        "Project configuration error: output.truth requires a PAL, NTSC or "
+        "PAL-M project; SECAM has no U/V quadrature components.");
+    return;
+  }
+  for (const videosynth::Section& section : project.sections) {
+    if (!section.osd.overlays.empty()) {
+      result->warnings.push_back(
+          "Section '" + section.name +
+          "': output.truth excludes OSD overlays, which are drawn after the "
+          "truth is taken.");
+    }
   }
 }
 
@@ -2090,20 +2402,21 @@ bool ProjectDeclaresChannelPair(const videosynth::Project& project, int pair) {
 // the programme-area track layout satisfies the CD-DA/LaserDisc track rules.
 void ValidateEfmAudioOutput(const videosynth::Project& project,
                             videosynth::ValidationResult* result) {
-  if (result == nullptr || !project.output.efm_audio.enabled) {
+  if (result == nullptr || !project.laserdisc.efm_audio.enabled) {
     return;
   }
 
-  const int pair = project.output.efm_audio.pair;
+  const int pair = project.laserdisc.efm_audio.pair;
   if (pair < 0 || pair >= videosynth::kMaxAudioChannelPairs) {
     result->is_valid = false;
     result->errors.push_back(
-        "Project configuration error: output.efm_audio.pair must be in [0, " +
+        "Project configuration error: laserdisc.efm_audio.pair must be in "
+        "[0, " +
         std::to_string(videosynth::kMaxAudioChannelPairs - 1) + "]; got " +
         std::to_string(pair) + ".");
   } else if (!ProjectDeclaresChannelPair(project, pair)) {
     result->warnings.push_back(
-        "output.efm_audio.pair " + std::to_string(pair) +
+        "laserdisc.efm_audio.pair " + std::to_string(pair) +
         " is not declared by any section; no EFM stream is written.");
   }
 
@@ -2115,7 +2428,7 @@ void ValidateEfmAudioOutput(const videosynth::Project& project,
   if (!videosynth::StandardHasLaserdiscDigitalAudio(standard)) {
     result->is_valid = false;
     result->errors.push_back(
-        "Project configuration error: output.efm_audio requires a PAL, NTSC "
+        "Project configuration error: laserdisc.efm_audio requires a PAL, NTSC "
         "or PAL_M video_standard_preset; got '" +
         videosynth::StandardToString(standard) + "'.");
     return;
@@ -2141,7 +2454,7 @@ void ValidateEfmAudioOutput(const videosynth::Project& project,
   if (static_cast<int>(programme_sections.size()) > kMaxEfmTracks) {
     result->is_valid = false;
     result->errors.push_back(
-        "Project configuration error: output.efm_audio supports at most " +
+        "Project configuration error: laserdisc.efm_audio supports at most " +
         std::to_string(kMaxEfmTracks) + " tracks; the project has " +
         std::to_string(programme_sections.size()) +
         " programme_area section(s).");
@@ -2161,7 +2474,7 @@ void ValidateEfmAudioOutput(const videosynth::Project& project,
         static_cast<double>(section.duration_frames) / frame_rate_hz;
     if (section_seconds < minimum_seconds) {
       result->warnings.push_back(
-          "output.efm_audio: programme_area section '" + section.name +
+          "laserdisc.efm_audio: programme_area section '" + section.name +
           "' is shorter than the " +
           std::to_string(static_cast<int>(minimum_seconds)) +
           " s minimum length required for EFM track " +
@@ -2171,7 +2484,8 @@ void ValidateEfmAudioOutput(const videosynth::Project& project,
 
   if (!has_lead_in) {
     result->warnings.push_back(
-        "output.efm_audio: the project has no lead_in section, so no table of "
+        "laserdisc.efm_audio: the project has no lead_in section, so no table "
+        "of "
         "contents will be emitted.");
   }
 }
@@ -2191,7 +2505,7 @@ void ValidateEfmAudioOutput(const videosynth::Project& project,
 void ValidateChapterLengths(const videosynth::Project& project,
                             videosynth::ValidationResult* result) {
   if (result == nullptr ||
-      videosynth::DiscTypeFromString(project.line_injections.disc_type) !=
+      videosynth::DiscTypeFromString(project.laserdisc.disc_type) !=
           videosynth::DiscType::kCAV) {
     return;
   }
@@ -2265,7 +2579,7 @@ void ValidatePictureNumberRange(const videosynth::Project& project,
                                 const std::vector<int>& source_frame_counts,
                                 videosynth::ValidationResult* result) {
   if (result == nullptr ||
-      videosynth::DiscTypeFromString(project.line_injections.disc_type) !=
+      videosynth::DiscTypeFromString(project.laserdisc.disc_type) !=
           videosynth::DiscType::kCAV) {
     return;
   }
@@ -2425,7 +2739,7 @@ void ValidateSectionOrdering(const videosynth::Project& project,
       result->is_valid = false;
       result->errors.push_back(
           "Section ordering validation error: section '" + section.name +
-          "' must have section_type 'programme_area' because it is " +
+          "' must have laserdisc.area 'programme_area' because it is " +
           position + ".");
     }
   }
@@ -2485,6 +2799,7 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
   ValidateDeferredLaserdiscPresetFlags(project, &result);
   ValidateSecamPreset(project, &result);
   ValidateChannelParameters(project, &result);
+  ValidateLaserdiscParameters(project, &result);
   ValidateChromaErrorParameters(project, &result);
 
   if (project.cvbs_presets.video_standard_preset != Standard::kNtsc &&
@@ -2545,6 +2860,7 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
   }
 
   ValidateEfmAudioOutput(project, &result);
+  ValidateTruthOutput(project, &result);
 
   if (project.sections.empty()) {
     result.is_valid = false;
@@ -2583,13 +2899,13 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
 
     if (section.type == "progressive") {
       if (!ValidateLaserdiscInjectionStructure(
-              section, project.line_injections.disc_type, &result)) {
+              section, project.laserdisc.disc_type, &result)) {
         break;
       }
 
       if (!ValidateLaserdiscSectionTypeAndCodes(
               section, project.cvbs_presets.video_standard_preset,
-              project.line_injections.disc_type, &result)) {
+              project.laserdisc.disc_type, &result)) {
         break;
       }
 
@@ -2609,6 +2925,11 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
       }
 
       ValidateLumaBandwidth(section, project, &result);
+      if (!result.is_valid) {
+        break;
+      }
+
+      ValidateChromaLineSign(section, project, &result);
       if (!result.is_valid) {
         break;
       }

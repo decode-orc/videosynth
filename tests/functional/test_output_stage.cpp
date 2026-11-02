@@ -543,11 +543,13 @@ TEST(OutputStageTest, WritesCompositeSamplesUsingUint16EncodingPreset) {
   std::vector<std::string> errors;
   ASSERT_TRUE(output.Write(project, y, c, &errors));
 
+  // The 10-bit codes (256 blanking, 844 white, 4 clamped floor) stored as
+  // unsigned 16-bit words shifted left 6 bits.
   const std::vector<std::int16_t> samples = ReadSamples(video_path, 3);
   ASSERT_EQ(samples.size(), 3U);
-  EXPECT_EQ(samples[0], 256);
-  EXPECT_EQ(samples[1], 844);
-  EXPECT_EQ(samples[2], 4);
+  EXPECT_EQ(static_cast<std::uint16_t>(samples[0]), 256 * 64);
+  EXPECT_EQ(static_cast<std::uint16_t>(samples[1]), 844 * 64);
+  EXPECT_EQ(static_cast<std::uint16_t>(samples[2]), 4 * 64);
   EXPECT_EQ(std::filesystem::file_size(video_path),
             frame_span * sizeof(std::int16_t));
 
@@ -556,6 +558,49 @@ TEST(OutputStageTest, WritesCompositeSamplesUsingUint16EncodingPreset) {
   EXPECT_EQ(metadata.sample_encoding_preset, "CVBS_U16_4FSC");
 
   std::filesystem::remove(video_path);
+  std::filesystem::remove(metadata_path);
+}
+
+TEST(OutputStageTest, WritesYcSamplesUsingUint16EncodingPreset) {
+  OutputStage output;
+  Project project = MakeProject(Standard::kPal);
+  project.cvbs_presets.sample_encoding_preset = "CVBS_U16_4FSC";
+  project.output.signal_type = "yc";
+  const std::size_t frame_span =
+      static_cast<std::size_t>(SamplesPerFrame4fsc(Standard::kPal));
+
+  std::vector<SampleFixed> y(frame_span, MillivoltsToSampleFixed(0.0));
+  std::vector<SampleFixed> c(frame_span, MillivoltsToSampleFixed(0.0));
+  y[0] = MillivoltsToSampleFixed(700.0);
+
+  const std::filesystem::path luma_path =
+      std::filesystem::temp_directory_path() /
+      "videosynth_output_stage_u16_yc.cvbsy";
+  const std::filesystem::path chroma_path =
+      std::filesystem::temp_directory_path() /
+      "videosynth_output_stage_u16_yc.cvbsc";
+  const std::filesystem::path metadata_path =
+      std::filesystem::temp_directory_path() /
+      "videosynth_output_stage_u16_yc.meta";
+  project.output.video_path = luma_path.string();
+  project.output.metadata_path = metadata_path.string();
+  std::filesystem::remove(luma_path);
+  std::filesystem::remove(chroma_path);
+  std::filesystem::remove(metadata_path);
+
+  std::vector<std::string> errors;
+  ASSERT_TRUE(output.Write(project, y, c, &errors));
+
+  const std::vector<std::int16_t> luma = ReadSamples(luma_path, 1);
+  ASSERT_EQ(luma.size(), 1U);
+  EXPECT_EQ(static_cast<std::uint16_t>(luma[0]), 844 * 64);
+  // Chroma zero is code 512, scaled the same way as luma.
+  const std::vector<std::int16_t> chroma = ReadSamples(chroma_path, 1);
+  ASSERT_EQ(chroma.size(), 1U);
+  EXPECT_EQ(static_cast<std::uint16_t>(chroma[0]), 512 * 64);
+
+  std::filesystem::remove(luma_path);
+  std::filesystem::remove(chroma_path);
   std::filesystem::remove(metadata_path);
 }
 
@@ -992,8 +1037,8 @@ TEST(OutputStageTest, DoesNotWriteEfmMetadataIntoTheCoreDatabase) {
   pair2.left.enabled = true;
   section.audio_channel_pairs = {pair2};
   project.sections.push_back(section);
-  project.output.efm_audio.enabled = true;
-  project.output.efm_audio.pair = 2;
+  project.laserdisc.efm_audio.enabled = true;
+  project.laserdisc.efm_audio.pair = 2;
 
   const std::size_t frame_span =
       static_cast<std::size_t>(SamplesPerFrame4fsc(Standard::kPal));

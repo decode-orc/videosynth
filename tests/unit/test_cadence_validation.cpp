@@ -262,7 +262,7 @@ Section WithPictureNumbers(Section section, int start_value) {
 
 Project MakeCavProject() {
   Project project = MakeProject(Standard::kNtsc);
-  project.line_injections.disc_type = "CAV";
+  project.laserdisc.disc_type = "CAV";
   project.line_injections.vits.push_back(VitsInjection{"virs", {19, 282}});
   return project;
 }

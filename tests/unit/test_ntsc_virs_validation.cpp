@@ -59,7 +59,7 @@ Section::LineInjection MakeLaserdiscInjection() {
 TEST(NtscVirsValidationTest, RejectsNtscLaserdiscProjectWithoutVirs) {
   // IEC 60857 §9.1.3: VIR signal is mandatory for colour on NTSC laserdisc.
   Project p = MakeBaseNtscProject();
-  p.line_injections.disc_type = "CAV";
+  p.laserdisc.disc_type = "CAV";
   Section s = MakeSection();
   s.line_injections.push_back(MakeLaserdiscInjection());
   // Deliberately omit the project virs.
@@ -75,7 +75,7 @@ TEST(NtscVirsValidationTest, RejectsNtscLaserdiscProjectWithoutVirs) {
 
 TEST(NtscVirsValidationTest, AcceptsNtscLaserdiscProjectWithVirs) {
   Project p = MakeBaseNtscProject();
-  p.line_injections.disc_type = "CAV";
+  p.laserdisc.disc_type = "CAV";
   p.line_injections.vits.push_back(VitsInjection{"virs", {19, 282}});
   Section s = MakeSection();
   s.line_injections.push_back(MakeLaserdiscInjection());
@@ -90,6 +90,7 @@ TEST(NtscVirsValidationTest, AcceptsNtscProjectWithoutLaserdiscAndWithoutVirs) {
   // No laserdisc disc_type → not a laserdisc project → no VIRS requirement.
   Project p = MakeBaseNtscProject();
   Section s = MakeSection();
+  s.section_type = SectionType::kUnknown;
   // No injections at all.
   p.sections.push_back(s);
 
@@ -101,7 +102,7 @@ TEST(NtscVirsValidationTest, AcceptsNtscProjectWithoutLaserdiscAndWithoutVirs) {
 TEST(NtscVirsValidationTest, AcceptsPalLaserdiscProjectWithoutVirs) {
   // PAL laserdisc projects do not require virs (IEC 60856 only).
   Project p = MakeBasePalProject();
-  p.line_injections.disc_type = "CAV";
+  p.laserdisc.disc_type = "CAV";
   Section s = MakeSection();
   s.line_injections.push_back(MakeLaserdiscInjection());
   p.sections.push_back(s);
@@ -116,7 +117,7 @@ TEST(NtscVirsValidationTest,
   // The VIRS requirement is project-wide; multiple laserdisc sections with no
   // project virs are rejected once.
   Project p = MakeBaseNtscProject();
-  p.line_injections.disc_type = "CAV";
+  p.laserdisc.disc_type = "CAV";
 
   Section s1 = MakeSection();
   s1.line_injections.push_back(MakeLaserdiscInjection());
@@ -136,7 +137,7 @@ TEST(NtscVirsValidationTest,
 TEST(NtscVirsValidationTest,
      AcceptsNtscMultipleLaserdiscSectionsWithProjectVirs) {
   Project p = MakeBaseNtscProject();
-  p.line_injections.disc_type = "CAV";
+  p.laserdisc.disc_type = "CAV";
   p.line_injections.vits.push_back(VitsInjection{"virs", {19, 282}});
 
   Section s1 = MakeSection();
@@ -155,7 +156,7 @@ TEST(NtscVirsValidationTest,
 TEST(NtscVirsValidationTest, AcceptsNtscLaserdiscProjectWithVirsOnLine19Only) {
   // VIRS may target line 19 (field 1) only; line 282 is optional.
   Project p = MakeBaseNtscProject();
-  p.line_injections.disc_type = "CAV";
+  p.laserdisc.disc_type = "CAV";
   p.line_injections.vits.push_back(VitsInjection{"virs", {19}});
   Section s = MakeSection();
   s.line_injections.push_back(MakeLaserdiscInjection());
@@ -169,7 +170,7 @@ TEST(NtscVirsValidationTest, AcceptsNtscLaserdiscProjectWithVirsOnLine19Only) {
 TEST(NtscVirsValidationTest, AcceptsNtscLaserdiscProjectWithVirsOnLine282Only) {
   // VIRS may target line 282 (field 2) only.
   Project p = MakeBaseNtscProject();
-  p.line_injections.disc_type = "CAV";
+  p.laserdisc.disc_type = "CAV";
   p.line_injections.vits.push_back(VitsInjection{"virs", {282}});
   Section s = MakeSection();
   s.line_injections.push_back(MakeLaserdiscInjection());
@@ -182,7 +183,7 @@ TEST(NtscVirsValidationTest, AcceptsNtscLaserdiscProjectWithVirsOnLine282Only) {
 
 TEST(NtscVirsValidationTest, VirsMissingErrorMessageContainsIecReference) {
   Project p = MakeBaseNtscProject();
-  p.line_injections.disc_type = "CAV";
+  p.laserdisc.disc_type = "CAV";
   Section s = MakeSection();
   s.line_injections.push_back(MakeLaserdiscInjection());
   p.sections.push_back(s);
@@ -199,7 +200,7 @@ TEST(NtscVirsValidationTest, VirsMissingDoesNotBlockAfterReservedLineError) {
   // When an incompatible VITS type is on a reserved line, the reserved-line
   // error fires first (before the VIRS check).
   Project p = MakeBaseNtscProject();
-  p.line_injections.disc_type = "CAV";
+  p.laserdisc.disc_type = "CAV";
   p.line_injections.vits.push_back(VitsInjection{"ntc7-composite", {17}});
   Section s = MakeSection();
   s.line_injections.push_back(MakeLaserdiscInjection());

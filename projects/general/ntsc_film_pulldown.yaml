@@ -20,29 +20,30 @@ output:
   video_path: "{output}/videosynth_ntsc_film_pulldown.cvbs"
 
 line_injections:
-  disc_type: CAV
   vits:
     - vits_type: virs
       target_lines: [19, 282]
+
+laserdisc:
+  disc_type: CAV
 
 sections:
   - name: Film
     type: progressive
     source: "{bundled}/mkv/720x486/FILM_COUNTER_24P.mkv"
     duration_frames: all
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 1
+        - code_type: chapter_number
+          chapter: 1
+        - code_type: fm_picture_number
+        - code_type: fm_white_flag
     cadence:
       pattern: "2:3"
       phase: A
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 1
-          - code_type: chapter_number
-            chapter: 1
-          - code_type: fm_picture_number
-          - code_type: fm_white_flag
     osd:
       overlays:
         - text: "FILM:{film_frame} {cadence} PN:{picture_number}"

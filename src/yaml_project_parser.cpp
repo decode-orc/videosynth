@@ -11,8 +11,10 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <array>
 #include <exception>
 #include <set>
+#include <utility>
 
 #include "videosynth/biphase_types.h"
 #include "videosynth/path_resolution.h"
@@ -43,6 +45,27 @@ bool ValidateAllowedKeys(const YAML::Node& node,
   }
 
   return errors->empty();
+}
+
+// Reports each key of `moved` that `node` still carries, naming the place it
+// moved to when the laserdisc settings were gathered into `laserdisc:`
+// blocks. Returns false when any was found.
+bool ReportMovedKeys(
+    const YAML::Node& node,
+    const std::vector<std::pair<std::string, std::string>>& moved,
+    const std::string& context, std::vector<std::string>* errors) {
+  if (!node || !node.IsMap()) {
+    return true;
+  }
+  bool clean = true;
+  for (const auto& [key, destination] : moved) {
+    if (node[key]) {
+      errors->push_back(context + "." + key + " has moved to " + destination +
+                        ".");
+      clean = false;
+    }
+  }
+  return clean;
 }
 
 bool ParseDurationFrames(const YAML::Node& section_node, Section* section,
@@ -236,6 +259,13 @@ bool ParseSharedNoise(const YAML::Node& shared_node,
   return true;
 }
 
+bool ParseScalarString(const YAML::Node& node, const std::string& key,
+                       const std::string& context, std::string* value,
+                       std::vector<std::string>* errors);
+bool ParseInteger(const YAML::Node& node, const std::string& key,
+                  const std::string& context, int* value,
+                  std::vector<std::string>* errors);
+
 bool ParseLineInjectionCodes(const YAML::Node& codes_node,
                              Section::LineInjection* injection,
                              std::vector<std::string>* errors) {
@@ -246,41 +276,58 @@ bool ParseLineInjectionCodes(const YAML::Node& codes_node,
 
   for (const YAML::Node& code_node : codes_node) {
     if (!code_node.IsMap()) {
-      errors->push_back("line_injections[].codes[] must be a map/object.");
+      errors->push_back("laserdisc.codes[] must be a map/object.");
       return false;
     }
 
     const std::set<std::string> code_keys = {"code_type", "start_value",
                                              "chapter", "programme_status",
                                              "users_code"};
-    ValidateAllowedKeys(code_node, code_keys, "line_injections[].codes[]",
-                        errors);
+    ValidateAllowedKeys(code_node, code_keys, "laserdisc.codes[]", errors);
     if (!errors->empty()) {
       return false;
     }
 
+    const std::string context = "laserdisc.codes[]";
     Section::LineInjectionCode code;
-    code.code_type = code_node["code_type"].as<std::string>("");
+    if (!code_node["code_type"]) {
+      errors->push_back(context + " is missing required field: 'code_type'.");
+      return false;
+    }
+    if (!ParseScalarString(code_node, "code_type", context, &code.code_type,
+                           errors)) {
+      return false;
+    }
     if (code.code_type.empty()) {
-      errors->push_back(
-          "line_injections[].codes[] is missing required field: 'code_type'.");
+      errors->push_back(context + ".code_type must not be empty.");
       return false;
     }
 
     if (code_node["start_value"]) {
-      code.start_value = code_node["start_value"].as<int>();
+      if (!ParseInteger(code_node, "start_value", context, &code.start_value,
+                        errors)) {
+        return false;
+      }
       code.start_value_specified = true;
     }
     if (code_node["chapter"]) {
-      code.chapter = code_node["chapter"].as<int>();
+      if (!ParseInteger(code_node, "chapter", context, &code.chapter, errors)) {
+        return false;
+      }
       code.chapter_specified = true;
     }
     if (code_node["programme_status"]) {
-      code.programme_status = code_node["programme_status"].as<std::string>("");
+      if (!ParseScalarString(code_node, "programme_status", context,
+                             &code.programme_status, errors)) {
+        return false;
+      }
       code.programme_status_specified = true;
     }
     if (code_node["users_code"]) {
-      code.users_code = code_node["users_code"].as<std::string>("");
+      if (!ParseScalarString(code_node, "users_code", context, &code.users_code,
+                             errors)) {
+        return false;
+      }
       code.users_code_specified = true;
     }
 
@@ -313,11 +360,9 @@ bool ParseLineInjections(const YAML::Node& section_node, Section* section,
       return false;
     }
 
-    // Section-level line injections carry only laserdisc codes (and vitc).
-    // The VITS set and the disc_type (CAV/CLV) are project-wide and live in the
-    // top-level `line_injections:` block, so they are not accepted here.
-    const std::set<std::string> injection_keys = {"type", "target_lines",
-                                                  "codes"};
+    // Section-level line injections carry vitc only. Laserdisc codes live in
+    // the section's `laserdisc:` block, and the VITS set is project-wide.
+    const std::set<std::string> injection_keys = {"type", "target_lines"};
     ValidateAllowedKeys(injection_node, injection_keys, "line_injections[]",
                         errors);
     if (!errors->empty()) {
@@ -328,6 +373,12 @@ bool ParseLineInjections(const YAML::Node& section_node, Section* section,
     injection.type = injection_node["type"].as<std::string>("");
     if (injection.type.empty()) {
       errors->push_back("line_injections[] is missing required field: 'type'.");
+      return false;
+    }
+    if (injection.type == "laserdisc") {
+      errors->push_back(
+          "line_injections[] type 'laserdisc' has moved: laserdisc codes go "
+          "in the section's laserdisc.codes list.");
       return false;
     }
 
@@ -341,11 +392,6 @@ bool ParseLineInjections(const YAML::Node& section_node, Section* section,
       for (const YAML::Node& target_line : target_lines_node) {
         injection.target_lines.push_back(target_line.as<int>());
       }
-    }
-
-    if (injection_node["codes"] &&
-        !ParseLineInjectionCodes(injection_node["codes"], &injection, errors)) {
-      return false;
     }
 
     section->line_injections.push_back(injection);
@@ -482,6 +528,181 @@ bool ParseCadence(const YAML::Node& node, CadenceParameters* cadence,
   return true;
 }
 
+// Parses `section.horizontal_resample:`.
+bool ParseHorizontalResample(const YAML::Node& section_node,
+                             HorizontalResample* resample,
+                             std::vector<std::string>* errors) {
+  const std::string context = "section";
+  std::string text;
+  if (!ParseScalarString(section_node, "horizontal_resample", context, &text,
+                         errors)) {
+    return false;
+  }
+  if (text == "nearest") {
+    *resample = HorizontalResample::kNearest;
+  } else if (text == "bandlimited") {
+    *resample = HorizontalResample::kBandlimited;
+  } else {
+    errors->push_back(context +
+                      ".horizontal_resample has unrecognised value '" + text +
+                      "'. Expected one of: nearest, bandlimited.");
+    return false;
+  }
+  return true;
+}
+
+// Reads one integer key into *value. Returns false, with an error naming the
+// key, when the value is not an integer.
+bool ParseInteger(const YAML::Node& node, const std::string& key,
+                  const std::string& context, int* value,
+                  std::vector<std::string>* errors) {
+  try {
+    *value = node[key].as<int>();
+  } catch (const YAML::Exception&) {
+    errors->push_back(context + "." + key + " must be an integer.");
+    return false;
+  }
+  return true;
+}
+
+// Parses a section's `laserdisc:` block: the disc area the section belongs
+// to and the biphase codes it carries. The codes become the section's
+// laserdisc line injection.
+bool ParseSectionLaserdisc(const YAML::Node& section_node, Section* section,
+                           std::vector<std::string>* errors) {
+  if (!section_node["laserdisc"]) {
+    return true;
+  }
+  const YAML::Node node = section_node["laserdisc"];
+  if (!node.IsMap()) {
+    errors->push_back("section field 'laserdisc' must be a map/object.");
+    return false;
+  }
+  const std::set<std::string> keys = {"area", "codes"};
+  ValidateAllowedKeys(node, keys, "section.laserdisc", errors);
+  if (!errors->empty()) {
+    return false;
+  }
+  if (!node["area"] && !node["codes"]) {
+    errors->push_back(
+        "section.laserdisc must set at least one of: area, codes.");
+    return false;
+  }
+
+  if (node["area"]) {
+    std::string area;
+    if (!ParseScalarString(node, "area", "section.laserdisc", &area, errors)) {
+      return false;
+    }
+    section->section_type = SectionTypeFromString(area);
+    if (section->section_type == SectionType::kUnknown) {
+      errors->push_back("section.laserdisc.area has unrecognised value '" +
+                        area +
+                        "'. Expected one of: lead_in, programme_area, "
+                        "lead_out.");
+      return false;
+    }
+  }
+
+  if (node["codes"]) {
+    if (!node["codes"].IsSequence()) {
+      errors->push_back("section.laserdisc.codes must be a list/sequence.");
+      return false;
+    }
+    Section::LineInjection injection;
+    injection.type = "laserdisc";
+    if (!ParseLineInjectionCodes(node["codes"], &injection, errors)) {
+      return false;
+    }
+    section->line_injections.push_back(std::move(injection));
+  }
+  return true;
+}
+
+// Parses `section.chroma_line_sign:`, the list of regions whose U or V
+// follows the PAL V-switch. Geometry and standard rules are the validator's.
+bool ParseChromaLineSign(const YAML::Node& node,
+                         std::vector<ChromaLineSignRegion>* regions,
+                         std::vector<std::string>* errors) {
+  const std::string context = "section.chroma_line_sign";
+  if (!node.IsSequence()) {
+    errors->push_back(context + " must be a list/sequence.");
+    return false;
+  }
+  for (const YAML::Node& entry : node) {
+    const std::string entry_context = context + "[]";
+    if (!entry.IsMap()) {
+      errors->push_back(entry_context + " must be a map/object.");
+      return false;
+    }
+    const std::set<std::string> keys = {"region", "u", "v"};
+    ValidateAllowedKeys(entry, keys, entry_context, errors);
+    if (!errors->empty()) {
+      return false;
+    }
+    const YAML::Node region_node = entry["region"];
+    if (!region_node) {
+      errors->push_back(entry_context +
+                        " is missing required field: 'region'.");
+      return false;
+    }
+    const std::string region_context = entry_context + ".region";
+    if (!region_node.IsMap()) {
+      errors->push_back(region_context + " must be a map/object.");
+      return false;
+    }
+    const std::set<std::string> region_keys = {"x", "y", "width", "height"};
+    ValidateAllowedKeys(region_node, region_keys, region_context, errors);
+    if (!errors->empty()) {
+      return false;
+    }
+
+    ChromaLineSignRegion region;
+    const std::array<std::pair<const char*, int*>, 4> geometry = {{
+        {"x", &region.x},
+        {"y", &region.y},
+        {"width", &region.width},
+        {"height", &region.height},
+    }};
+    for (const auto& [key, value] : geometry) {
+      if (!region_node[key]) {
+        errors->push_back(region_context + " is missing required field: '" +
+                          key + "'.");
+        return false;
+      }
+      if (!ParseInteger(region_node, key, region_context, value, errors)) {
+        return false;
+      }
+    }
+
+    const std::array<std::pair<const char*, ChromaLineSignMode*>, 2> axes = {{
+        {"u", &region.u},
+        {"v", &region.v},
+    }};
+    for (const auto& [key, mode] : axes) {
+      if (!entry[key]) {
+        continue;
+      }
+      std::string text;
+      if (!ParseScalarString(entry, key, entry_context, &text, errors)) {
+        return false;
+      }
+      if (text == "normal") {
+        *mode = ChromaLineSignMode::kNormal;
+      } else if (text == "follow_switch") {
+        *mode = ChromaLineSignMode::kFollowSwitch;
+      } else {
+        errors->push_back(entry_context + "." + key +
+                          " has unrecognised value '" + text +
+                          "'. Expected one of: normal, follow_switch.");
+        return false;
+      }
+    }
+    regions->push_back(region);
+  }
+  return true;
+}
+
 // Parses one `section.dropouts.random:` or `section.dropouts.scratch:` block.
 template <typename DropoutBlock>
 bool ParseDropoutType(const YAML::Node& node, const std::string& name,
@@ -555,19 +776,19 @@ bool ParseEdgeSmear(const YAML::Node& node, EdgeSmearParameters* edge_smear,
   return true;
 }
 
-// Parses `channel.fm_beat:`, the PAL FM-beat herringbone.
+// Parses `laserdisc.channel.fm_beat:`, the PAL FM-beat herringbone.
 bool ParseFmBeat(const YAML::Node& node, FmBeatParameters* fm_beat,
                  std::vector<std::string>* errors) {
   if (!node.IsMap()) {
-    errors->push_back("channel.fm_beat must be a map/object.");
+    errors->push_back("laserdisc.channel.fm_beat must be a map/object.");
     return false;
   }
   const std::set<std::string> keys = {"carrier_black_hz", "level_db"};
-  ValidateAllowedKeys(node, keys, "channel.fm_beat", errors);
+  ValidateAllowedKeys(node, keys, "laserdisc.channel.fm_beat", errors);
   if (!errors->empty()) {
     return false;
   }
-  const std::string context = "channel.fm_beat";
+  const std::string context = "laserdisc.channel.fm_beat";
   if (!node["level_db"]) {
     errors->push_back(context + " is missing required field: 'level_db'.");
     return false;
@@ -585,8 +806,7 @@ bool ParseFmBeat(const YAML::Node& node, FmBeatParameters* fm_beat,
 }
 
 // Parses the project-wide `channel:` block: impairments of the pressing that
-// apply to every frame (the FM beat, the edge smear and the sub-sample timing
-// offset).
+// apply to every frame (the edge smear and the sub-sample timing offset).
 bool ParseChannel(const YAML::Node& root, Project* project,
                   std::vector<std::string>* errors) {
   if (!root["channel"]) {
@@ -599,18 +819,20 @@ bool ParseChannel(const YAML::Node& root, Project* project,
     return false;
   }
 
-  const std::set<std::string> keys = {"timing_offset_samples", "edge_smear",
-                                      "fm_beat"};
+  if (!ReportMovedKeys(node, {{"fm_beat", "laserdisc.channel.fm_beat"}},
+                       "channel", errors)) {
+    return false;
+  }
+  const std::set<std::string> keys = {"timing_offset_samples", "edge_smear"};
   ValidateAllowedKeys(node, keys, "channel", errors);
   if (!errors->empty()) {
     return false;
   }
 
-  if (!node["timing_offset_samples"] && !node["edge_smear"] &&
-      !node["fm_beat"]) {
+  if (!node["timing_offset_samples"] && !node["edge_smear"]) {
     errors->push_back(
         "channel block must set at least one of: timing_offset_samples, "
-        "edge_smear, fm_beat.");
+        "edge_smear.");
     return false;
   }
 
@@ -624,11 +846,279 @@ bool ParseChannel(const YAML::Node& root, Project* project,
       !ParseEdgeSmear(node["edge_smear"], &channel.edge_smear, errors)) {
     return false;
   }
-  if (node["fm_beat"] &&
-      !ParseFmBeat(node["fm_beat"], &channel.fm_beat, errors)) {
+  channel.enabled = true;
+  return true;
+}
+
+// Parses a sequence of [x, y] number pairs into *points via make_point.
+template <typename Point, typename MakePoint>
+bool ParsePointPairs(const YAML::Node& node, const std::string& context,
+                     const std::string& pair_names, MakePoint make_point,
+                     std::vector<Point>* points,
+                     std::vector<std::string>* errors) {
+  if (!node.IsSequence()) {
+    errors->push_back(context + " must be a sequence of [" + pair_names +
+                      "] pairs.");
     return false;
   }
-  channel.enabled = true;
+  points->clear();
+  for (const YAML::Node& point_node : node) {
+    if (!point_node.IsSequence() || point_node.size() != 2U) {
+      errors->push_back(context + " entries must be [" + pair_names +
+                        "] pairs.");
+      return false;
+    }
+    try {
+      points->push_back(
+          make_point(point_node[0].as<double>(), point_node[1].as<double>()));
+    } catch (const YAML::Exception&) {
+      errors->push_back(context + " entries must be numeric pairs.");
+      return false;
+    }
+  }
+  return true;
+}
+
+// Parses `laserdisc.channel.group_delay:`, the IEC 60856 group-delay
+// pre-distortion.
+bool ParseGroupDelay(const YAML::Node& node, GroupDelayParameters* group_delay,
+                     std::vector<std::string>* errors) {
+  const std::string context = "laserdisc.channel.group_delay";
+  if (!node.IsMap()) {
+    errors->push_back(context + " must be a map/object.");
+    return false;
+  }
+  const std::set<std::string> keys = {"preset", "points_ns", "scale"};
+  ValidateAllowedKeys(node, keys, context, errors);
+  if (!errors->empty()) {
+    return false;
+  }
+  if (static_cast<bool>(node["preset"]) ==
+      static_cast<bool>(node["points_ns"])) {
+    errors->push_back(context + " must set exactly one of: preset, points_ns.");
+    return false;
+  }
+  if (node["preset"]) {
+    std::string preset;
+    if (!ParseScalarString(node, "preset", context, &preset, errors)) {
+      return false;
+    }
+    if (preset != "iec60856_nominal") {
+      errors->push_back(context + ".preset has unrecognised value '" + preset +
+                        "'. Expected: iec60856_nominal.");
+      return false;
+    }
+    group_delay->preset = GroupDelayPreset::kIec60856Nominal;
+  } else {
+    group_delay->preset = GroupDelayPreset::kCustom;
+    if (!ParsePointPairs(
+            node["points_ns"], context + ".points_ns",
+            "frequency_mhz, delay_ns",
+            [](double mhz, double ns) { return GroupDelayPoint{mhz, ns}; },
+            &group_delay->points_ns, errors)) {
+      return false;
+    }
+  }
+  if (node["scale"] &&
+      !ParseNumber(node, "scale", context, &group_delay->scale, errors)) {
+    return false;
+  }
+  group_delay->enabled = true;
+  return true;
+}
+
+// Parses `laserdisc.channel.response_by_picture:`, the replay responses at
+// two or more disc positions.
+bool ParseResponseByPicture(const YAML::Node& node,
+                            std::vector<ResponseByPictureEntry>* entries,
+                            std::vector<std::string>* errors) {
+  const std::string context = "laserdisc.channel.response_by_picture";
+  if (!node.IsSequence()) {
+    errors->push_back(context + " must be a list/sequence.");
+    return false;
+  }
+  for (const YAML::Node& entry_node : node) {
+    if (!entry_node.IsMap()) {
+      errors->push_back(context + "[] must be a map/object.");
+      return false;
+    }
+    ValidateAllowedKeys(entry_node, {"picture", "response_db"}, context + "[]",
+                        errors);
+    if (!errors->empty()) {
+      return false;
+    }
+    if (!entry_node["picture"] || !entry_node["response_db"]) {
+      errors->push_back(context + "[] must set both of: picture, response_db.");
+      return false;
+    }
+    ResponseByPictureEntry entry;
+    if (!ParseInteger(entry_node, "picture", context + "[]", &entry.picture,
+                      errors)) {
+      return false;
+    }
+    if (!ParseNoiseSpectrum(entry_node["response_db"],
+                            context + "[].response_db", &entry.response_db,
+                            errors)) {
+      return false;
+    }
+    entries->push_back(std::move(entry));
+  }
+  return true;
+}
+
+// Parses `laserdisc.channel.field2_offset:`, the picture-domain
+// misregistration of field 2.
+bool ParseField2Offset(const YAML::Node& node, Field2OffsetParameters* offset,
+                       std::vector<std::string>* errors) {
+  const std::string context = "laserdisc.channel.field2_offset";
+  if (!node.IsMap()) {
+    errors->push_back(context + " must be a map/object.");
+    return false;
+  }
+  ValidateAllowedKeys(node, {"x_samples", "y_lines"}, context, errors);
+  if (!errors->empty()) {
+    return false;
+  }
+  if (!node["x_samples"] && !node["y_lines"]) {
+    errors->push_back(context +
+                      " must set at least one of: x_samples, "
+                      "y_lines.");
+    return false;
+  }
+  if (node["x_samples"] &&
+      !ParseNumber(node, "x_samples", context, &offset->x_samples, errors)) {
+    return false;
+  }
+  if (node["y_lines"] &&
+      !ParseNumber(node, "y_lines", context, &offset->y_lines, errors)) {
+    return false;
+  }
+  offset->enabled = true;
+  return true;
+}
+
+// Parses `laserdisc.channel:`, the LaserVision pressing and replay channel.
+bool ParseLaserdiscChannel(const YAML::Node& node,
+                           LaserdiscChannelParameters* channel,
+                           std::vector<std::string>* errors) {
+  const std::string context = "laserdisc.channel";
+  if (!node.IsMap()) {
+    errors->push_back(context + " must be a map/object.");
+    return false;
+  }
+  const std::set<std::string> keys = {"fm_beat", "group_delay", "response_db",
+                                      "response_by_picture", "field2_offset"};
+  ValidateAllowedKeys(node, keys, context, errors);
+  if (!errors->empty()) {
+    return false;
+  }
+  if (node.size() == 0U) {
+    errors->push_back(context +
+                      " must set at least one of: fm_beat, group_delay, "
+                      "response_db, response_by_picture, field2_offset.");
+    return false;
+  }
+  if (node["fm_beat"] &&
+      !ParseFmBeat(node["fm_beat"], &channel->fm_beat, errors)) {
+    return false;
+  }
+  if (node["group_delay"] &&
+      !ParseGroupDelay(node["group_delay"], &channel->group_delay, errors)) {
+    return false;
+  }
+  if (node["response_db"] &&
+      !ParseNoiseSpectrum(node["response_db"], context + ".response_db",
+                          &channel->response_db, errors)) {
+    return false;
+  }
+  if (node["response_by_picture"] &&
+      !ParseResponseByPicture(node["response_by_picture"],
+                              &channel->response_by_picture, errors)) {
+    return false;
+  }
+  if (node["field2_offset"] &&
+      !ParseField2Offset(node["field2_offset"], &channel->field2_offset,
+                         errors)) {
+    return false;
+  }
+  channel->enabled = true;
+  return true;
+}
+
+// Parses the project-wide `laserdisc:` block: the disc format, the
+// LaserVision signal options, the EFM digital audio selection and the
+// LaserVision channel.
+bool ParseLaserdisc(const YAML::Node& root, Project* project,
+                    std::vector<std::string>* errors) {
+  if (!root["laserdisc"]) {
+    return true;
+  }
+  const YAML::Node node = root["laserdisc"];
+  if (!node.IsMap()) {
+    errors->push_back("Top-level 'laserdisc' must be a map/object.");
+    return false;
+  }
+  const std::set<std::string> keys = {"disc_type", "pilot_burst", "vbi_burst",
+                                      "efm_audio", "channel"};
+  ValidateAllowedKeys(node, keys, "laserdisc", errors);
+  if (!errors->empty()) {
+    return false;
+  }
+  if (node.size() == 0U) {
+    errors->push_back(
+        "laserdisc block must set at least one of: disc_type, pilot_burst, "
+        "vbi_burst, efm_audio, channel.");
+    return false;
+  }
+
+  LaserdiscParameters& laserdisc = project->laserdisc;
+  if (node["disc_type"] && !ParseScalarString(node, "disc_type", "laserdisc",
+                                              &laserdisc.disc_type, errors)) {
+    return false;
+  }
+  for (const auto& [key, flag] :
+       {std::pair<const char*, bool*>{"pilot_burst", &laserdisc.pilot_burst},
+        std::pair<const char*, bool*>{"vbi_burst", &laserdisc.vbi_burst}}) {
+    if (node[key]) {
+      try {
+        *flag = node[key].as<bool>();
+      } catch (const YAML::Exception&) {
+        errors->push_back(std::string("laserdisc.") + key +
+                          " must be true or false.");
+        return false;
+      }
+    }
+  }
+
+  // Presence of laserdisc.efm_audio enables LaserDisc digital audio output
+  // for the single channel pair it names.
+  if (node["efm_audio"]) {
+    const YAML::Node efm_node = node["efm_audio"];
+    if (!efm_node.IsMap()) {
+      errors->push_back("laserdisc.efm_audio must be a map/object.");
+      return false;
+    }
+    ValidateAllowedKeys(efm_node, {"pair"}, "laserdisc.efm_audio", errors);
+    if (!errors->empty()) {
+      return false;
+    }
+    if (!efm_node["pair"]) {
+      errors->push_back(
+          "laserdisc.efm_audio is missing required field: 'pair'.");
+      return false;
+    }
+    if (!ParseInteger(efm_node, "pair", "laserdisc.efm_audio",
+                      &laserdisc.efm_audio.pair, errors)) {
+      return false;
+    }
+    laserdisc.efm_audio.enabled = true;
+  }
+
+  if (node["channel"] &&
+      !ParseLaserdiscChannel(node["channel"], &laserdisc.channel, errors)) {
+    return false;
+  }
+  laserdisc.enabled = true;
   return true;
 }
 
@@ -672,6 +1162,80 @@ bool ParseChromaJitter(const YAML::Node& node, ChromaJitterParameters* jitter,
   return true;
 }
 
+// Parses `chroma_error.differential:`, the differential gain and phase.
+bool ParseDifferential(const YAML::Node& node,
+                       DifferentialParameters* differential,
+                       std::vector<std::string>* errors) {
+  const std::string context = "chroma_error.differential";
+  if (!node.IsMap()) {
+    errors->push_back(context + " must be a map/object.");
+    return false;
+  }
+  ValidateAllowedKeys(node, {"gain", "phase_deg"}, context, errors);
+  if (!errors->empty()) {
+    return false;
+  }
+  if (!node["gain"] && !node["phase_deg"]) {
+    errors->push_back(context + " must set at least one of: gain, phase_deg.");
+    return false;
+  }
+  const auto make_point = [](double ire, double value) {
+    return LevelCurvePoint{ire, value};
+  };
+  if (node["gain"] &&
+      !ParsePointPairs(node["gain"], context + ".gain", "level_ire, gain",
+                       make_point, &differential->gain, errors)) {
+    return false;
+  }
+  if (node["phase_deg"] &&
+      !ParsePointPairs(node["phase_deg"], context + ".phase_deg",
+                       "level_ire, phase_deg", make_point,
+                       &differential->phase_deg, errors)) {
+    return false;
+  }
+  differential->enabled = true;
+  return true;
+}
+
+// Parses `chroma_error.crosstalk:`, the U/V crosstalk.
+bool ParseCrosstalk(const YAML::Node& node, CrosstalkParameters* crosstalk,
+                    std::vector<std::string>* errors) {
+  const std::string context = "chroma_error.crosstalk";
+  if (!node.IsMap()) {
+    errors->push_back(context + " must be a map/object.");
+    return false;
+  }
+  ValidateAllowedKeys(node, {"v_to_u", "u_to_v", "alternate_with_switch"},
+                      context, errors);
+  if (!errors->empty()) {
+    return false;
+  }
+  if (!node["v_to_u"] && !node["u_to_v"]) {
+    errors->push_back(context + " must set at least one of: v_to_u, u_to_v.");
+    return false;
+  }
+  if (node["v_to_u"] &&
+      !ParseNumber(node, "v_to_u", context, &crosstalk->v_to_u, errors)) {
+    return false;
+  }
+  if (node["u_to_v"] &&
+      !ParseNumber(node, "u_to_v", context, &crosstalk->u_to_v, errors)) {
+    return false;
+  }
+  if (node["alternate_with_switch"]) {
+    try {
+      crosstalk->alternate_with_switch =
+          node["alternate_with_switch"].as<bool>();
+    } catch (const YAML::Exception&) {
+      errors->push_back(context +
+                        ".alternate_with_switch must be true or false.");
+      return false;
+    }
+  }
+  crosstalk->enabled = true;
+  return true;
+}
+
 // Parses the project-wide `chroma_error:` block: the chroma gain and phase
 // error of this capture's player.
 bool ParseChromaError(const YAML::Node& root, Project* project,
@@ -686,17 +1250,19 @@ bool ParseChromaError(const YAML::Node& root, Project* project,
     return false;
   }
 
-  const std::set<std::string> keys = {"gain", "phase_deg", "line_jitter",
-                                      "include_burst"};
+  const std::set<std::string> keys = {"gain",        "phase_deg",
+                                      "line_jitter", "differential",
+                                      "crosstalk",   "include_burst"};
   ValidateAllowedKeys(node, keys, "chroma_error", errors);
   if (!errors->empty()) {
     return false;
   }
 
-  if (!node["gain"] && !node["phase_deg"] && !node["line_jitter"]) {
+  if (!node["gain"] && !node["phase_deg"] && !node["line_jitter"] &&
+      !node["differential"] && !node["crosstalk"]) {
     errors->push_back(
         "chroma_error block must set at least one of: gain, phase_deg, "
-        "line_jitter.");
+        "line_jitter, differential, crosstalk.");
     return false;
   }
 
@@ -714,6 +1280,15 @@ bool ParseChromaError(const YAML::Node& root, Project* project,
                          errors)) {
     return false;
   }
+  if (node["differential"] &&
+      !ParseDifferential(node["differential"], &chroma_error.differential,
+                         errors)) {
+    return false;
+  }
+  if (node["crosstalk"] &&
+      !ParseCrosstalk(node["crosstalk"], &chroma_error.crosstalk, errors)) {
+    return false;
+  }
   if (node["include_burst"]) {
     try {
       chroma_error.include_burst = node["include_burst"].as<bool>();
@@ -726,9 +1301,8 @@ bool ParseChromaError(const YAML::Node& root, Project* project,
   return true;
 }
 
-// Parses the project-wide `line_injections:` block: the laserdisc disc_type
-// (CAV/CLV) and the VITS test-signal set. Both are project-wide decisions, so
-// they live at the top level rather than per section.
+// Parses the project-wide `line_injections:` block: the VITS test-signal set
+// and its placement policy.
 bool ParseProjectLineInjections(const YAML::Node& root, Project* project,
                                 std::vector<std::string>* errors) {
   if (project == nullptr || errors == nullptr) {
@@ -745,13 +1319,15 @@ bool ParseProjectLineInjections(const YAML::Node& root, Project* project,
     return false;
   }
 
-  const std::set<std::string> keys = {"disc_type", "placement", "vits"};
+  if (!ReportMovedKeys(node, {{"disc_type", "laserdisc.disc_type"}},
+                       "line_injections", errors)) {
+    return false;
+  }
+  const std::set<std::string> keys = {"placement", "vits"};
   ValidateAllowedKeys(node, keys, "line_injections", errors);
   if (!errors->empty()) {
     return false;
   }
-
-  project->line_injections.disc_type = node["disc_type"].as<std::string>("");
 
   if (node["placement"]) {
     const std::string placement = node["placement"].as<std::string>("");
@@ -953,8 +1529,8 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
     }
 
     const std::set<std::string> root_keys = {
-        "project", "cvbs_presets", "output",  "line_injections",
-        "channel", "chroma_error", "sections"};
+        "project",   "cvbs_presets", "output",       "line_injections",
+        "laserdisc", "channel",      "chroma_error", "sections"};
     ValidateAllowedKeys(root, root_keys, "Top-level YAML", &result.errors);
     if (!result.errors.empty()) {
       return result;
@@ -984,10 +1560,16 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
     }
 
     const YAML::Node presets = root["cvbs_presets"];
+    if (!ReportMovedKeys(
+            presets,
+            {{"pal_laserdisc_pilot_burst", "laserdisc.pilot_burst"},
+             {"ntsc_laserdisc_vbi_burst", "laserdisc.vbi_burst"}},
+            "cvbs_presets", &result.errors)) {
+      return result;
+    }
     const std::set<std::string> preset_keys = {
-        "video_standard_preset",     "sample_encoding_preset",
-        "signal_state_preset",       "pal_laserdisc_pilot_burst",
-        "ntsc_laserdisc_vbi_burst",  "ntsc_black_setup_ire",
+        "video_standard_preset", "sample_encoding_preset",
+        "signal_state_preset", "ntsc_black_setup_ire",
         "secam_field_identification"};
     ValidateAllowedKeys(presets, preset_keys, "cvbs_presets", &result.errors);
     if (!result.errors.empty()) {
@@ -1006,12 +1588,6 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
         presets["signal_state_preset"].as<std::string>(
             GeneratedSignalStatePreset(
                 result.project.cvbs_presets.video_standard_preset));
-    result.project.cvbs_presets.pal_laserdisc_pilot_burst =
-        presets["pal_laserdisc_pilot_burst"].as<bool>(
-            result.project.cvbs_presets.pal_laserdisc_pilot_burst);
-    result.project.cvbs_presets.ntsc_laserdisc_vbi_burst =
-        presets["ntsc_laserdisc_vbi_burst"].as<bool>(
-            result.project.cvbs_presets.ntsc_laserdisc_vbi_burst);
     if (presets["ntsc_black_setup_ire"]) {
       result.project.cvbs_presets.ntsc_black_setup_ire =
           presets["ntsc_black_setup_ire"].as<double>();
@@ -1022,8 +1598,12 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
             result.project.cvbs_presets.secam_field_identification);
 
     const YAML::Node output = root["output"];
+    if (!ReportMovedKeys(output, {{"efm_audio", "laserdisc.efm_audio"}},
+                         "output", &result.errors)) {
+      return result;
+    }
     const std::set<std::string> output_keys = {"video_path", "signal_type",
-                                               "efm_audio"};
+                                               "truth"};
     ValidateAllowedKeys(output, output_keys, "output", &result.errors);
     if (!result.errors.empty()) {
       return result;
@@ -1036,31 +1616,20 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
         DeriveMetadataPath(result.project.output.video_path);
     result.project.output.signal_type =
         output["signal_type"].as<std::string>("composite");
-
-    // Presence of the output.efm_audio map enables LaserDisc digital audio
-    // output for the single channel pair it names.
-    if (output["efm_audio"]) {
-      const YAML::Node efm_node = output["efm_audio"];
-      if (!efm_node.IsMap()) {
-        result.errors.push_back("output.efm_audio must be a map/object.");
+    if (output["truth"]) {
+      try {
+        result.project.output.truth = output["truth"].as<bool>();
+      } catch (const YAML::Exception&) {
+        result.errors.push_back("output.truth must be true or false.");
         return result;
       }
-      const std::set<std::string> efm_keys = {"pair"};
-      ValidateAllowedKeys(efm_node, efm_keys, "output.efm_audio",
-                          &result.errors);
-      if (!result.errors.empty()) {
-        return result;
-      }
-      if (!efm_node["pair"]) {
-        result.errors.push_back(
-            "output.efm_audio is missing required field: 'pair'.");
-        return result;
-      }
-      result.project.output.efm_audio.enabled = true;
-      result.project.output.efm_audio.pair = efm_node["pair"].as<int>();
     }
 
     if (!ParseProjectLineInjections(root, &result.project, &result.errors)) {
+      return result;
+    }
+
+    if (!ParseLaserdisc(root, &result.project, &result.errors)) {
       return result;
     }
 
@@ -1078,9 +1647,14 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
         return result;
       }
 
+      if (!ReportMovedKeys(section_node,
+                           {{"section_type", "the section's laserdisc.area"}},
+                           "section", &result.errors)) {
+        return result;
+      }
       const std::set<std::string> section_keys = {"name",
                                                   "type",
-                                                  "section_type",
+                                                  "laserdisc",
                                                   "duration_frames",
                                                   "duration_repeat",
                                                   "line_injections",
@@ -1089,6 +1663,8 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
                                                   "end_frame",
                                                   "cadence",
                                                   "luma_bandwidth",
+                                                  "horizontal_resample",
+                                                  "chroma_line_sign",
                                                   "noise",
                                                   "dropouts",
                                                   "osd",
@@ -1104,18 +1680,6 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
       section.type = section_node["type"].as<std::string>("");
       section.source = section_node["source"].as<std::string>("");
 
-      if (section_node["section_type"]) {
-        const std::string section_type_str =
-            section_node["section_type"].as<std::string>("");
-        section.section_type = SectionTypeFromString(section_type_str);
-        if (section.section_type == SectionType::kUnknown) {
-          result.errors.push_back(
-              "section field 'section_type' has unrecognised value '" +
-              section_type_str +
-              "'. Expected one of: lead_in, programme_area, lead_out.");
-          return result;
-        }
-      }
       section.start_frame = section_node["start_frame"].as<int>(0);
       if (section_node["end_frame"]) {
         try {
@@ -1126,6 +1690,9 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
           return result;
         }
         section.end_frame_specified = true;
+      }
+      if (!ParseSectionLaserdisc(section_node, &section, &result.errors)) {
+        return result;
       }
       if (!ParseLineInjections(section_node, &section, &result.errors)) {
         return result;
@@ -1206,6 +1773,18 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
       if (section_node["luma_bandwidth"] &&
           !ParseLumaBandwidth(section_node["luma_bandwidth"],
                               &section.luma_bandwidth, &result.errors)) {
+        return result;
+      }
+
+      if (section_node["horizontal_resample"] &&
+          !ParseHorizontalResample(section_node, &section.horizontal_resample,
+                                   &result.errors)) {
+        return result;
+      }
+
+      if (section_node["chroma_line_sign"] &&
+          !ParseChromaLineSign(section_node["chroma_line_sign"],
+                               &section.chroma_line_sign, &result.errors)) {
         return result;
       }
 

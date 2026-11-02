@@ -26,6 +26,7 @@ Project MakeBasePalProject() {
   p.cvbs_presets.signal_state_preset = "STANDARD_STABLE_LOCKED";
   p.output.video_path = "/tmp/so_test.cvbs";
   p.output.metadata_path = "/tmp/so_test.meta";
+  p.laserdisc.enabled = true;
   return p;
 }
 
@@ -138,7 +139,7 @@ TEST(SectionOrderingValidationTest,
   EXPECT_FALSE(r.is_valid);
   EXPECT_TRUE(HasErrorContaining(
       r,
-      "'plain' must have section_type 'programme_area' because it is between "
+      "'plain' must have laserdisc.area 'programme_area' because it is between "
       "the lead_in and lead_out sections"));
 }
 
@@ -152,7 +153,7 @@ TEST(SectionOrderingValidationTest, RejectsUntypedSectionAfterLoneLeadIn) {
   EXPECT_FALSE(r.is_valid);
   EXPECT_TRUE(HasErrorContaining(
       r,
-      "'plain' must have section_type 'programme_area' because it is after "
+      "'plain' must have laserdisc.area 'programme_area' because it is after "
       "the lead_in section"));
 }
 
@@ -166,7 +167,7 @@ TEST(SectionOrderingValidationTest, RejectsUntypedSectionBeforeLoneLeadOut) {
   EXPECT_FALSE(r.is_valid);
   EXPECT_TRUE(HasErrorContaining(
       r,
-      "'plain' must have section_type 'programme_area' because it is before "
+      "'plain' must have laserdisc.area 'programme_area' because it is before "
       "the lead_out section"));
 }
 

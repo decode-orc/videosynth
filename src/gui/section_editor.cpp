@@ -3,7 +3,7 @@
  * Module:      gui
  * Purpose:     Per-section form editor: source and span, field cadence,
  *              optional audio, luma bandwidth, noise, dropout, OSD blocks,
- *              and line injections
+ *              and the section's LaserDisc disc area and codes
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -37,6 +37,7 @@
 #include <utility>
 
 #include "asset_roots.h"
+#include "chroma_line_sign_editor.h"
 #include "form_field_width.h"
 #include "project_templates.h"
 #include "section_block_presenters.h"
@@ -128,15 +129,19 @@ void SectionEditor::BuildUi() {
   multi_edit_hint_->setVisible(false);
   layout->addWidget(multi_edit_hint_);
 
+  // Groups follow the project file's section key order, which is the signal
+  // flow: source, cadence, disc codes, picture processing, OSD burn-in,
+  // impairments, then audio.
   layout->addWidget(BuildGeneralGroup());
-  layout->addWidget(BuildCadenceGroup());
   layout->addWidget(BuildProbeGroup());
-  layout->addWidget(BuildAudioGroup());
+  layout->addWidget(BuildCadenceGroup());
+  layout->addWidget(BuildLaserdiscGroup());
+  layout->addWidget(BuildPictureGroup());
   layout->addWidget(BuildLumaBandwidthGroup());
+  layout->addWidget(BuildOsdGroup());
   layout->addWidget(BuildNoiseGroup());
   layout->addWidget(BuildDropoutsGroup());
-  layout->addWidget(BuildOsdGroup());
-  layout->addWidget(BuildInjectionsGroup());
+  layout->addWidget(BuildAudioGroup());
   layout->addStretch();
 
   scroll->setWidget(content_);
@@ -150,13 +155,6 @@ QWidget* SectionEditor::BuildGeneralGroup() {
   name_edit_ = new QLineEdit(group);
   name_edit_->setMinimumWidth(name_edit_->sizeHint().width() * 2);
   form->addRow(tr("Name:"), name_edit_);
-
-  section_type_combo_ = new QComboBox(group);
-  section_type_combo_->addItem(tr("(none)"));
-  section_type_combo_->addItem(QStringLiteral("lead_in"));
-  section_type_combo_->addItem(QStringLiteral("programme_area"));
-  section_type_combo_->addItem(QStringLiteral("lead_out"));
-  form->addRow(tr("Disc section type:"), section_type_combo_);
 
   // Source: a two-way choice between a built-in (shipped) asset and a local
   // file. Built-in composes {bundled}/<type>/<raster>/<file> from the
@@ -287,8 +285,6 @@ QWidget* SectionEditor::BuildGeneralGroup() {
   general_form_ = form;
 
   connect(name_edit_, &QLineEdit::editingFinished, this,
-          &SectionEditor::CommitSection);
-  connect(section_type_combo_, &QComboBox::activated, this,
           &SectionEditor::CommitSection);
   // A different file resets the frame selection; storing the same file
   // relative or absolute does not.
@@ -569,6 +565,42 @@ QWidget* SectionEditor::BuildLumaBandwidthGroup() {
     }
   });
   return luma_bandwidth_group_;
+}
+
+QWidget* SectionEditor::BuildPictureGroup() {
+  picture_group_ = new QGroupBox(tr("Picture mapping"), content_);
+  auto* form = new QFormLayout(picture_group_);
+
+  horizontal_resample_combo_ = new QComboBox(picture_group_);
+  horizontal_resample_combo_->addItem(
+      tr("Nearest pixel"), static_cast<int>(HorizontalResample::kNearest));
+  horizontal_resample_combo_->addItem(
+      tr("Band-limited"), static_cast<int>(HorizontalResample::kBandlimited));
+  horizontal_resample_combo_->setToolTip(
+      tr("How the 720 source pixels map onto the active line. Nearest pixel "
+         "holds each pixel (a zero-order hold, which leaves images of the "
+         "source spectrum, including energy near the colour subcarrier). "
+         "Band-limited interpolates with a windowed-sinc filter at the source "
+         "Nyquist frequency instead."));
+  form->addRow(tr("Horizontal resampling:"), horizontal_resample_combo_);
+
+  chroma_line_sign_note_ = new QLabel(picture_group_);
+  chroma_line_sign_note_->setWordWrap(true);
+  chroma_line_sign_note_->setText(
+      tr("Chroma line sign regions need a PAL or PAL-M project."));
+  form->addRow(chroma_line_sign_note_);
+  chroma_line_sign_editor_ = new ChromaLineSignEditor(picture_group_);
+  form->addRow(tr("Chroma line sign:"), chroma_line_sign_editor_);
+
+  const auto commit = [this] {
+    if (!updating_) {
+      CommitSection();
+    }
+  };
+  connect(horizontal_resample_combo_, &QComboBox::activated, this, commit);
+  connect(chroma_line_sign_editor_, &ChromaLineSignEditor::RegionsEdited, this,
+          commit);
+  return picture_group_;
 }
 
 QWidget* SectionEditor::BuildNoiseGroup() {
@@ -874,38 +906,69 @@ QWidget* SectionEditor::BuildOsdGroup() {
   return osd_group_;
 }
 
-QWidget* SectionEditor::BuildInjectionsGroup() {
-  injections_group_ = new QGroupBox(tr("Line injections"), content_);
-  injections_group_->setCheckable(true);
-  auto* layout = new QVBoxLayout(injections_group_);
-  injections_editor_ = new LineInjectionsEditor(injections_group_);
+QWidget* SectionEditor::BuildLaserdiscGroup() {
+  // The section's laserdisc block: its disc area and its biphase codes. The
+  // whole group is shown only for projects with a laserdisc block, so
+  // non-LaserDisc projects never see it.
+  laserdisc_group_ = new QGroupBox(tr("LaserDisc"), content_);
+  laserdisc_group_->setCheckable(true);
+  laserdisc_group_->setToolTip(
+      tr("Where this section sits on the disc and the laserdisc codes "
+         "(IEC 60856/60857) its vertical interval carries."));
+  auto* outer = new QVBoxLayout(laserdisc_group_);
+  outer->setContentsMargins(0, 0, 0, 0);
+  auto* body = new QWidget(laserdisc_group_);
+  auto* layout = new QVBoxLayout(body);
+  auto* form = new QFormLayout();
+  disc_area_combo_ = new QComboBox(body);
+  disc_area_combo_->addItem(tr("(none)"));
+  disc_area_combo_->addItem(QStringLiteral("lead_in"));
+  disc_area_combo_->addItem(QStringLiteral("programme_area"));
+  disc_area_combo_->addItem(QStringLiteral("lead_out"));
+  disc_area_combo_->setToolTip(
+      tr("The disc area the section occupies: lead-in, programme area or "
+         "lead-out. It decides which codes the section may carry."));
+  form->addRow(tr("Disc area:"), disc_area_combo_);
+  layout->addLayout(form);
+
+  layout->addWidget(new QLabel(tr("Codes:"), body));
+  injections_editor_ = new LineInjectionsEditor(body);
   injections_editor_->setMinimumHeight(220);
   layout->addWidget(injections_editor_);
+  outer->addWidget(body);
 
+  connect(disc_area_combo_, &QComboBox::activated, this,
+          &SectionEditor::CommitSection);
   connect(injections_editor_, &LineInjectionsEditor::InjectionsEdited, this,
           [this] {
             if (!updating_) {
               CommitSection();
             }
           });
-  // The block exists exactly when at least one injection exists; ticking the
-  // box seeds a default one, unticking clears them (SectionFromWidgets).
-  connect(injections_group_, &QGroupBox::toggled, this, [this](bool checked) {
-    injections_editor_->setVisible(checked);
-    if (updating_) {
+  // The block exists exactly when the section has a disc area or codes.
+  // Ticking the box seeds an area and its recommended codes; unticking clears
+  // both (SetSectionLaserdiscEnabled).
+  connect(laserdisc_group_, &QGroupBox::toggled, body, &QWidget::setVisible);
+  connect(laserdisc_group_, &QGroupBox::toggled, this, [this](bool checked) {
+    if (updating_ || section_index_ < 0) {
       return;
     }
-    if (checked) {
-      if (injections_editor_->injections().empty()) {
-        // Emits InjectionsEdited, which commits the now-non-empty block.
-        injections_editor_->AddDefaultInjection();
-      }
-    } else {
-      CommitSection();
-    }
+    const Project& project = document_->project();
+    Section section = SectionFromWidgets();
+    SetSectionLaserdiscEnabled(&section, checked,
+                               project.cvbs_presets.video_standard_preset,
+                               DiscTypeFromString(project.laserdisc.disc_type));
+    CommitEditedSection(section);
   });
-  injections_editor_->setVisible(injections_group_->isChecked());
-  return injections_group_;
+  body->setVisible(laserdisc_group_->isChecked());
+  return laserdisc_group_;
+}
+
+SectionType SectionEditor::SelectedDiscArea() const {
+  return disc_area_combo_->currentIndex() <= 0
+             ? SectionType::kUnknown
+             : SectionTypeFromString(
+                   disc_area_combo_->currentText().toStdString());
 }
 
 void SectionEditor::SetCurrentSection(int index) {
@@ -957,10 +1020,10 @@ void SectionEditor::UpdateMultiEditHint() {
   // so types limited to a single section (lead_in, lead_out) must not be
   // offered while a multi-selection is active.
   if (auto* model =
-          qobject_cast<QStandardItemModel*>(section_type_combo_->model())) {
+          qobject_cast<QStandardItemModel*>(disc_area_combo_->model())) {
     for (int i = 0; i < model->rowCount(); ++i) {
       const SectionType type =
-          SectionTypeFromString(section_type_combo_->itemText(i).toStdString());
+          SectionTypeFromString(disc_area_combo_->itemText(i).toStdString());
       model->item(i)->setEnabled(!batch_editing ||
                                  SectionTypeAllowsBatchAssignment(type));
     }
@@ -977,10 +1040,10 @@ void SectionEditor::LoadFromDocument() {
       project.sections[static_cast<std::size_t>(section_index_)];
 
   name_edit_->setText(QString::fromStdString(section.name));
-  section_type_combo_->setCurrentIndex(
+  disc_area_combo_->setCurrentIndex(
       section.section_type == SectionType::kUnknown
           ? 0
-          : section_type_combo_->findText(QString::fromStdString(
+          : disc_area_combo_->findText(QString::fromStdString(
                 SectionTypeToString(section.section_type))));
   LoadSourceWidgets(section.source);
   duration_all_check_->setChecked(section.duration_frames_all);
@@ -1027,6 +1090,19 @@ void SectionEditor::LoadFromDocument() {
   luma_transition_spin_->setValue(section.luma_bandwidth.transition_mhz);
   UpdateLumaCutoffRange();
   luma_cutoff_spin_->setValue(section.luma_bandwidth.cutoff_mhz);
+
+  // Picture mapping. A project that cannot use chroma_line_sign keeps the
+  // table usable only to remove regions it already carries.
+  horizontal_resample_combo_->setCurrentIndex(
+      horizontal_resample_combo_->findData(
+          static_cast<int>(section.horizontal_resample)));
+  const Standard standard = project.cvbs_presets.video_standard_preset;
+  const bool line_sign_supported = SupportsChromaLineSign(standard);
+  chroma_line_sign_note_->setVisible(!line_sign_supported);
+  chroma_line_sign_editor_->setEnabled(line_sign_supported ||
+                                       !section.chroma_line_sign.empty());
+  chroma_line_sign_editor_->SetRegions(section.chroma_line_sign,
+                                       SourceRasterHeight(standard));
 
   // Noise.
   const double spectrum_max_mhz =
@@ -1081,16 +1157,14 @@ void SectionEditor::LoadFromDocument() {
   osd_group_->setChecked(OsdBlockEnabled(section));
   LoadOsdTable(section);
 
-  // Line injections. Section-level injections carry only laserdisc biphase
-  // codes, which are meaningless without a project-wide disc format, so the
-  // whole group is hidden until CAV/CLV is chosen in project settings.
-  const DiscType project_disc_type =
-      DiscTypeFromString(project.line_injections.disc_type);
-  const bool laserdisc_project = project_disc_type != DiscType::kUnknown;
-  injections_group_->setVisible(laserdisc_project);
-  injections_group_->setChecked(!section.line_injections.empty());
-  injections_editor_->SetContext(project.cvbs_presets.video_standard_preset,
-                                 section.section_type, project_disc_type);
+  // LaserDisc: the disc area and the laserdisc biphase codes. Hidden unless
+  // the project declares a laserdisc block, so non-LaserDisc projects never
+  // see it.
+  laserdisc_group_->setVisible(SectionLaserdiscGroupVisible(project));
+  laserdisc_group_->setChecked(SectionHasLaserdiscBlock(section));
+  injections_editor_->SetContext(
+      project.cvbs_presets.video_standard_preset, section.section_type,
+      DiscTypeFromString(project.laserdisc.disc_type));
   injections_editor_->SetBatchSectionTypes(SelectedSectionTypes());
   injections_editor_->SetInjections(section.line_injections);
 
@@ -1160,11 +1234,6 @@ Section SectionEditor::SectionFromWidgets() const {
       document_->project().sections[static_cast<std::size_t>(section_index_)];
 
   section.name = name_edit_->text().toStdString();
-  section.section_type =
-      section_type_combo_->currentIndex() <= 0
-          ? SectionType::kUnknown
-          : SectionTypeFromString(
-                section_type_combo_->currentText().toStdString());
   section.source = SourceFromWidgets();
   section.duration_frames_all = duration_all_check_->isChecked();
   section.duration_frames =
@@ -1197,6 +1266,10 @@ Section SectionEditor::SectionFromWidgets() const {
   } else {
     SetLumaBandwidthEnabled(&section, false);
   }
+
+  section.horizontal_resample = static_cast<HorizontalResample>(
+      horizontal_resample_combo_->currentData().toInt());
+  section.chroma_line_sign = chroma_line_sign_editor_->regions();
 
   // Noise layers. The capture layer's group owns noise_db/spread/seed and its
   // spectra; the shared layer is independent of it.
@@ -1298,10 +1371,14 @@ Section SectionEditor::SectionFromWidgets() const {
     }
   }
 
-  // Line injections (unticking excludes them entirely).
-  section.line_injections = injections_group_->isChecked()
-                                ? injections_editor_->injections()
-                                : std::vector<Section::LineInjection>{};
+  // LaserDisc: unticking the group clears the disc area and the codes.
+  if (laserdisc_group_->isChecked()) {
+    section.section_type = SelectedDiscArea();
+    section.line_injections = injections_editor_->injections();
+  } else {
+    section.section_type = SectionType::kUnknown;
+    section.line_injections.clear();
+  }
 
   return section;
 }
@@ -1430,9 +1507,14 @@ void SectionEditor::RevealField(IssueField field) {
       group = cadence_group_;
       focus = cadence_pattern_combo_;
       break;
+    case IssueField::kPicture:
+      group = picture_group_;
+      focus = horizontal_resample_combo_;
+      break;
     case IssueField::kNone:
     case IssueField::kChannel:
     case IssueField::kChromaError:
+    case IssueField::kLaserdiscChannel:
     default:
       return;
   }
@@ -1615,8 +1697,7 @@ void SectionEditor::UpdateFrameRangeDisplay() {
   // Disc positions exist for programme_area sections only (IEC 60856/60857:
   // lead-in and lead-out carry no picture numbers or timecodes), so the row
   // hides for those sections and for non-laserdisc projects.
-  const DiscType disc_type =
-      DiscTypeFromString(project.line_injections.disc_type);
+  const DiscType disc_type = DiscTypeFromString(project.laserdisc.disc_type);
   const std::vector<int> disc_offsets =
       BuildDiscFrameOffsets(project, disc_type);
   const int disc_start = disc_offsets[static_cast<std::size_t>(section_index_)];

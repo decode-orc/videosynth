@@ -180,10 +180,10 @@ std::vector<VitsInjection> LaserdiscVitsSet(Standard standard) {
 
 ProjectLineInjections ReconcileVitsForStandard(ProjectLineInjections injections,
                                                Standard new_standard) {
-  // There is no SECAM LaserVision format: drop the disc format and fall back
-  // from laserdisc to standard VITS placement.
+  // There is no SECAM LaserVision format: fall back from laserdisc to
+  // standard VITS placement (the laserdisc block itself is cleared by
+  // NormalizeLaserdiscForStandard).
   if (new_standard == Standard::kSecam) {
-    injections.disc_type.clear();
     if (injections.placement == VitsPlacement::kLaserdisc) {
       injections.placement = VitsPlacement::kStandard;
       injections.vits.clear();

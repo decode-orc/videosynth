@@ -287,7 +287,7 @@ TEST(BiphaseEncoderTest, Generate24BitCodeHasCorrectSampleCount) {
   constexpr double kPalSampleRate = 17734475.0;
   const BiphaseEncoder enc(kPalSampleRate);
   const auto samples = enc.Generate24BitCode(0x88FFFFu, 210.0, 700.0);
-  EXPECT_EQ(static_cast<int>(samples.size()), 24 * enc.bit_cell_samples());
+  EXPECT_EQ(static_cast<int>(samples.size()), enc.BitCellStart(24));
 }
 
 // First bit of 0x88FFFF is '1' (MSB of 0x88 = 1).
@@ -316,9 +316,9 @@ TEST(BiphaseEncoderTest, Generate24BitCodeSecondBitIsZeroStartsAtPeak) {
   const BiphaseEncoder enc(kPalSampleRate);
   const auto samples = enc.Generate24BitCode(0x88FFFFu, kBaseline, kPeak);
 
-  // Second bit cell starts at bit_cell_samples_.  Its first quarter is at peak
+  // Second bit cell starts at BitCellStart(1).  Its first quarter is at peak
   // (it is a '0' bit with no inter-bit transition from the preceding '1').
-  const int bit2_start = enc.bit_cell_samples();
+  const int bit2_start = enc.BitCellStart(1);
   const int quarter = enc.bit_cell_samples() / 4;
   for (int i = bit2_start; i < bit2_start + quarter; ++i) {
     EXPECT_NEAR(SampleFixedToMillivolts(samples[static_cast<std::size_t>(i)]),
@@ -341,7 +341,7 @@ TEST(BiphaseEncoderTest,
 
   // Check the inter-bit transition at the boundary between bit 8 and bit 9
   // (first boundary in the all-1 run).
-  const int boundary = 9 * enc.bit_cell_samples();
+  const int boundary = enc.BitCellStart(9);
   // A few samples before the boundary should be near peak.
   const int pre_idx = boundary - enc.ramp_samples() - 1;
   // A few samples after the boundary should be near baseline.
@@ -366,7 +366,7 @@ TEST(BiphaseEncoderTest, AllOneCodeHasInterBitTransitionAtEveryBoundary) {
   const int bcs = enc.bit_cell_samples();
   const int ramp = enc.ramp_samples();
   for (int bit_idx = 1; bit_idx < 24; ++bit_idx) {
-    const int boundary = bit_idx * bcs;
+    const int boundary = enc.BitCellStart(bit_idx);
     // Just before the boundary the signal should still be near peak.
     const int pre_idx = boundary - ramp - 1;
     // Just after the boundary the signal should be near baseline (the inter-bit
@@ -401,7 +401,7 @@ TEST(BiphaseEncoderTest,
   const int bcs = enc.bit_cell_samples();
   const int ramp = enc.ramp_samples();
   for (int bit_idx = 1; bit_idx < 24; ++bit_idx) {
-    const int boundary = bit_idx * bcs;
+    const int boundary = enc.BitCellStart(bit_idx);
     const int pre_idx = boundary - ramp - 1;
     const int post_idx = boundary + ramp + 1;
     EXPECT_NEAR(
@@ -431,7 +431,7 @@ TEST(BiphaseEncoderTest, AlternatingBitCodeHasNoBoundaryTransitions) {
   // the boundary should both be near peak.
   for (int bit_idx = 1; bit_idx < 24; bit_idx += 2) {
     // Boundary between '1'(bit_idx-1) and '0'(bit_idx).
-    const int boundary = bit_idx * bcs;
+    const int boundary = enc.BitCellStart(bit_idx);
     const int pre_idx = boundary - 2;
     const int post_idx = boundary + 2;
     const double pre =
@@ -453,7 +453,7 @@ TEST(BiphaseEncoderTest, Generate24BitCodeWorksForNtscSampleRate) {
   constexpr double kPeak = 714.3;
   const BiphaseEncoder enc(kNtscSampleRate);
   const auto samples = enc.Generate24BitCode(0x80EEEEu, kBaseline, kPeak);
-  EXPECT_EQ(static_cast<int>(samples.size()), 24 * enc.bit_cell_samples());
+  EXPECT_EQ(static_cast<int>(samples.size()), enc.BitCellStart(24));
 
   // First bit is '1' (MSB of 0x80 = 1): first quarter near baseline.
   const int quarter = enc.bit_cell_samples() / 4;
@@ -509,7 +509,7 @@ TEST(BiphaseEncoderTest, GenerateLineSamplesAfterCodeAreAtBaseline) {
   const auto line =
       enc.GenerateLine("88FFFF", Standard::kPal, kBaseline, kPeak);
 
-  const int code_end = 24 * enc.bit_cell_samples();
+  const int code_end = enc.BitCellStart(24);
   const int line_size = static_cast<int>(line.size());
   for (int i = code_end; i < line_size; ++i) {
     EXPECT_NEAR(SampleFixedToMillivolts(line[static_cast<std::size_t>(i)]),
@@ -571,7 +571,7 @@ TEST(BiphaseEncoderTest,
       enc.Generate24BitCode(0x80EEEEu, kNtscBaseline, kNtscPeak);
 
   const int bcs = enc.bit_cell_samples();
-  const int last_bit_start = 23 * bcs;
+  const int last_bit_start = enc.BitCellStart(23);
   const int three_q = last_bit_start + (3 * bcs) / 4;
   const int n = static_cast<int>(samples.size());
   for (int i = three_q; i < n; ++i) {

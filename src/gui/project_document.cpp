@@ -260,6 +260,18 @@ bool ProjectDocument::SetOutputTargets(const OutputTargets& output) {
       QStringLiteral("Edit output targets")));
 }
 
+bool ProjectDocument::SetLaserdisc(const LaserdiscParameters& laserdisc) {
+  if (project_.laserdisc == laserdisc) {
+    return false;
+  }
+  return ApplyCommand(std::make_unique<SwapValueCommand<LaserdiscParameters>>(
+      +[](Project& project) -> LaserdiscParameters& {
+        return project.laserdisc;
+      },
+      laserdisc, DocumentChange::Kind::kProjectSettings,
+      QStringLiteral("Edit laserdisc")));
+}
+
 bool ProjectDocument::SetChannel(const ChannelParameters& channel) {
   if (project_.channel == channel) {
     return false;

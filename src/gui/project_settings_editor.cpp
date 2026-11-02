@@ -1,8 +1,9 @@
 /*
  * File:        project_settings_editor.cpp
  * Module:      gui
- * Purpose:     Form editor for project info, CVBS presets, line injections,
- *              channel and chroma error impairments, and output targets
+ * Purpose:     Form editor for project info, CVBS presets, VITS, channel and
+ *              chroma error impairments, output targets and the LaserDisc
+ *              block
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -30,10 +31,13 @@
 #include <utility>
 
 #include "asset_roots.h"
+#include "curve_points_editor.h"
 #include "form_field_width.h"
 #include "line_injection_presenter.h"
 #include "project_settings_presenter.h"
 #include "project_templates.h"
+#include "response_by_picture_editor.h"
+#include "section_block_presenters.h"
 
 namespace {
 constexpr int kVitsTypeColumn = 0;
@@ -43,6 +47,46 @@ const char* const kDiscTypeNone = "(none)";
 
 // VITS placement combo item order: 0 standard, 1 laserdisc, 2 custom.
 constexpr int kVitsPlacementLaserdiscIndex = 1;
+
+// Group-delay curve combo item order.
+constexpr int kGroupDelayNominalIndex = 0;
+constexpr int kGroupDelayCustomIndex = 1;
+
+// Abscissa spacing of a newly added curve breakpoint.
+constexpr double kCurvePointStepMhz = 1.0;
+constexpr double kCurvePointStepIre = 25.0;
+// Group delay is relative to its lowest breakpoint, conventionally 0.5 MHz.
+constexpr double kGroupDelayReferenceMhz = 0.5;
+
+// Replay response mode combo item order, matching ReplayResponseMode.
+int ComboIndexFromResponseMode(videosynth::gui::ReplayResponseMode mode) {
+  return static_cast<int>(mode);
+}
+
+videosynth::gui::ReplayResponseMode ResponseModeFromComboIndex(int index) {
+  switch (index) {
+    case 1:
+      return videosynth::gui::ReplayResponseMode::kFixed;
+    case 2:
+      return videosynth::gui::ReplayResponseMode::kByPicture;
+    default:
+      return videosynth::gui::ReplayResponseMode::kNone;
+  }
+}
+
+// A double spin box that commits on Enter or focus loss (not per keystroke),
+// capped at its size hint so forms stay compact.
+QDoubleSpinBox* MakeSpin(QWidget* parent, double min, double max, int decimals,
+                         double step, const QString& suffix) {
+  auto* spin = new QDoubleSpinBox(parent);
+  spin->setRange(min, max);
+  spin->setDecimals(decimals);
+  spin->setSingleStep(step);
+  spin->setSuffix(suffix);
+  spin->setKeyboardTracking(false);
+  videosynth::gui::CapFieldWidthAtSizeHint(spin);
+  return spin;
+}
 
 videosynth::VitsPlacement VitsPlacementFromComboIndex(int index) {
   switch (index) {
@@ -127,10 +171,6 @@ void ProjectSettingsEditor::BuildUi() {
   standard_combo_ = new QComboBox(presets_group);
   sample_encoding_combo_ = new QComboBox(presets_group);
   signal_state_combo_ = new QComboBox(presets_group);
-  pilot_burst_check_ = new QCheckBox(
-      tr("PAL laserdisc pilot burst (IEC 60856 §9.1.2)"), presets_group);
-  vbi_burst_check_ = new QCheckBox(
-      tr("NTSC laserdisc VBI burst (IEC 60857 §9.1.2)"), presets_group);
   setup_ire_check_ =
       new QCheckBox(tr("Override NTSC black setup IRE"), presets_group);
   setup_ire_combo_ = new QComboBox(presets_group);
@@ -140,8 +180,6 @@ void ProjectSettingsEditor::BuildUi() {
   presets_form->addRow(tr("Video standard:"), standard_combo_);
   presets_form->addRow(tr("Sample encoding:"), sample_encoding_combo_);
   presets_form->addRow(tr("Signal state:"), signal_state_combo_);
-  presets_form->addRow(pilot_burst_check_);
-  presets_form->addRow(vbi_burst_check_);
   auto* setup_row = new QHBoxLayout();
   setup_row->addWidget(setup_ire_check_);
   setup_row->addWidget(setup_ire_combo_);
@@ -156,16 +194,6 @@ void ProjectSettingsEditor::BuildUi() {
           &ProjectSettingsEditor::CommitCvbsPresets);
   connect(signal_state_combo_, &QComboBox::activated, this,
           &ProjectSettingsEditor::CommitCvbsPresets);
-  connect(pilot_burst_check_, &QCheckBox::toggled, this, [this] {
-    if (!updating_) {
-      CommitCvbsPresets();
-    }
-  });
-  connect(vbi_burst_check_, &QCheckBox::toggled, this, [this] {
-    if (!updating_) {
-      CommitCvbsPresets();
-    }
-  });
   connect(secam_field_id_check_, &QCheckBox::toggled, this, [this] {
     if (!updating_) {
       CommitCvbsPresets();
@@ -179,46 +207,6 @@ void ProjectSettingsEditor::BuildUi() {
   });
   connect(setup_ire_combo_, &QComboBox::activated, this,
           &ProjectSettingsEditor::CommitCvbsPresets);
-
-  // --- line_injections: (project-wide laserdisc format + VITS set) ---------
-  auto* injections_group = new QGroupBox(tr("Laserdisc && VITS"), this);
-  auto* injections_layout = new QVBoxLayout(injections_group);
-  auto* disc_form = new QFormLayout();
-  disc_type_combo_ = new QComboBox(injections_group);
-  disc_type_combo_->addItem(QString::fromLatin1(kDiscTypeNone));
-  for (const std::string& disc_type : AvailableDiscTypes()) {
-    disc_type_combo_->addItem(QString::fromStdString(disc_type));
-  }
-  disc_form->addRow(tr("Disc format:"), disc_type_combo_);
-
-  vits_placement_combo_ = new QComboBox(injections_group);
-  vits_placement_combo_->addItem(tr("Standard (broadcast lines)"));
-  vits_placement_combo_->addItem(tr("Laserdisc (IEC 60856/60857)"));
-  vits_placement_combo_->addItem(tr("Custom (choose lines)"));
-  disc_form->addRow(tr("VITS placement:"), vits_placement_combo_);
-  injections_layout->addLayout(disc_form);
-
-  connect(vits_placement_combo_, &QComboBox::activated, this,
-          &ProjectSettingsEditor::OnVitsPlacementChanged);
-
-  vits_label_ = new QLabel(injections_group);
-  vits_label_->setWordWrap(true);
-  injections_layout->addWidget(vits_label_);
-
-  auto* vits_host = new QWidget(injections_group);
-  vits_checklist_layout_ = new QGridLayout(vits_host);
-  vits_checklist_layout_->setContentsMargins(0, 0, 0, 0);
-  // Stretch an empty trailing column so each checkbox and its lines edit
-  // pack together on the left.
-  vits_checklist_layout_->setColumnStretch(2, 1);
-  injections_layout->addWidget(vits_host);
-  layout->addWidget(injections_group);
-
-  connect(disc_type_combo_, &QComboBox::activated, this,
-          &ProjectSettingsEditor::CommitLineInjections);
-
-  layout->addWidget(BuildChannelGroup());
-  layout->addWidget(BuildChromaErrorGroup());
 
   // --- output: -------------------------------------------------------------
   auto* output_group = new QGroupBox(tr("Output"), this);
@@ -244,27 +232,32 @@ void ProjectSettingsEditor::BuildUi() {
       output_group);
   outputs_note_->setWordWrap(true);
 
-  // LaserDisc digital audio: one channel pair is additionally encoded as an
-  // EFM stream (IEC 60856:1986 Amd 2 / IEC 60857:1986 Amd 2, clause 13); its
-  // WAV track is written as usual.
-  efm_check_ =
-      new QCheckBox(tr("Encode one channel pair as EFM"), output_group);
-  efm_pair_combo_ = new QComboBox(output_group);
-  auto* efm_row = new QHBoxLayout();
-  efm_row->addWidget(efm_check_);
-  efm_row->addWidget(new QLabel(tr("Pair:"), output_group));
-  efm_row->addWidget(efm_pair_combo_);
-  efm_row->addStretch();
-  efm_hint_ = new QLabel(output_group);
-  efm_hint_->setWordWrap(true);
+  // The component picture that went into the modulator, for scoring
+  // decoders against the source rather than against their own decode.
+  truth_check_ =
+      new QCheckBox(tr("Write the component picture (Y, U, V)"), output_group);
+  truth_check_->setToolTip(
+      tr("Writes “.truth” and its “.truth.meta” sidecar beside the video "
+         "output: the Y, U and V that went into the composite at 4fsc over "
+         "the active window, after the horizontal mapping, luma bandwidth "
+         "limit, chroma low-pass and chroma line sign, and before any "
+         "channel, chroma error, noise or dropout impairment."));
 
   output_form->addRow(tr("Signal type:"), signal_type_combo_);
   output_form->addRow(tr("Video path:"), video_row);
   output_form->addRow(QString(), video_path_hint_);
-  output_form->addRow(tr("Digital audio:"), efm_row);
-  output_form->addRow(QString(), efm_hint_);
+  output_form->addRow(tr("Picture truth:"), truth_check_);
   output_form->addRow(QString(), outputs_note_);
   layout->addWidget(output_group);
+
+  // The remaining groups follow the project file's block order: the signal
+  // content (VITS, then everything LaserDisc-specific in one group that stays
+  // a single title row for projects without a laserdisc block), then the
+  // pressing and capture impairments.
+  layout->addWidget(BuildVitsGroup());
+  layout->addWidget(BuildLaserdiscGroup());
+  layout->addWidget(BuildChannelGroup());
+  layout->addWidget(BuildChromaErrorGroup());
 
   layout->addStretch();
 
@@ -274,13 +267,11 @@ void ProjectSettingsEditor::BuildUi() {
           &ProjectSettingsEditor::CommitOutputTargets);
   connect(browse_button, &QPushButton::clicked, this,
           &ProjectSettingsEditor::OnBrowseVideoPath);
-  connect(efm_check_, &QCheckBox::toggled, this, [this] {
+  connect(truth_check_, &QCheckBox::toggled, this, [this] {
     if (!updating_) {
       CommitOutputTargets();
     }
   });
-  connect(efm_pair_combo_, &QComboBox::activated, this,
-          &ProjectSettingsEditor::CommitOutputTargets);
 }
 
 QWidget* ProjectSettingsEditor::BuildChannelGroup() {
@@ -290,29 +281,17 @@ QWidget* ProjectSettingsEditor::BuildChannelGroup() {
   channel_group_->setCheckable(true);
   channel_group_->setToolTip(
       tr("Impairments of the pressing and its readout. Every project of one "
-         "pressing should use the same channel settings."));
+         "pressing should use the same channel settings. The LaserVision "
+         "replay channel is in the LaserDisc group."));
   auto* outer = new QVBoxLayout(channel_group_);
   outer->setContentsMargins(0, 0, 0, 0);
   auto* body = new QWidget(channel_group_);
   auto* layout = new QVBoxLayout(body);
   auto* form = new QFormLayout();
 
-  const auto make_spin = [](QWidget* parent, double min, double max,
-                            int decimals, double step, const QString& suffix) {
-    auto* spin = new QDoubleSpinBox(parent);
-    spin->setRange(min, max);
-    spin->setDecimals(decimals);
-    spin->setSingleStep(step);
-    spin->setSuffix(suffix);
-    // Commit on Enter or focus loss, not per keystroke.
-    spin->setKeyboardTracking(false);
-    CapFieldWidthAtSizeHint(spin);
-    return spin;
-  };
-
   timing_offset_spin_ =
-      make_spin(body, -limits::kTimingOffsetMaxSamples,
-                limits::kTimingOffsetMaxSamples, 3, 0.05, tr(" samples"));
+      MakeSpin(body, -limits::kTimingOffsetMaxSamples,
+               limits::kTimingOffsetMaxSamples, 3, 0.05, tr(" samples"));
   timing_offset_spin_->setToolTip(
       tr("Sub-sample timing offset in 4fsc samples; positive values make the "
          "signal arrive later."));
@@ -326,39 +305,15 @@ QWidget* ProjectSettingsEditor::BuildChannelGroup() {
          "low-pass, trailing every edge."));
   auto* smear_form = new QFormLayout(edge_smear_group_);
   edge_smear_fraction_spin_ =
-      make_spin(edge_smear_group_, 0.0, limits::kEdgeSmearFractionMax, 3, 0.01,
-                QString());
+      MakeSpin(edge_smear_group_, 0.0, limits::kEdgeSmearFractionMax, 3, 0.01,
+               QString());
   smear_form->addRow(tr("Fraction:"), edge_smear_fraction_spin_);
   edge_smear_tau_spin_ =
-      make_spin(edge_smear_group_, limits::kEdgeSmearTauMinSamples,
-                limits::kEdgeSmearTauMaxSamples, 2, 0.5, tr(" samples"));
+      MakeSpin(edge_smear_group_, limits::kEdgeSmearTauMinSamples,
+               limits::kEdgeSmearTauMaxSamples, 2, 0.5, tr(" samples"));
   smear_form->addRow(tr("Time constant:"), edge_smear_tau_spin_);
   layout->addWidget(edge_smear_group_);
 
-  fm_beat_group_ = new QGroupBox(tr("FM beat (herringbone)"), body);
-  fm_beat_group_->setCheckable(true);
-  fm_beat_group_->setToolTip(
-      tr("The beat between the FM video carrier and the colour signal, "
-         "recorded on the master (625-line PAL only)."));
-  auto* beat_form = new QFormLayout(fm_beat_group_);
-  fm_beat_carrier_spin_ =
-      make_spin(fm_beat_group_, limits::kFmBeatCarrierMinHz,
-                limits::kFmBeatCarrierMaxHz, 0, 1000.0, tr(" Hz"));
-  fm_beat_carrier_spin_->setToolTip(tr("FM video carrier frequency at black."));
-  beat_form->addRow(tr("Carrier at black:"), fm_beat_carrier_spin_);
-  fm_beat_level_spin_ = make_spin(fm_beat_group_, limits::kFmBeatLevelMinDb,
-                                  limits::kFmBeatLevelMaxDb, 1, 1.0, tr(" dB"));
-  fm_beat_level_spin_->setToolTip(
-      tr("Beat level relative to the local chroma amplitude, at the carrier "
-         "for 50 IRE."));
-  beat_form->addRow(tr("Level:"), fm_beat_level_spin_);
-  layout->addWidget(fm_beat_group_);
-  fm_beat_hint_ = new QLabel(
-      tr("The FM beat model is fitted to PAL LaserDisc pressings, so it is "
-         "available for PAL projects only."),
-      body);
-  fm_beat_hint_->setWordWrap(true);
-  layout->addWidget(fm_beat_hint_);
   outer->addWidget(body);
 
   const auto commit = [this] {
@@ -370,10 +325,8 @@ QWidget* ProjectSettingsEditor::BuildChannelGroup() {
   connect(channel_group_, &QGroupBox::toggled, this, commit);
   body->setVisible(channel_group_->isChecked());
   connect(edge_smear_group_, &QGroupBox::toggled, this, commit);
-  connect(fm_beat_group_, &QGroupBox::toggled, this, commit);
   for (QDoubleSpinBox* spin :
-       {timing_offset_spin_, edge_smear_fraction_spin_, edge_smear_tau_spin_,
-        fm_beat_carrier_spin_, fm_beat_level_spin_}) {
+       {timing_offset_spin_, edge_smear_fraction_spin_, edge_smear_tau_spin_}) {
     connect(spin, &QDoubleSpinBox::valueChanged, this, commit);
   }
   return channel_group_;
@@ -393,25 +346,13 @@ QWidget* ProjectSettingsEditor::BuildChromaErrorGroup() {
   auto* layout = new QVBoxLayout(body);
   auto* form = new QFormLayout();
 
-  const auto make_spin = [](QWidget* parent, double min, double max,
-                            int decimals, double step, const QString& suffix) {
-    auto* spin = new QDoubleSpinBox(parent);
-    spin->setRange(min, max);
-    spin->setDecimals(decimals);
-    spin->setSingleStep(step);
-    spin->setSuffix(suffix);
-    spin->setKeyboardTracking(false);
-    CapFieldWidthAtSizeHint(spin);
-    return spin;
-  };
-
-  chroma_gain_spin_ = make_spin(body, limits::kChromaGainMin,
-                                limits::kChromaGainMax, 3, 0.01, QString());
+  chroma_gain_spin_ = MakeSpin(body, limits::kChromaGainMin,
+                               limits::kChromaGainMax, 3, 0.01, QString());
   chroma_gain_spin_->setToolTip(
       tr("Chroma gain; 1.0 leaves saturation as is."));
   form->addRow(tr("Gain:"), chroma_gain_spin_);
-  chroma_phase_spin_ = make_spin(body, -limits::kChromaPhaseMaxDeg,
-                                 limits::kChromaPhaseMaxDeg, 2, 0.5, tr("°"));
+  chroma_phase_spin_ = MakeSpin(body, -limits::kChromaPhaseMaxDeg,
+                                limits::kChromaPhaseMaxDeg, 2, 0.5, tr("°"));
   chroma_phase_spin_->setToolTip(tr("Chroma phase advance (hue error)."));
   form->addRow(tr("Phase:"), chroma_phase_spin_);
   chroma_include_burst_check_ = new QCheckBox(tr("Include burst"), body);
@@ -429,12 +370,12 @@ QWidget* ProjectSettingsEditor::BuildChromaErrorGroup() {
          "standard deviations."));
   auto* jitter_form = new QFormLayout(chroma_jitter_group_);
   jitter_phase_spin_ =
-      make_spin(chroma_jitter_group_, 0.0, limits::kChromaJitterPhaseMaxDeg, 2,
-                0.1, tr("°"));
+      MakeSpin(chroma_jitter_group_, 0.0, limits::kChromaJitterPhaseMaxDeg, 2,
+               0.1, tr("°"));
   jitter_form->addRow(tr("Phase deviation:"), jitter_phase_spin_);
   jitter_gain_spin_ =
-      make_spin(chroma_jitter_group_, 0.0, limits::kChromaJitterGainMax, 3,
-                0.005, QString());
+      MakeSpin(chroma_jitter_group_, 0.0, limits::kChromaJitterGainMax, 3,
+               0.005, QString());
   jitter_form->addRow(tr("Gain deviation:"), jitter_gain_spin_);
   jitter_seed_check_ = new QCheckBox(tr("Fixed seed"), chroma_jitter_group_);
   jitter_seed_edit_ = new QLineEdit(chroma_jitter_group_);
@@ -445,6 +386,55 @@ QWidget* ProjectSettingsEditor::BuildChromaErrorGroup() {
   seed_row->addStretch();
   jitter_form->addRow(seed_row);
   layout->addWidget(chroma_jitter_group_);
+
+  differential_group_ = new QGroupBox(tr("Differential gain and phase"), body);
+  differential_group_->setCheckable(true);
+  differential_group_->setToolTip(
+      tr("Chroma gain and phase that depend on the luma level the chroma sits "
+         "on (0 IRE at blanking, 100 IRE at white). Each curve's breakpoints "
+         "are joined by straight lines and held beyond its ends; an empty "
+         "curve leaves the chroma as is."));
+  auto* differential_layout = new QVBoxLayout(differential_group_);
+  differential_layout->addWidget(new QLabel(tr("Gain:"), differential_group_));
+  differential_gain_editor_ = new CurvePointsEditor(
+      CurveAxis{tr("Level"), limits::kDifferentialLevelMinIre,
+                limits::kDifferentialLevelMaxIre, 1, 5.0, tr(" IRE")},
+      CurveAxis{tr("Gain"), limits::kDifferentialGainMin,
+                limits::kDifferentialGainMax, 3, 0.01, QString()},
+      kCurvePointStepIre, CurvePoint{0.0, 1.0}, differential_group_);
+  differential_layout->addWidget(differential_gain_editor_);
+  differential_layout->addWidget(new QLabel(tr("Phase:"), differential_group_));
+  differential_phase_editor_ = new CurvePointsEditor(
+      CurveAxis{tr("Level"), limits::kDifferentialLevelMinIre,
+                limits::kDifferentialLevelMaxIre, 1, 5.0, tr(" IRE")},
+      CurveAxis{tr("Phase"), -limits::kDifferentialPhaseMaxDeg,
+                limits::kDifferentialPhaseMaxDeg, 2, 0.5, tr("°")},
+      kCurvePointStepIre, CurvePoint{0.0, 0.0}, differential_group_);
+  differential_layout->addWidget(differential_phase_editor_);
+  layout->addWidget(differential_group_);
+
+  crosstalk_group_ = new QGroupBox(tr("Crosstalk"), body);
+  crosstalk_group_->setCheckable(true);
+  crosstalk_group_->setToolTip(
+      tr("Mixing of the decoded colour-difference signals: U gains a share "
+         "of V and V a share of U."));
+  auto* crosstalk_form = new QFormLayout(crosstalk_group_);
+  crosstalk_v_to_u_spin_ = MakeSpin(crosstalk_group_, -limits::kCrosstalkMax,
+                                    limits::kCrosstalkMax, 3, 0.005, QString());
+  crosstalk_v_to_u_spin_->setToolTip(tr("Share of V added to U."));
+  crosstalk_form->addRow(tr("V into U:"), crosstalk_v_to_u_spin_);
+  crosstalk_u_to_v_spin_ = MakeSpin(crosstalk_group_, -limits::kCrosstalkMax,
+                                    limits::kCrosstalkMax, 3, 0.005, QString());
+  crosstalk_u_to_v_spin_->setToolTip(tr("Share of U added to V."));
+  crosstalk_form->addRow(tr("U into V:"), crosstalk_u_to_v_spin_);
+  crosstalk_alternate_check_ =
+      new QCheckBox(tr("Alternate with PAL V-switch"), crosstalk_group_);
+  crosstalk_alternate_check_->setToolTip(
+      tr("Flip the sign of the mixing on alternate lines with the PAL "
+         "V-switch (PAL and PAL-M only)."));
+  crosstalk_form->addRow(QString(), crosstalk_alternate_check_);
+  layout->addWidget(crosstalk_group_);
+
   chroma_error_hint_ = new QLabel(
       tr("Chroma error models a quadrature (PAL/NTSC) chroma path, so it is "
          "not available for SECAM."),
@@ -462,9 +452,17 @@ QWidget* ProjectSettingsEditor::BuildChromaErrorGroup() {
   connect(chroma_error_group_, &QGroupBox::toggled, this, commit);
   body->setVisible(chroma_error_group_->isChecked());
   connect(chroma_jitter_group_, &QGroupBox::toggled, this, commit);
+  connect(differential_group_, &QGroupBox::toggled, this, commit);
+  connect(crosstalk_group_, &QGroupBox::toggled, this, commit);
   connect(chroma_include_burst_check_, &QCheckBox::toggled, this, commit);
-  for (QDoubleSpinBox* spin : {chroma_gain_spin_, chroma_phase_spin_,
-                               jitter_phase_spin_, jitter_gain_spin_}) {
+  connect(crosstalk_alternate_check_, &QCheckBox::toggled, this, commit);
+  connect(differential_gain_editor_, &CurvePointsEditor::CurveEdited, this,
+          commit);
+  connect(differential_phase_editor_, &CurvePointsEditor::CurveEdited, this,
+          commit);
+  for (QDoubleSpinBox* spin :
+       {chroma_gain_spin_, chroma_phase_spin_, jitter_phase_spin_,
+        jitter_gain_spin_, crosstalk_v_to_u_spin_, crosstalk_u_to_v_spin_}) {
     connect(spin, &QDoubleSpinBox::valueChanged, this, commit);
   }
   connect(jitter_seed_check_, &QCheckBox::toggled, this, [this](bool checked) {
@@ -477,6 +475,256 @@ QWidget* ProjectSettingsEditor::BuildChromaErrorGroup() {
   return chroma_error_group_;
 }
 
+QWidget* ProjectSettingsEditor::BuildVitsGroup() {
+  // --- line_injections: (project-wide VITS set) ----------------------------
+  auto* vits_group = new QGroupBox(tr("VITS"), this);
+  auto* vits_layout = new QVBoxLayout(vits_group);
+  auto* placement_form = new QFormLayout();
+  vits_placement_combo_ = new QComboBox(vits_group);
+  vits_placement_combo_->addItem(tr("Standard (broadcast lines)"));
+  vits_placement_combo_->addItem(tr("Laserdisc (IEC 60856/60857)"));
+  vits_placement_combo_->addItem(tr("Custom (choose lines)"));
+  placement_form->addRow(tr("Placement:"), vits_placement_combo_);
+  vits_layout->addLayout(placement_form);
+
+  connect(vits_placement_combo_, &QComboBox::activated, this,
+          &ProjectSettingsEditor::OnVitsPlacementChanged);
+
+  vits_label_ = new QLabel(vits_group);
+  vits_label_->setWordWrap(true);
+  vits_layout->addWidget(vits_label_);
+
+  auto* vits_host = new QWidget(vits_group);
+  vits_checklist_layout_ = new QGridLayout(vits_host);
+  vits_checklist_layout_->setContentsMargins(0, 0, 0, 0);
+  // Stretch an empty trailing column so each checkbox and its lines edit
+  // pack together on the left.
+  vits_checklist_layout_->setColumnStretch(2, 1);
+  vits_layout->addWidget(vits_host);
+  return vits_group;
+}
+
+QWidget* ProjectSettingsEditor::BuildLaserdiscGroup() {
+  // --- laserdisc: (LaserVision disc, its audio and its channel) ------------
+  laserdisc_group_ = new QGroupBox(tr("LaserDisc"), this);
+  laserdisc_group_->setCheckable(true);
+  laserdisc_group_->setToolTip(
+      tr("LaserDisc (LaserVision) properties of the project: the disc "
+         "format, the LaserDisc-only signal features, digital audio and the "
+         "pressing and replay channel. Untick for a project that is not a "
+         "LaserDisc; sections then carry no disc area or codes."));
+  auto* outer = new QVBoxLayout(laserdisc_group_);
+  outer->setContentsMargins(0, 0, 0, 0);
+  auto* body = new QWidget(laserdisc_group_);
+  auto* layout = new QVBoxLayout(body);
+  auto* form = new QFormLayout();
+
+  disc_type_combo_ = new QComboBox(body);
+  disc_type_combo_->addItem(QString::fromLatin1(kDiscTypeNone));
+  for (const std::string& disc_type : AvailableDiscTypes()) {
+    disc_type_combo_->addItem(QString::fromStdString(disc_type));
+  }
+  disc_type_combo_->setToolTip(
+      tr("CAV (picture numbers) or CLV (time codes). Sections need a disc "
+         "format before they can carry laserdisc codes."));
+  form->addRow(tr("Disc format:"), disc_type_combo_);
+
+  pilot_burst_check_ =
+      new QCheckBox(tr("PAL pilot burst (IEC 60856 §9.1.2)"), body);
+  pilot_burst_check_->setToolTip(
+      tr("The 3.75 MHz pilot burst on every sync pulse (PAL only)."));
+  form->addRow(pilot_burst_check_);
+  vbi_burst_check_ =
+      new QCheckBox(tr("NTSC VBI burst (IEC 60857 §9.1.2)"), body);
+  vbi_burst_check_->setToolTip(
+      tr("The colour burst kept on every vertical-interval line (NTSC "
+         "only)."));
+  form->addRow(vbi_burst_check_);
+
+  // LaserDisc digital audio: one channel pair is additionally encoded as an
+  // EFM stream (IEC 60856:1986 Amd 2 / IEC 60857:1986 Amd 2, clause 13); its
+  // WAV track is written as usual.
+  efm_check_ = new QCheckBox(tr("Encode one channel pair as EFM"), body);
+  efm_pair_combo_ = new QComboBox(body);
+  auto* efm_row = new QHBoxLayout();
+  efm_row->addWidget(efm_check_);
+  efm_row->addWidget(new QLabel(tr("Pair:"), body));
+  efm_row->addWidget(efm_pair_combo_);
+  efm_row->addStretch();
+  efm_hint_ = new QLabel(body);
+  efm_hint_->setWordWrap(true);
+  form->addRow(tr("Digital audio:"), efm_row);
+  form->addRow(QString(), efm_hint_);
+  layout->addLayout(form);
+
+  layout->addWidget(BuildLaserdiscChannelGroup(body));
+  outer->addWidget(body);
+
+  laserdisc_hint_ = new QLabel(
+      tr("There is no SECAM LaserVision format, so the LaserDisc settings are "
+         "not available for SECAM projects."),
+      laserdisc_group_);
+  laserdisc_hint_->setWordWrap(true);
+  outer->addWidget(laserdisc_hint_);
+
+  const auto commit = [this] {
+    if (!updating_) {
+      CommitLaserdisc();
+    }
+  };
+  connect(laserdisc_group_, &QGroupBox::toggled, body, &QWidget::setVisible);
+  connect(laserdisc_group_, &QGroupBox::toggled, this, commit);
+  body->setVisible(laserdisc_group_->isChecked());
+  connect(disc_type_combo_, &QComboBox::activated, this, commit);
+  connect(pilot_burst_check_, &QCheckBox::toggled, this, commit);
+  connect(vbi_burst_check_, &QCheckBox::toggled, this, commit);
+  connect(efm_check_, &QCheckBox::toggled, this, commit);
+  connect(efm_pair_combo_, &QComboBox::activated, this, commit);
+  return laserdisc_group_;
+}
+
+QWidget* ProjectSettingsEditor::BuildLaserdiscChannelGroup(QWidget* parent) {
+  namespace limits = project_editor_limits;
+  ld_channel_group_ =
+      new QGroupBox(tr("LaserVision channel (pressing)"), parent);
+  ld_channel_group_->setCheckable(true);
+  ld_channel_group_->setToolTip(
+      tr("What the master, the disc and a player's replay path do to the "
+         "video signal. It belongs to the pressing, so every project of one "
+         "pressing should use the same settings."));
+  auto* outer = new QVBoxLayout(ld_channel_group_);
+  outer->setContentsMargins(0, 0, 0, 0);
+  auto* body = new QWidget(ld_channel_group_);
+  auto* layout = new QVBoxLayout(body);
+  fm_beat_group_ = new QGroupBox(tr("FM beat (herringbone)"), body);
+  fm_beat_group_->setCheckable(true);
+  fm_beat_group_->setToolTip(
+      tr("The beat between the FM video carrier and the colour signal, "
+         "recorded on the master (625-line PAL only)."));
+  auto* beat_form = new QFormLayout(fm_beat_group_);
+  fm_beat_carrier_spin_ =
+      MakeSpin(fm_beat_group_, limits::kFmBeatCarrierMinHz,
+               limits::kFmBeatCarrierMaxHz, 0, 1000.0, tr(" Hz"));
+  fm_beat_carrier_spin_->setToolTip(tr("FM video carrier frequency at black."));
+  beat_form->addRow(tr("Carrier at black:"), fm_beat_carrier_spin_);
+  fm_beat_level_spin_ = MakeSpin(fm_beat_group_, limits::kFmBeatLevelMinDb,
+                                 limits::kFmBeatLevelMaxDb, 1, 1.0, tr(" dB"));
+  fm_beat_level_spin_->setToolTip(
+      tr("Beat level relative to the local chroma amplitude, at the carrier "
+         "for 50 IRE."));
+  beat_form->addRow(tr("Level:"), fm_beat_level_spin_);
+  layout->addWidget(fm_beat_group_);
+  fm_beat_hint_ = new QLabel(
+      tr("The FM beat model is fitted to PAL LaserDisc pressings, so it is "
+         "available for PAL projects only."),
+      body);
+  fm_beat_hint_->setWordWrap(true);
+  layout->addWidget(fm_beat_hint_);
+
+  group_delay_group_ = new QGroupBox(tr("Group delay"), body);
+  group_delay_group_->setCheckable(true);
+  group_delay_group_->setToolTip(
+      tr("The LaserVision group-delay pre-distortion: an all-pass element "
+         "whose delay follows a curve relative to its lowest breakpoint, "
+         "scaled by the fraction of the recorded pre-distortion left in the "
+         "signal."));
+  auto* delay_form = new QFormLayout(group_delay_group_);
+  group_delay_preset_combo_ = new QComboBox(group_delay_group_);
+  group_delay_preset_combo_->addItem(tr("IEC 60856 nominal"));
+  group_delay_preset_combo_->addItem(tr("Custom curve"));
+  group_delay_preset_combo_->setToolTip(
+      tr("IEC 60856 nominal: the PAL LaserVision pre-distortion of IEC 60856 "
+         "§9.1.6 (PAL only). Custom curve: your own [MHz, ns] breakpoints."));
+  delay_form->addRow(tr("Curve:"), group_delay_preset_combo_);
+  group_delay_curve_editor_ = new CurvePointsEditor(
+      CurveAxis{tr("Frequency"), 0.0, 0.0, 2, 0.1, tr(" MHz")},
+      CurveAxis{tr("Delay"), -limits::kGroupDelayMaxNs,
+                limits::kGroupDelayMaxNs, 1, 5.0, tr(" ns")},
+      kCurvePointStepMhz, CurvePoint{kGroupDelayReferenceMhz, 0.0},
+      group_delay_group_);
+  delay_form->addRow(group_delay_curve_editor_);
+  group_delay_scale_spin_ =
+      MakeSpin(group_delay_group_, -limits::kGroupDelayScaleMax,
+               limits::kGroupDelayScaleMax, 2, 0.05, QString());
+  group_delay_scale_spin_->setToolTip(
+      tr("Fraction of the curve applied: 1 leaves the full pre-distortion in "
+         "the signal, 0 none, negative values correct it."));
+  delay_form->addRow(tr("Scale:"), group_delay_scale_spin_);
+  layout->addWidget(group_delay_group_);
+
+  auto* response_group = new QGroupBox(tr("Replay response"), body);
+  response_group->setToolTip(
+      tr("Linear-phase amplitude response of the replay path, as [MHz, dB] "
+         "breakpoints: one fixed response, or responses at several disc "
+         "positions interpolated by picture number."));
+  auto* response_layout = new QVBoxLayout(response_group);
+  auto* response_form = new QFormLayout();
+  response_mode_combo_ = new QComboBox(response_group);
+  response_mode_combo_->addItem(tr("None"));
+  response_mode_combo_->addItem(tr("Fixed response"));
+  response_mode_combo_->addItem(tr("By disc position"));
+  response_form->addRow(tr("Response:"), response_mode_combo_);
+  response_layout->addLayout(response_form);
+  response_curve_editor_ = new CurvePointsEditor(
+      CurveAxis{tr("Frequency"), 0.0, 0.0, 2, 0.1, tr(" MHz")},
+      CurveAxis{tr("Response"), limits::kReplayResponseMinDb,
+                limits::kReplayResponseMaxDb, 1, 0.5, tr(" dB")},
+      kCurvePointStepMhz, CurvePoint{kGroupDelayReferenceMhz, 0.0},
+      response_group);
+  response_layout->addWidget(response_curve_editor_);
+  response_by_picture_editor_ = new ResponseByPictureEditor(response_group);
+  response_layout->addWidget(response_by_picture_editor_);
+  layout->addWidget(response_group);
+
+  field2_offset_group_ = new QGroupBox(tr("Field-2 offset"), body);
+  field2_offset_group_->setCheckable(true);
+  field2_offset_group_->setToolTip(
+      tr("Misregistration of field 2 against field 1, applied to the picture "
+         "rows field 2 carries before encoding."));
+  auto* offset_form = new QFormLayout(field2_offset_group_);
+  field2_x_spin_ =
+      MakeSpin(field2_offset_group_, -limits::kField2OffsetMaxSamples,
+               limits::kField2OffsetMaxSamples, 3, 0.05, tr(" samples"));
+  field2_x_spin_->setToolTip(
+      tr("Horizontal offset in 4fsc samples; positive moves field 2 right."));
+  offset_form->addRow(tr("Horizontal:"), field2_x_spin_);
+  field2_y_spin_ =
+      MakeSpin(field2_offset_group_, -limits::kField2OffsetMaxLines,
+               limits::kField2OffsetMaxLines, 3, 0.05, tr(" lines"));
+  field2_y_spin_->setToolTip(
+      tr("Vertical offset in frame lines; positive moves field 2 down."));
+  offset_form->addRow(tr("Vertical:"), field2_y_spin_);
+  layout->addWidget(field2_offset_group_);
+  outer->addWidget(body);
+
+  const auto commit = [this] {
+    if (!updating_) {
+      CommitLaserdisc();
+    }
+  };
+  connect(ld_channel_group_, &QGroupBox::toggled, body, &QWidget::setVisible);
+  connect(ld_channel_group_, &QGroupBox::toggled, this, commit);
+  body->setVisible(ld_channel_group_->isChecked());
+  for (QGroupBox* group :
+       {fm_beat_group_, group_delay_group_, field2_offset_group_}) {
+    connect(group, &QGroupBox::toggled, this, commit);
+  }
+  for (QDoubleSpinBox* spin :
+       {fm_beat_carrier_spin_, fm_beat_level_spin_, group_delay_scale_spin_,
+        field2_x_spin_, field2_y_spin_}) {
+    connect(spin, &QDoubleSpinBox::valueChanged, this, commit);
+  }
+  connect(group_delay_preset_combo_, &QComboBox::activated, this, commit);
+  connect(response_mode_combo_, &QComboBox::activated, this, commit);
+  connect(group_delay_curve_editor_, &CurvePointsEditor::CurveEdited, this,
+          commit);
+  connect(response_curve_editor_, &CurvePointsEditor::CurveEdited, this,
+          commit);
+  connect(response_by_picture_editor_, &ResponseByPictureEditor::EntriesEdited,
+          this, commit);
+  return ld_channel_group_;
+}
+
 void ProjectSettingsEditor::LoadChannelAndChromaError(const Project& project) {
   const ChannelParameters& channel = project.channel;
   channel_group_->setChecked(channel.enabled);
@@ -484,9 +732,6 @@ void ProjectSettingsEditor::LoadChannelAndChromaError(const Project& project) {
   edge_smear_group_->setChecked(channel.edge_smear.enabled);
   edge_smear_fraction_spin_->setValue(channel.edge_smear.fraction);
   edge_smear_tau_spin_->setValue(channel.edge_smear.tau_samples);
-  fm_beat_group_->setChecked(channel.fm_beat.enabled);
-  fm_beat_carrier_spin_->setValue(channel.fm_beat.carrier_black_hz);
-  fm_beat_level_spin_->setValue(channel.fm_beat.level_db);
 
   const ChromaErrorParameters& chroma_error = project.chroma_error;
   chroma_error_group_->setChecked(chroma_error.enabled);
@@ -503,6 +748,78 @@ void ProjectSettingsEditor::LoadChannelAndChromaError(const Project& project) {
       jitter.seed_specified
           ? QString::number(static_cast<qlonglong>(jitter.seed))
           : QString());
+  const DifferentialParameters& differential = chroma_error.differential;
+  differential_group_->setChecked(differential.enabled);
+  differential_gain_editor_->SetPoints(ToCurvePoints(differential.gain));
+  differential_phase_editor_->SetPoints(ToCurvePoints(differential.phase_deg));
+  const CrosstalkParameters& crosstalk = chroma_error.crosstalk;
+  crosstalk_group_->setChecked(crosstalk.enabled);
+  crosstalk_v_to_u_spin_->setValue(crosstalk.v_to_u);
+  crosstalk_u_to_v_spin_->setValue(crosstalk.u_to_v);
+  crosstalk_alternate_check_->setChecked(crosstalk.alternate_with_switch);
+}
+
+void ProjectSettingsEditor::LoadLaserdisc(const Project& project) {
+  const LaserdiscParameters& laserdisc = project.laserdisc;
+  laserdisc_group_->setChecked(laserdisc.enabled);
+
+  const QString disc_type = laserdisc.disc_type.empty()
+                                ? QString::fromLatin1(kDiscTypeNone)
+                                : QString::fromStdString(laserdisc.disc_type);
+  int disc_index = disc_type_combo_->findText(disc_type);
+  if (disc_index < 0) {
+    // Preserve values the catalogue does not know (kept for round-trips).
+    disc_type_combo_->addItem(disc_type);
+    disc_index = disc_type_combo_->count() - 1;
+  }
+  disc_type_combo_->setCurrentIndex(disc_index);
+  pilot_burst_check_->setChecked(laserdisc.pilot_burst);
+  vbi_burst_check_->setChecked(laserdisc.vbi_burst);
+
+  const ProjectSettingsFormState state = BuildProjectSettingsFormState(project);
+  efm_pair_combo_->clear();
+  for (const int pair : state.efm_pair_options) {
+    efm_pair_combo_->addItem(QString::number(pair), pair);
+  }
+  const int efm_pair_index =
+      efm_pair_combo_->findData(laserdisc.efm_audio.pair);
+  efm_pair_combo_->setCurrentIndex(efm_pair_index >= 0 ? efm_pair_index : 0);
+  efm_check_->setChecked(laserdisc.efm_audio.enabled);
+
+  const LaserdiscChannelParameters& channel = laserdisc.channel;
+  ld_channel_group_->setChecked(channel.enabled);
+  fm_beat_group_->setChecked(channel.fm_beat.enabled);
+  fm_beat_carrier_spin_->setValue(channel.fm_beat.carrier_black_hz);
+  fm_beat_level_spin_->setValue(channel.fm_beat.level_db);
+
+  const double max_frequency_mhz =
+      NoiseSpectrumMaxFrequencyMhz(project.cvbs_presets.video_standard_preset);
+  const GroupDelayParameters& group_delay = channel.group_delay;
+  group_delay_group_->setChecked(group_delay.enabled);
+  const bool custom_delay = group_delay.preset == GroupDelayPreset::kCustom;
+  group_delay_preset_combo_->setCurrentIndex(
+      custom_delay ? kGroupDelayCustomIndex : kGroupDelayNominalIndex);
+  group_delay_curve_editor_->SetXRange(0.0, max_frequency_mhz);
+  group_delay_curve_editor_->SetPoints(ToCurvePoints(group_delay.points_ns));
+  group_delay_curve_editor_->setVisible(custom_delay);
+  group_delay_scale_spin_->setValue(group_delay.scale);
+
+  const ReplayResponseMode response_mode = ReplayResponseModeOf(channel);
+  response_mode_combo_->setCurrentIndex(
+      ComboIndexFromResponseMode(response_mode));
+  response_curve_editor_->SetXRange(0.0, max_frequency_mhz);
+  response_curve_editor_->SetPoints(ToCurvePoints(channel.response_db));
+  response_curve_editor_->setVisible(response_mode ==
+                                     ReplayResponseMode::kFixed);
+  response_by_picture_editor_->SetEntries(channel.response_by_picture,
+                                          max_frequency_mhz);
+  response_by_picture_editor_->setVisible(response_mode ==
+                                          ReplayResponseMode::kByPicture);
+
+  const Field2OffsetParameters& offset = channel.field2_offset;
+  field2_offset_group_->setChecked(offset.enabled);
+  field2_x_spin_->setValue(offset.x_samples);
+  field2_y_spin_->setValue(offset.y_lines);
 }
 
 void ProjectSettingsEditor::LoadFromDocument() {
@@ -553,40 +870,21 @@ void ProjectSettingsEditor::LoadFromDocument() {
       setup_ire_combo_->findData(project.cvbs_presets.ntsc_black_setup_ire);
   setup_ire_combo_->setCurrentIndex(ire_index >= 0 ? ire_index : 0);
 
-  pilot_burst_check_->setChecked(
-      project.cvbs_presets.pal_laserdisc_pilot_burst);
-  vbi_burst_check_->setChecked(project.cvbs_presets.ntsc_laserdisc_vbi_burst);
   setup_ire_check_->setChecked(
       project.cvbs_presets.ntsc_black_setup_ire_specified);
   secam_field_id_check_->setChecked(
       project.cvbs_presets.secam_field_identification);
 
-  const QString disc_type =
-      project.line_injections.disc_type.empty()
-          ? QString::fromLatin1(kDiscTypeNone)
-          : QString::fromStdString(project.line_injections.disc_type);
-  int disc_index = disc_type_combo_->findText(disc_type);
-  if (disc_index < 0) {
-    disc_type_combo_->addItem(disc_type);
-    disc_index = disc_type_combo_->count() - 1;
-  }
-  disc_type_combo_->setCurrentIndex(disc_index);
   vits_placement_combo_->setCurrentIndex(
       ComboIndexFromVitsPlacement(project.line_injections.placement));
   RebuildVitsChecklist();
 
   video_path_edit_->setText(QString::fromStdString(project.output.video_path));
 
-  efm_pair_combo_->clear();
-  for (const int pair : state.efm_pair_options) {
-    efm_pair_combo_->addItem(QString::number(pair), pair);
-  }
-  const int efm_pair_index =
-      efm_pair_combo_->findData(project.output.efm_audio.pair);
-  efm_pair_combo_->setCurrentIndex(efm_pair_index >= 0 ? efm_pair_index : 0);
-  efm_check_->setChecked(project.output.efm_audio.enabled);
+  truth_check_->setChecked(project.output.truth);
 
   LoadChannelAndChromaError(project);
+  LoadLaserdisc(project);
 
   ApplyEnablement();
   updating_ = false;
@@ -680,11 +978,8 @@ void ProjectSettingsEditor::ApplyEnablement() {
   const ProjectSettingsFormState state =
       BuildProjectSettingsFormState(document_->project());
   standard_combo_->setEnabled(standard_editable_);
-  pilot_burst_check_->setEnabled(state.pilot_burst_editable);
-  vbi_burst_check_->setEnabled(state.vbi_burst_editable);
   setup_ire_check_->setEnabled(state.setup_ire_editable);
   secam_field_id_check_->setEnabled(state.secam_field_identification_editable);
-  disc_type_combo_->setEnabled(state.laserdisc_editable);
   if (auto* placement_model =
           qobject_cast<QStandardItemModel*>(vits_placement_combo_->model())) {
     if (QStandardItem* laserdisc_item =
@@ -702,23 +997,51 @@ void ProjectSettingsEditor::ApplyEnablement() {
 
   // A block the standard cannot carry stays enabled while it is set, so the
   // user can still untick it; the hint explains the validation error.
-  fm_beat_group_->setEnabled(state.fm_beat_editable ||
-                             fm_beat_group_->isChecked());
-  fm_beat_hint_->setVisible(!state.fm_beat_editable);
   chroma_error_group_->setEnabled(state.chroma_error_editable ||
                                   chroma_error_group_->isChecked());
   chroma_error_hint_->setVisible(!state.chroma_error_editable);
+  crosstalk_alternate_check_->setEnabled(
+      state.crosstalk_alternate_editable ||
+      crosstalk_alternate_check_->isChecked());
 
-  efm_check_->setEnabled(state.efm_output_editable);
+  ApplyLaserdiscEnablement(state);
+  truth_check_->setEnabled(state.truth_editable || truth_check_->isChecked());
+}
+
+void ProjectSettingsEditor::ApplyLaserdiscEnablement(
+    const ProjectSettingsFormState& state) {
+  laserdisc_group_->setEnabled(state.laserdisc_editable ||
+                               laserdisc_group_->isChecked());
+  laserdisc_hint_->setVisible(!state.laserdisc_editable);
+  // A flag the standard cannot carry stays enabled while it is set, so the
+  // user can still untick it; the issues dock explains the error.
+  pilot_burst_check_->setEnabled(state.pilot_burst_editable ||
+                                 pilot_burst_check_->isChecked());
+  vbi_burst_check_->setEnabled(state.vbi_burst_editable ||
+                               vbi_burst_check_->isChecked());
+  efm_check_->setEnabled(state.efm_output_editable || efm_check_->isChecked());
   efm_pair_combo_->setEnabled(state.efm_pair_editable);
   efm_hint_->setText(EfmStatusText(state.efm_status));
+
+  fm_beat_group_->setEnabled(state.fm_beat_editable ||
+                             fm_beat_group_->isChecked());
+  fm_beat_hint_->setVisible(!state.fm_beat_editable);
+  if (auto* preset_model = qobject_cast<QStandardItemModel*>(
+          group_delay_preset_combo_->model())) {
+    if (QStandardItem* nominal_item =
+            preset_model->item(kGroupDelayNominalIndex)) {
+      nominal_item->setEnabled(state.group_delay_nominal_editable ||
+                               group_delay_preset_combo_->currentIndex() ==
+                                   kGroupDelayNominalIndex);
+    }
+  }
 }
 
 // Renders the presenter's EFM outcome as the sentence shown beneath the
 // controls. The wording mirrors the validator messages for the same
 // conditions so the form and the issues dock agree.
 QString ProjectSettingsEditor::EfmStatusText(EfmOutputStatus status) const {
-  const int pair = document_->project().output.efm_audio.pair;
+  const int pair = document_->project().laserdisc.efm_audio.pair;
   switch (status) {
     case EfmOutputStatus::kUnsupportedStandard:
       return tr(
@@ -768,8 +1091,6 @@ void ProjectSettingsEditor::CommitCvbsPresets() {
       sample_encoding_combo_->currentText().toStdString();
   presets.signal_state_preset =
       signal_state_combo_->currentText().toStdString();
-  presets.pal_laserdisc_pilot_burst = pilot_burst_check_->isChecked();
-  presets.ntsc_laserdisc_vbi_burst = vbi_burst_check_->isChecked();
   presets.ntsc_black_setup_ire_specified = setup_ire_check_->isChecked();
   presets.secam_field_identification = secam_field_id_check_->isChecked();
   presets.ntsc_black_setup_ire =
@@ -785,17 +1106,18 @@ void ProjectSettingsEditor::CommitCvbsPresets() {
   // stays previewable; user-chosen sources are left untouched.
   const Standard new_standard = presets.video_standard_preset;
   if (new_standard != old_standard) {
-    // LaserDisc digital audio only exists for PAL and NTSC, so switching to a
-    // standard without it clears the selection rather than leaving a setting
-    // the validator would reject.
-    OutputTargets output = NormalizeOutputTargetsForStandard(
-        document_->project().output, new_standard);
-    if (!(output == document_->project().output)) {
-      document_->SetOutputTargets(output);
+    // Clear the settings the new standard cannot carry rather than leave
+    // ones the validator would reject: the picture truth (not SECAM), the
+    // LaserDisc block (none for SECAM; pilot burst, FM beat and the nominal
+    // group delay PAL-only, VBI burst NTSC-only, EFM per
+    // StandardHasLaserdiscDigitalAudio) and the chroma error (not SECAM).
+    document_->SetOutputTargets(NormalizeOutputTargetsForStandard(
+        document_->project().output, new_standard));
+    document_->SetLaserdisc(NormalizeLaserdiscForStandard(
+        document_->project().laserdisc, new_standard));
+    if (!document_->project().laserdisc.enabled) {
+      ClearSectionLaserdiscBlocks();
     }
-    // Likewise the FM beat (PAL only) and the chroma error (not SECAM).
-    document_->SetChannel(NormalizeChannelForStandard(
-        document_->project().channel, new_standard));
     document_->SetChromaError(NormalizeChromaErrorForStandard(
         document_->project().chroma_error, new_standard));
 
@@ -829,8 +1151,6 @@ void ProjectSettingsEditor::CommitLineInjections() {
   }
 
   ProjectLineInjections li;
-  const std::string disc = disc_type_combo_->currentText().toStdString();
-  li.disc_type = (disc == kDiscTypeNone) ? std::string() : disc;
   li.placement =
       VitsPlacementFromComboIndex(vits_placement_combo_->currentIndex());
 
@@ -862,8 +1182,8 @@ void ProjectSettingsEditor::OnVitsPlacementChanged() {
   const VitsPlacement placement =
       VitsPlacementFromComboIndex(vits_placement_combo_->currentIndex());
 
-  // Start from the current model so disc_type and any manual VITS set are
-  // preserved where the new mode allows it.
+  // Start from the current model so any manual VITS set is preserved where
+  // the new mode allows it.
   ProjectLineInjections li = document_->project().line_injections;
   li.placement = placement;
   switch (placement) {
@@ -940,8 +1260,7 @@ void ProjectSettingsEditor::CommitOutputTargets() {
   // All outputs are co-located with the video; the metadata path is always
   // derived from it rather than set independently.
   output.metadata_path = DeriveMetadataPath(output.video_path);
-  output.efm_audio.enabled = efm_check_->isChecked();
-  output.efm_audio.pair = efm_pair_combo_->currentData().toInt();
+  output.truth = truth_check_->isChecked();
   output = NormalizeOutputTargetsForStandard(
       std::move(output),
       document_->project().cvbs_presets.video_standard_preset);
@@ -969,11 +1288,6 @@ void ProjectSettingsEditor::CommitChannel() {
     if (edge_smear_group_->isChecked() && stored.edge_smear.enabled) {
       channel.edge_smear.fraction = edge_smear_fraction_spin_->value();
       channel.edge_smear.tau_samples = edge_smear_tau_spin_->value();
-    }
-    SetFmBeatEnabled(&channel, fm_beat_group_->isChecked());
-    if (fm_beat_group_->isChecked() && stored.fm_beat.enabled) {
-      channel.fm_beat.carrier_black_hz = fm_beat_carrier_spin_->value();
-      channel.fm_beat.level_db = fm_beat_level_spin_->value();
     }
   }
   committing_ = true;
@@ -1006,6 +1320,20 @@ void ProjectSettingsEditor::CommitChromaError() {
       jitter.seed =
           jitter.seed_specified ? ParseSeed(jitter_seed_edit_->text()) : 0;
     }
+    SetDifferentialEnabled(&chroma_error, differential_group_->isChecked());
+    if (differential_group_->isChecked() && stored.differential.enabled) {
+      chroma_error.differential.gain =
+          ToLevelCurvePoints(differential_gain_editor_->points());
+      chroma_error.differential.phase_deg =
+          ToLevelCurvePoints(differential_phase_editor_->points());
+    }
+    SetCrosstalkEnabled(&chroma_error, crosstalk_group_->isChecked());
+    if (crosstalk_group_->isChecked() && stored.crosstalk.enabled) {
+      CrosstalkParameters& crosstalk = chroma_error.crosstalk;
+      crosstalk.v_to_u = crosstalk_v_to_u_spin_->value();
+      crosstalk.u_to_v = crosstalk_u_to_v_spin_->value();
+      crosstalk.alternate_with_switch = crosstalk_alternate_check_->isChecked();
+    }
   }
   committing_ = true;
   const bool changed = document_->SetChromaError(chroma_error);
@@ -1015,12 +1343,113 @@ void ProjectSettingsEditor::CommitChromaError() {
   }
 }
 
+void ProjectSettingsEditor::CommitLaserdisc() {
+  if (updating_) {
+    return;
+  }
+  const Project& project = document_->project();
+  const LaserdiscParameters& stored = project.laserdisc;
+  const Standard standard = project.cvbs_presets.video_standard_preset;
+  LaserdiscParameters laserdisc = stored;
+  if (!laserdisc_group_->isChecked()) {
+    SetLaserdiscEnabled(&laserdisc, false);
+  } else {
+    SetLaserdiscEnabled(&laserdisc, true);
+    const std::string disc = disc_type_combo_->currentText().toStdString();
+    laserdisc.disc_type = (disc == kDiscTypeNone) ? std::string() : disc;
+    laserdisc.pilot_burst = pilot_burst_check_->isChecked();
+    laserdisc.vbi_burst = vbi_burst_check_->isChecked();
+    laserdisc.efm_audio.enabled = efm_check_->isChecked();
+    laserdisc.efm_audio.pair = efm_pair_combo_->currentData().toInt();
+
+    // Freshly ticked sub-blocks take the presenter defaults; the widgets
+    // still hold the disabled block's values.
+    const LaserdiscChannelParameters& stored_channel = stored.channel;
+    SetLaserdiscChannelEnabled(&laserdisc, ld_channel_group_->isChecked());
+    if (ld_channel_group_->isChecked()) {
+      LaserdiscChannelParameters& channel = laserdisc.channel;
+      SetFmBeatEnabled(&laserdisc, fm_beat_group_->isChecked());
+      if (fm_beat_group_->isChecked() && stored_channel.fm_beat.enabled) {
+        channel.fm_beat.carrier_black_hz = fm_beat_carrier_spin_->value();
+        channel.fm_beat.level_db = fm_beat_level_spin_->value();
+      }
+
+      SetGroupDelayEnabled(&laserdisc, group_delay_group_->isChecked(),
+                           standard);
+      if (group_delay_group_->isChecked() &&
+          stored_channel.group_delay.enabled) {
+        const GroupDelayPreset preset =
+            group_delay_preset_combo_->currentIndex() == kGroupDelayCustomIndex
+                ? GroupDelayPreset::kCustom
+                : GroupDelayPreset::kIec60856Nominal;
+        if (preset != stored_channel.group_delay.preset) {
+          SetGroupDelayPreset(&laserdisc, preset);
+        } else if (preset == GroupDelayPreset::kCustom) {
+          channel.group_delay.points_ns =
+              ToGroupDelayPoints(group_delay_curve_editor_->points());
+        }
+        channel.group_delay.scale = group_delay_scale_spin_->value();
+      }
+
+      const ReplayResponseMode mode =
+          ResponseModeFromComboIndex(response_mode_combo_->currentIndex());
+      if (mode != ReplayResponseModeOf(stored_channel)) {
+        SetReplayResponseMode(&laserdisc, mode);
+      } else if (mode == ReplayResponseMode::kFixed) {
+        channel.response_db =
+            ToResponsePoints(response_curve_editor_->points());
+      } else if (mode == ReplayResponseMode::kByPicture) {
+        channel.response_by_picture = response_by_picture_editor_->entries();
+      }
+
+      SetField2OffsetEnabled(&laserdisc, field2_offset_group_->isChecked());
+      if (field2_offset_group_->isChecked() &&
+          stored_channel.field2_offset.enabled) {
+        channel.field2_offset.x_samples = field2_x_spin_->value();
+        channel.field2_offset.y_lines = field2_y_spin_->value();
+      }
+    }
+  }
+
+  committing_ = true;
+  bool changed = false;
+  {
+    // Sections may carry laserdisc data only while the project has a
+    // laserdisc block, so unticking the block clears it from every section in
+    // the same undo step.
+    const ScopedUndoBatch batch(document_, tr("Edit laserdisc"));
+    changed = document_->SetLaserdisc(laserdisc);
+    if (!laserdisc.enabled) {
+      changed = ClearSectionLaserdiscBlocks() || changed;
+    }
+  }
+  committing_ = false;
+  if (changed) {
+    LoadFromDocument();
+  }
+}
+
+bool ProjectSettingsEditor::ClearSectionLaserdiscBlocks() {
+  bool changed = false;
+  const int count = document_->section_count();
+  for (int index = 0; index < count; ++index) {
+    Section section =
+        document_->project().sections[static_cast<std::size_t>(index)];
+    if (ClearSectionLaserdiscBlock(&section)) {
+      changed = document_->SetSection(index, std::move(section)) || changed;
+    }
+  }
+  return changed;
+}
+
 QWidget* ProjectSettingsEditor::FieldGroup(IssueField field) const {
   switch (field) {
     case IssueField::kChannel:
       return channel_group_;
     case IssueField::kChromaError:
       return chroma_error_group_;
+    case IssueField::kLaserdiscChannel:
+      return ld_channel_group_;
     default:
       return nullptr;
   }
@@ -1032,6 +1461,8 @@ QWidget* ProjectSettingsEditor::FieldFocusWidget(IssueField field) const {
       return timing_offset_spin_;
     case IssueField::kChromaError:
       return chroma_gain_spin_;
+    case IssueField::kLaserdiscChannel:
+      return ld_channel_group_;
     default:
       return nullptr;
   }

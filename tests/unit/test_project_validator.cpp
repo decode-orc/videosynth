@@ -288,22 +288,7 @@ TEST(ProjectValidatorTest, RejectsNtscBlackSetupOnPalProject) {
 TEST(ProjectValidatorTest, RejectsPalLaserdiscPilotBurstOnNtscProject) {
   Project project = MakeValidProject();
   project.cvbs_presets.video_standard_preset = Standard::kNtsc;
-  project.cvbs_presets.pal_laserdisc_pilot_burst = true;
-
-  ProjectValidator validator;
-  const ValidationResult result = validator.Validate(project);
-
-  EXPECT_FALSE(result.is_valid);
-  ASSERT_EQ(result.errors.size(), 1U);
-  EXPECT_EQ(
-      result.errors[0],
-      "Project configuration error: pal_laserdisc_pilot_burst can only be "
-      "enabled for PAL projects.");
-}
-
-TEST(ProjectValidatorTest, RejectsNtscLaserdiscVbiBurstOnPalProject) {
-  Project project = MakeValidProject();
-  project.cvbs_presets.ntsc_laserdisc_vbi_burst = true;
+  project.laserdisc.pilot_burst = true;
 
   ProjectValidator validator;
   const ValidationResult result = validator.Validate(project);
@@ -311,7 +296,21 @@ TEST(ProjectValidatorTest, RejectsNtscLaserdiscVbiBurstOnPalProject) {
   EXPECT_FALSE(result.is_valid);
   ASSERT_EQ(result.errors.size(), 1U);
   EXPECT_EQ(result.errors[0],
-            "Project configuration error: ntsc_laserdisc_vbi_burst can only be "
+            "Project configuration error: laserdisc.pilot_burst can only be "
+            "enabled for PAL projects.");
+}
+
+TEST(ProjectValidatorTest, RejectsNtscLaserdiscVbiBurstOnPalProject) {
+  Project project = MakeValidProject();
+  project.laserdisc.vbi_burst = true;
+
+  ProjectValidator validator;
+  const ValidationResult result = validator.Validate(project);
+
+  EXPECT_FALSE(result.is_valid);
+  ASSERT_EQ(result.errors.size(), 1U);
+  EXPECT_EQ(result.errors[0],
+            "Project configuration error: laserdisc.vbi_burst can only be "
             "enabled for NTSC projects.");
 }
 
@@ -374,7 +373,7 @@ TEST(ProjectValidatorTest, RejectsUnlockedSignalStateForPal) {
 
 TEST(ProjectValidatorTest, RejectsPalLaserdiscPilotBurstOnSecamProject) {
   Project project = MakeValidSecamProject();
-  project.cvbs_presets.pal_laserdisc_pilot_burst = true;
+  project.laserdisc.pilot_burst = true;
 
   ProjectValidator validator;
   const ValidationResult result = validator.Validate(project);
@@ -382,13 +381,13 @@ TEST(ProjectValidatorTest, RejectsPalLaserdiscPilotBurstOnSecamProject) {
   EXPECT_FALSE(result.is_valid);
   EXPECT_TRUE(ContainsMessage(result.errors,
                               "Project configuration error: "
-                              "pal_laserdisc_pilot_burst can only be enabled "
+                              "laserdisc.pilot_burst can only be enabled "
                               "for PAL projects."));
 }
 
 TEST(ProjectValidatorTest, RejectsLaserdiscDiscTypeOnSecamProject) {
   Project project = MakeValidSecamProject();
-  project.line_injections.disc_type = "CAV";
+  project.laserdisc.disc_type = "CAV";
 
   ProjectValidator validator;
   const ValidationResult result = validator.Validate(project);
@@ -396,9 +395,9 @@ TEST(ProjectValidatorTest, RejectsLaserdiscDiscTypeOnSecamProject) {
   EXPECT_FALSE(result.is_valid);
   EXPECT_TRUE(ContainsMessage(
       result.errors,
-      "Project configuration error: laserdisc line injections, "
-      "line_injections.disc_type and laserdisc VITS placement are not "
-      "available for SECAM projects."));
+      "Project configuration error: there is no SECAM LaserVision format, "
+      "so the laserdisc block, section laserdisc blocks and laserdisc VITS "
+      "placement are not available for SECAM projects."));
 }
 
 TEST(ProjectValidatorTest, WarnsThatSecamVitsKeepPalDefinitions) {
@@ -432,7 +431,7 @@ TEST(ProjectValidatorTest, WarnsWhenSecamFieldIdentificationSetWithoutSecam) {
 
 TEST(ProjectValidatorTest, AcceptsPalLaserdiscPilotBurstOnPalProject) {
   Project project = MakeValidProject();
-  project.cvbs_presets.pal_laserdisc_pilot_burst = true;
+  project.laserdisc.pilot_burst = true;
 
   ProjectValidator validator;
   const ValidationResult result = validator.Validate(project);
@@ -443,7 +442,7 @@ TEST(ProjectValidatorTest, AcceptsPalLaserdiscPilotBurstOnPalProject) {
 
 TEST(ProjectValidatorTest, WarnsPalPilotBurstClippingWithU10Preset) {
   Project project = MakeValidProject();
-  project.cvbs_presets.pal_laserdisc_pilot_burst = true;
+  project.laserdisc.pilot_burst = true;
   project.cvbs_presets.sample_encoding_preset = "CVBS_U10_4FSC";
 
   ProjectValidator validator;
@@ -453,7 +452,7 @@ TEST(ProjectValidatorTest, WarnsPalPilotBurstClippingWithU10Preset) {
   EXPECT_TRUE(result.errors.empty());
   ASSERT_EQ(result.warnings.size(), 1U);
   EXPECT_EQ(result.warnings[0],
-            "pal_laserdisc_pilot_burst warning: preset 'CVBS_U10_4FSC' clips "
+            "laserdisc.pilot_burst warning: preset 'CVBS_U10_4FSC' clips "
             "sub-sync excursions below -300 mV; the pilot burst trough reaches "
             "-600 mV. Use CVBS_S16_4FSC or RAW_S16_28M/RAW_S16_40M to preserve "
             "the full burst waveform.");
@@ -461,7 +460,7 @@ TEST(ProjectValidatorTest, WarnsPalPilotBurstClippingWithU10Preset) {
 
 TEST(ProjectValidatorTest, WarnsPalPilotBurstClippingWithU16Preset) {
   Project project = MakeValidProject();
-  project.cvbs_presets.pal_laserdisc_pilot_burst = true;
+  project.laserdisc.pilot_burst = true;
   project.cvbs_presets.sample_encoding_preset = "CVBS_U16_4FSC";
 
   ProjectValidator validator;
@@ -471,7 +470,7 @@ TEST(ProjectValidatorTest, WarnsPalPilotBurstClippingWithU16Preset) {
   EXPECT_TRUE(result.errors.empty());
   ASSERT_EQ(result.warnings.size(), 1U);
   EXPECT_EQ(result.warnings[0],
-            "pal_laserdisc_pilot_burst warning: preset 'CVBS_U16_4FSC' clips "
+            "laserdisc.pilot_burst warning: preset 'CVBS_U16_4FSC' clips "
             "sub-sync excursions below -300 mV; the pilot burst trough reaches "
             "-600 mV. Use CVBS_S16_4FSC or RAW_S16_28M/RAW_S16_40M to preserve "
             "the full burst waveform.");
@@ -479,7 +478,7 @@ TEST(ProjectValidatorTest, WarnsPalPilotBurstClippingWithU16Preset) {
 
 TEST(ProjectValidatorTest, WarnsPalPilotBurstClippingWithTpg21Preset) {
   Project project = MakeValidProject();
-  project.cvbs_presets.pal_laserdisc_pilot_burst = true;
+  project.laserdisc.pilot_burst = true;
   project.cvbs_presets.sample_encoding_preset = "CVBS_TPG21_4FSC";
 
   ProjectValidator validator;
@@ -489,7 +488,7 @@ TEST(ProjectValidatorTest, WarnsPalPilotBurstClippingWithTpg21Preset) {
   EXPECT_TRUE(result.errors.empty());
   ASSERT_EQ(result.warnings.size(), 1U);
   EXPECT_EQ(result.warnings[0],
-            "pal_laserdisc_pilot_burst warning: preset 'CVBS_TPG21_4FSC' clips "
+            "laserdisc.pilot_burst warning: preset 'CVBS_TPG21_4FSC' clips "
             "sub-sync excursions below -300 mV; the pilot burst trough reaches "
             "-600 mV. Use CVBS_S16_4FSC or RAW_S16_28M/RAW_S16_40M to preserve "
             "the full burst waveform.");
@@ -497,7 +496,7 @@ TEST(ProjectValidatorTest, WarnsPalPilotBurstClippingWithTpg21Preset) {
 
 TEST(ProjectValidatorTest, NoPilotBurstClippingWarningWithS16FscPreset) {
   Project project = MakeValidProject();
-  project.cvbs_presets.pal_laserdisc_pilot_burst = true;
+  project.laserdisc.pilot_burst = true;
   project.cvbs_presets.sample_encoding_preset = "CVBS_S16_4FSC";
 
   ProjectValidator validator;
@@ -510,7 +509,7 @@ TEST(ProjectValidatorTest, NoPilotBurstClippingWarningWithS16FscPreset) {
 
 TEST(ProjectValidatorTest, NoPilotBurstClippingWarningWithRawS1628MPreset) {
   Project project = MakeValidProject();
-  project.cvbs_presets.pal_laserdisc_pilot_burst = true;
+  project.laserdisc.pilot_burst = true;
   project.cvbs_presets.sample_encoding_preset = "RAW_S16_28M";
 
   ProjectValidator validator;
@@ -523,7 +522,7 @@ TEST(ProjectValidatorTest, NoPilotBurstClippingWarningWithRawS1628MPreset) {
 
 TEST(ProjectValidatorTest, NoPilotBurstClippingWarningWithRawS1640MPreset) {
   Project project = MakeValidProject();
-  project.cvbs_presets.pal_laserdisc_pilot_burst = true;
+  project.laserdisc.pilot_burst = true;
   project.cvbs_presets.sample_encoding_preset = "RAW_S16_40M";
 
   ProjectValidator validator;
@@ -536,7 +535,7 @@ TEST(ProjectValidatorTest, NoPilotBurstClippingWarningWithRawS1640MPreset) {
 
 TEST(ProjectValidatorTest, NoPilotBurstClippingWarningWhenBurstDisabled) {
   Project project = MakeValidProject();
-  project.cvbs_presets.pal_laserdisc_pilot_burst = false;
+  project.laserdisc.pilot_burst = false;
   project.cvbs_presets.sample_encoding_preset = "CVBS_U10_4FSC";
 
   ProjectValidator validator;
@@ -551,7 +550,7 @@ TEST(ProjectValidatorTest, AcceptsNtscLaserdiscVbiBurstOnNtscProject) {
   Project project = MakeValidProject();
   project.cvbs_presets.video_standard_preset = Standard::kNtsc;
   project.cvbs_presets.sample_encoding_preset = "CVBS_S16_4FSC";
-  project.cvbs_presets.ntsc_laserdisc_vbi_burst = true;
+  project.laserdisc.vbi_burst = true;
 
   ProjectValidator validator;
   const ValidationResult result = validator.Validate(project);
@@ -565,7 +564,7 @@ TEST(ProjectValidatorTest, WarnsNtscVbiBurstClippingWithU10Preset) {
   Project project = MakeValidProject();
   project.cvbs_presets.video_standard_preset = Standard::kNtsc;
   project.cvbs_presets.sample_encoding_preset = "CVBS_U10_4FSC";
-  project.cvbs_presets.ntsc_laserdisc_vbi_burst = true;
+  project.laserdisc.vbi_burst = true;
 
   ProjectValidator validator;
   const ValidationResult result = validator.Validate(project);
@@ -573,7 +572,7 @@ TEST(ProjectValidatorTest, WarnsNtscVbiBurstClippingWithU10Preset) {
   EXPECT_TRUE(result.is_valid);
   ASSERT_EQ(result.warnings.size(), 1U);
   EXPECT_EQ(result.warnings[0],
-            "ntsc_laserdisc_vbi_burst warning: preset 'CVBS_U10_4FSC' clips "
+            "laserdisc.vbi_burst warning: preset 'CVBS_U10_4FSC' clips "
             "sub-sync excursions below sync tip; the colour burst on the "
             "broad field-sync pulses reaches -60 IRE. Use CVBS_S16_4FSC or "
             "RAW_S16_28M/RAW_S16_40M to preserve the full burst waveform.");
@@ -678,7 +677,7 @@ TEST(ProjectValidatorTest, RejectsOverlappingTargetLinesAcrossProjectVits) {
 
 TEST(ProjectValidatorTest, RejectsLaserdiscInjectionWithExplicitTargetLines) {
   Project project = MakeValidProject();
-  project.line_injections.disc_type = "CAV";
+  project.laserdisc.disc_type = "CAV";
   project.sections[0].section_type = SectionType::kProgrammeArea;
 
   Section::LineInjection injection;
@@ -698,7 +697,7 @@ TEST(ProjectValidatorTest, RejectsLaserdiscInjectionWithExplicitTargetLines) {
 
 TEST(ProjectValidatorTest, RejectsLaserdiscAndVitcInSameSection) {
   Project project = MakeValidProject();
-  project.line_injections.disc_type = "CAV";
+  project.laserdisc.disc_type = "CAV";
   project.sections[0].section_type = SectionType::kProgrammeArea;
 
   Section::LineInjection laserdisc;
@@ -723,7 +722,7 @@ TEST(ProjectValidatorTest, RejectsLaserdiscAndVitcInSameSection) {
 TEST(ProjectValidatorTest,
      RejectsProjectVitsInLaserdiscReservedRangesWhenLaserdiscIsActive) {
   Project project = MakeValidProject();
-  project.line_injections.disc_type = "CAV";
+  project.laserdisc.disc_type = "CAV";
   project.line_injections.vits.push_back(VitsInjection{"vits17", {17}});
   project.sections[0].section_type = SectionType::kProgrammeArea;
 
@@ -788,7 +787,7 @@ TEST(ProjectValidatorTest, CustomPlacementAcceptsNonRecommendedVitsLine) {
 TEST(ProjectValidatorTest,
      CustomPlacementRejectsReservedVitsLineOnLaserdiscProject) {
   Project project = MakeValidProject();
-  project.line_injections.disc_type = "CAV";
+  project.laserdisc.disc_type = "CAV";
   project.line_injections.placement = VitsPlacement::kCustom;
   project.line_injections.vits.push_back(VitsInjection{"vits17", {17}});
   project.sections[0].section_type = SectionType::kProgrammeArea;
@@ -1381,7 +1380,7 @@ TEST(ProjectValidatorTest, PropagatesProgressiveProbeErrorMessage) {
 
 TEST(ProjectValidatorTest, AcceptsLaserdiscInjectionWithValidCavDiscType) {
   Project project = MakeValidProject();
-  project.line_injections.disc_type = "CAV";
+  project.laserdisc.disc_type = "CAV";
   project.sections[0].section_type = SectionType::kProgrammeArea;
   Section::LineInjection injection;
   injection.type = "laserdisc";
@@ -1401,7 +1400,7 @@ TEST(ProjectValidatorTest, AcceptsLaserdiscInjectionWithValidCavDiscType) {
 
 TEST(ProjectValidatorTest, AcceptsLaserdiscInjectionWithValidClvDiscType) {
   Project project = MakeValidProject();
-  project.line_injections.disc_type = "CLV";
+  project.laserdisc.disc_type = "CLV";
   project.sections[0].section_type = SectionType::kProgrammeArea;
   Section::LineInjection injection;
   injection.type = "laserdisc";
@@ -1419,7 +1418,7 @@ TEST(ProjectValidatorTest, AcceptsLaserdiscInjectionWithValidClvDiscType) {
 
 TEST(ProjectValidatorTest, RejectsLaserdiscInjectionWithUnknownDiscType) {
   Project project = MakeValidProject();
-  project.line_injections.disc_type = "VHD";
+  project.laserdisc.disc_type = "VHD";
   Section::LineInjection injection;
   injection.type = "laserdisc";
   project.sections[0].line_injections.push_back(injection);
@@ -1435,7 +1434,7 @@ TEST(ProjectValidatorTest, RejectsLaserdiscInjectionWithUnknownDiscType) {
 
 TEST(ProjectValidatorTest, RejectsLaserdiscInjectionWithCodeTypeInvalidForCav) {
   Project project = MakeValidProject();
-  project.line_injections.disc_type = "CAV";
+  project.laserdisc.disc_type = "CAV";
   Section::LineInjection injection;
   injection.type = "laserdisc";
   Section::LineInjectionCode code;
@@ -1454,7 +1453,7 @@ TEST(ProjectValidatorTest, RejectsLaserdiscInjectionWithCodeTypeInvalidForCav) {
 
 TEST(ProjectValidatorTest, RejectsLaserdiscInjectionWithCodeTypeInvalidForClv) {
   Project project = MakeValidProject();
-  project.line_injections.disc_type = "CLV";
+  project.laserdisc.disc_type = "CLV";
   Section::LineInjection injection;
   injection.type = "laserdisc";
   Section::LineInjectionCode code;
@@ -1473,7 +1472,7 @@ TEST(ProjectValidatorTest, RejectsLaserdiscInjectionWithCodeTypeInvalidForClv) {
 
 TEST(ProjectValidatorTest, RejectsLaserdiscInjectionWithUnknownCodeType) {
   Project project = MakeValidProject();
-  project.line_injections.disc_type = "CAV";
+  project.laserdisc.disc_type = "CAV";
   Section::LineInjection injection;
   injection.type = "laserdisc";
   Section::LineInjectionCode code;
@@ -1940,8 +1939,9 @@ Project MakeEfmProject() {
   project.sections.push_back(programme);
   project.sections.push_back(
       MakeEfmSection("LeadOut", SectionType::kLeadOut, 25));
-  project.output.efm_audio.enabled = true;
-  project.output.efm_audio.pair = 0;
+  project.laserdisc.enabled = true;
+  project.laserdisc.efm_audio.enabled = true;
+  project.laserdisc.efm_audio.pair = 0;
   return project;
 }
 
@@ -2177,25 +2177,25 @@ TEST(ProjectValidatorTest, AcceptsEfmAudioWithDeclaredPairAndLeadIn) {
 
 TEST(ProjectValidatorTest, RejectsEfmAudioPairAboveRange) {
   Project project = MakeEfmProject();
-  project.output.efm_audio.pair = 8;
+  project.laserdisc.efm_audio.pair = 8;
 
   ProjectValidator validator;
   const ValidationResult result = validator.Validate(project);
 
   EXPECT_FALSE(result.is_valid);
-  EXPECT_TRUE(ContainsMessage(result.errors, "output.efm_audio.pair"));
+  EXPECT_TRUE(ContainsMessage(result.errors, "laserdisc.efm_audio.pair"));
   EXPECT_TRUE(ContainsMessage(result.errors, "8"));
 }
 
 TEST(ProjectValidatorTest, RejectsEfmAudioPairBelowRange) {
   Project project = MakeEfmProject();
-  project.output.efm_audio.pair = -1;
+  project.laserdisc.efm_audio.pair = -1;
 
   ProjectValidator validator;
   const ValidationResult result = validator.Validate(project);
 
   EXPECT_FALSE(result.is_valid);
-  EXPECT_TRUE(ContainsMessage(result.errors, "output.efm_audio.pair"));
+  EXPECT_TRUE(ContainsMessage(result.errors, "laserdisc.efm_audio.pair"));
 }
 
 TEST(ProjectValidatorTest, AcceptsEfmAudioForPalMPreset) {
@@ -2206,7 +2206,7 @@ TEST(ProjectValidatorTest, AcceptsEfmAudioForPalMPreset) {
   ProjectValidator validator;
   const ValidationResult result = validator.Validate(project);
 
-  EXPECT_FALSE(ContainsMessage(result.errors, "output.efm_audio requires"));
+  EXPECT_FALSE(ContainsMessage(result.errors, "laserdisc.efm_audio requires"));
   EXPECT_EQ(ProjectEfmAudioPair(project), 0);
 }
 
@@ -2218,23 +2218,24 @@ TEST(ProjectValidatorTest, RejectsEfmAudioForSecamPreset) {
   const ValidationResult result = validator.Validate(project);
 
   EXPECT_FALSE(result.is_valid);
-  EXPECT_TRUE(ContainsMessage(result.errors,
-                              "output.efm_audio requires a PAL, NTSC or PAL_M "
-                              "video_standard_preset"));
+  EXPECT_TRUE(
+      ContainsMessage(result.errors,
+                      "laserdisc.efm_audio requires a PAL, NTSC or PAL_M "
+                      "video_standard_preset"));
   EXPECT_TRUE(ContainsMessage(result.errors, "SECAM"));
   EXPECT_EQ(ProjectEfmAudioPair(project), -1);
 }
 
 TEST(ProjectValidatorTest, WarnsWhenEfmAudioPairIsNotDeclared) {
   Project project = MakeEfmProject();
-  project.output.efm_audio.pair = 4;
+  project.laserdisc.efm_audio.pair = 4;
 
   ProjectValidator validator;
   const ValidationResult result = validator.Validate(project);
 
   EXPECT_TRUE(result.is_valid);
   EXPECT_TRUE(ContainsMessage(result.warnings,
-                              "output.efm_audio.pair 4 is not declared"));
+                              "laserdisc.efm_audio.pair 4 is not declared"));
 }
 
 TEST(ProjectValidatorTest, RejectsMoreEfmTracksThanTheDiscLimit) {
@@ -2317,8 +2318,8 @@ TEST(ProjectValidatorTest, WarnsWhenEfmProjectHasNoLeadInSection) {
 
 TEST(ProjectValidatorTest, IgnoresEfmTrackLayoutWhenEfmAudioIsDisabled) {
   Project project = MakeEfmProject();
-  project.output.efm_audio.enabled = false;
-  project.output.efm_audio.pair = 4;
+  project.laserdisc.efm_audio.enabled = false;
+  project.laserdisc.efm_audio.pair = 4;
   project.sections[1].duration_frames = 1;
 
   ProjectValidator validator;
@@ -2326,6 +2327,200 @@ TEST(ProjectValidatorTest, IgnoresEfmTrackLayoutWhenEfmAudioIsDisabled) {
 
   EXPECT_TRUE(result.is_valid);
   EXPECT_FALSE(ContainsMessage(result.warnings, "efm_audio"));
+}
+
+// Expects `project` to fail validation with an error starting `error`.
+void ExpectValidationError(const Project& project, const std::string& error) {
+  const ValidationResult result = ProjectValidator().Validate(project);
+  EXPECT_FALSE(result.is_valid) << error;
+  bool found = false;
+  for (const std::string& message : result.errors) {
+    found = found || message.rfind(error, 0) == 0U;
+  }
+  EXPECT_TRUE(found) << "missing: " << error << "\nfirst error: "
+                     << (result.errors.empty() ? "" : result.errors[0]);
+}
+
+Project MakeLaserVisionChannelProject() {
+  Project project = MakeValidProject();
+  project.laserdisc.enabled = true;
+  project.laserdisc.channel.enabled = true;
+  return project;
+}
+
+TEST(ProjectValidatorTest, AcceptsAFullLaserVisionChannel) {
+  Project project = MakeLaserVisionChannelProject();
+  LaserdiscChannelParameters& channel = project.laserdisc.channel;
+  channel.group_delay = {.enabled = true,
+                         .preset = GroupDelayPreset::kIec60856Nominal,
+                         .points_ns = {},
+                         .scale = 1.0};
+  channel.response_by_picture = {{1, {{0.0, 0.0}, {5.0, -4.0}}},
+                                 {54000, {{0.0, 0.0}, {5.0, -9.0}}}};
+  channel.field2_offset = {.enabled = true, .x_samples = 0.5, .y_lines = -1.0};
+  const ValidationResult result = ProjectValidator().Validate(project);
+  EXPECT_TRUE(result.is_valid)
+      << (result.errors.empty() ? "" : result.errors[0]);
+}
+
+TEST(ProjectValidatorTest, RejectsLaserVisionChannelValuesOutOfRange) {
+  const std::string prefix = "Laserdisc channel validation error: ";
+  {
+    Project project = MakeLaserVisionChannelProject();
+    project.cvbs_presets.video_standard_preset = Standard::kNtsc;
+    project.laserdisc.channel.group_delay = {
+        .enabled = true,
+        .preset = GroupDelayPreset::kIec60856Nominal,
+        .points_ns = {},
+        .scale = 1.0};
+    ExpectValidationError(project, prefix +
+                                       "group_delay.preset iec60856_nominal is "
+                                       "the 625-line PAL pre-distortion");
+  }
+  {
+    Project project = MakeLaserVisionChannelProject();
+    project.laserdisc.channel.group_delay = {
+        .enabled = true,
+        .preset = GroupDelayPreset::kCustom,
+        .points_ns = {{3.0, -10.0}, {2.0, -20.0}},
+        .scale = 3.0};
+    ExpectValidationError(project, prefix +
+                                       "group_delay.points_ns "
+                                       "frequency_mhz values must be "
+                                       "strictly ascending");
+    ExpectValidationError(project, prefix +
+                                       "group_delay.scale must be in the range "
+                                       "[-2.0, 2.0]; got 3.000000.");
+  }
+  {
+    Project project = MakeLaserVisionChannelProject();
+    project.laserdisc.channel.group_delay = {
+        .enabled = true,
+        .preset = GroupDelayPreset::kCustom,
+        .points_ns = {},
+        .scale = 1.0};
+    ExpectValidationError(project,
+                          prefix +
+                              "group_delay.points_ns must have at least one "
+                              "breakpoint.");
+  }
+  {
+    Project project = MakeLaserVisionChannelProject();
+    project.laserdisc.channel.response_db = {{0.0, 0.0}, {9.5, -6.0}};
+    ExpectValidationError(project, prefix +
+                                       "response_db frequency_mhz must "
+                                       "be in the range [0.000000, 8.8");
+  }
+  {
+    Project project = MakeLaserVisionChannelProject();
+    project.laserdisc.channel.response_db = {{0.0, 0.0}, {4.0, 25.0}};
+    ExpectValidationError(project, prefix +
+                                       "response_db relative_db must be "
+                                       "in the range [-60.000000, "
+                                       "20.000000]; got 25.000000.");
+  }
+  {
+    Project project = MakeLaserVisionChannelProject();
+    project.laserdisc.channel.response_db = {{0.0, 0.0}};
+    project.laserdisc.channel.response_by_picture = {{1, {{0.0, 0.0}}},
+                                                     {2, {{0.0, 0.0}}}};
+    ExpectValidationError(project, prefix +
+                                       "response_db and "
+                                       "response_by_picture cannot both "
+                                       "be set");
+  }
+  {
+    Project project = MakeLaserVisionChannelProject();
+    project.laserdisc.channel.response_by_picture = {{5, {{0.0, 0.0}}}};
+    ExpectValidationError(project, prefix +
+                                       "response_by_picture needs at "
+                                       "least two entries");
+  }
+  {
+    Project project = MakeLaserVisionChannelProject();
+    project.laserdisc.channel.response_by_picture = {{5, {{0.0, 0.0}}},
+                                                     {5, {{0.0, -1.0}}}};
+    ExpectValidationError(project, prefix +
+                                       "response_by_picture[1].picture "
+                                       "must be greater than the "
+                                       "previous entry's; got 5 after 5.");
+  }
+  {
+    Project project = MakeLaserVisionChannelProject();
+    project.laserdisc.channel.response_by_picture = {{0, {{0.0, 0.0}}},
+                                                     {5, {{0.0, -1.0}}}};
+    ExpectValidationError(project, prefix +
+                                       "response_by_picture[0].picture "
+                                       "must be at least 1; got 0.");
+  }
+  {
+    Project project = MakeLaserVisionChannelProject();
+    project.laserdisc.channel.field2_offset = {
+        .enabled = true, .x_samples = 9.0, .y_lines = 4.5};
+    ExpectValidationError(project, prefix +
+                                       "field2_offset.x_samples must be "
+                                       "in the range [-8.0, 8.0]");
+    ExpectValidationError(project, prefix +
+                                       "field2_offset.y_lines must be in "
+                                       "the range [-4.0, 4.0]");
+  }
+}
+
+TEST(ProjectValidatorTest, RejectsSectionLaserdiscBlocksWithoutTheProjectOne) {
+  Project project = MakeValidProject();
+  project.sections[0].section_type = SectionType::kProgrammeArea;
+  ExpectValidationError(project,
+                        "Laserdisc validation error: section 'Progressive' "
+                        "has a laserdisc block, but the project has no "
+                        "top-level laserdisc block.");
+  project.laserdisc.enabled = true;
+  EXPECT_TRUE(ProjectValidator().Validate(project).is_valid);
+}
+
+TEST(ProjectValidatorTest, RejectsTheLaserdiscBlockOnSecam) {
+  Project project = MakeValidSecamProject();
+  project.laserdisc.enabled = true;
+  ExpectValidationError(project,
+                        "Project configuration error: there is no SECAM "
+                        "LaserVision format");
+}
+
+TEST(ProjectValidatorTest, ChecksDifferentialAndCrosstalk) {
+  const std::string prefix = "Chroma error validation error: ";
+  Project project = MakeValidProject();
+  project.chroma_error.enabled = true;
+  project.chroma_error.differential = {.enabled = true,
+                                       .gain = {{0.0, 1.0}, {100.0, 0.95}},
+                                       .phase_deg = {{0.0, 0.0}, {100.0, 2.5}}};
+  project.chroma_error.crosstalk = {.enabled = true,
+                                    .v_to_u = 0.3,
+                                    .u_to_v = 0.0,
+                                    .alternate_with_switch = true};
+  EXPECT_TRUE(ProjectValidator().Validate(project).is_valid);
+
+  Project bad = project;
+  bad.chroma_error.differential.gain = {{0.0, 1.0}, {200.0, 0.9}};
+  ExpectValidationError(bad, prefix +
+                                 "differential.gain level_ire must be in "
+                                 "the range [-50.000000, 150.000000]");
+  bad = project;
+  bad.chroma_error.differential.phase_deg = {{0.0, 45.0}};
+  ExpectValidationError(bad, prefix +
+                                 "differential.phase_deg phase_deg must "
+                                 "be in the range [-30.000000, "
+                                 "30.000000]; got 45.000000.");
+  bad = project;
+  bad.chroma_error.crosstalk.v_to_u = 0.6;
+  ExpectValidationError(bad, prefix +
+                                 "crosstalk.v_to_u must be in the range "
+                                 "[-0.5, 0.5]");
+  bad = project;
+  bad.cvbs_presets.video_standard_preset = Standard::kNtsc;
+  ExpectValidationError(bad, prefix +
+                                 "crosstalk.alternate_with_switch "
+                                 "follows the PAL V-switch");
+  bad.chroma_error.crosstalk.alternate_with_switch = false;
+  EXPECT_TRUE(ProjectValidator().Validate(bad).is_valid);
 }
 
 }  // namespace

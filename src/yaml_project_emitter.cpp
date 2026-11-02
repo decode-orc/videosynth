@@ -13,6 +13,8 @@
 
 #include <fstream>
 #include <limits>
+#include <utility>
+#include <vector>
 
 #include "videosynth/biphase_types.h"
 
@@ -56,12 +58,6 @@ void EmitCvbsPresets(YAML::Emitter& out, const CvbsPresets& presets) {
       << presets.sample_encoding_preset;
   out << YAML::Key << "signal_state_preset" << YAML::Value
       << presets.signal_state_preset;
-  if (presets.pal_laserdisc_pilot_burst) {
-    out << YAML::Key << "pal_laserdisc_pilot_burst" << YAML::Value << true;
-  }
-  if (presets.ntsc_laserdisc_vbi_burst) {
-    out << YAML::Key << "ntsc_laserdisc_vbi_burst" << YAML::Value << true;
-  }
   if (presets.ntsc_black_setup_ire_specified) {
     out << YAML::Key << "ntsc_black_setup_ire" << YAML::Value
         << presets.ntsc_black_setup_ire;
@@ -72,19 +68,16 @@ void EmitCvbsPresets(YAML::Emitter& out, const CvbsPresets& presets) {
   out << YAML::EndMap;
 }
 
-// Emits the project-wide `line_injections:` block (laserdisc disc_type and the
-// VITS test-signal set). Omitted entirely when neither is configured.
+// Emits the project-wide `line_injections:` block (the VITS test-signal set
+// and its placement). Omitted entirely when neither is configured.
 void EmitProjectLineInjections(YAML::Emitter& out,
                                const ProjectLineInjections& line_injections) {
-  if (line_injections.disc_type.empty() && line_injections.vits.empty() &&
+  if (line_injections.vits.empty() &&
       line_injections.placement == VitsPlacement::kStandard) {
     return;
   }
 
   out << YAML::Key << "line_injections" << YAML::Value << YAML::BeginMap;
-  if (!line_injections.disc_type.empty()) {
-    out << YAML::Key << "disc_type" << YAML::Value << line_injections.disc_type;
-  }
   // Emitted only when non-default so standard-placement projects keep their
   // existing serialisation.
   if (line_injections.placement != VitsPlacement::kStandard) {
@@ -115,10 +108,8 @@ void EmitOutputTargets(YAML::Emitter& out, const OutputTargets& output) {
   if (output.signal_type != "composite") {
     out << YAML::Key << "signal_type" << YAML::Value << output.signal_type;
   }
-  if (output.efm_audio.enabled) {
-    out << YAML::Key << "efm_audio" << YAML::Value << YAML::BeginMap;
-    out << YAML::Key << "pair" << YAML::Value << output.efm_audio.pair;
-    out << YAML::EndMap;
+  if (output.truth) {
+    out << YAML::Key << "truth" << YAML::Value << true;
   }
   out << YAML::EndMap;
 }
@@ -130,8 +121,7 @@ void EmitChannel(YAML::Emitter& out, const ChannelParameters& channel) {
   out << YAML::Key << "channel" << YAML::Value << YAML::BeginMap;
   // The block must set at least one key, so a zero offset is written when
   // nothing else is.
-  if (channel.timing_offset_samples != 0.0 ||
-      (!channel.edge_smear.enabled && !channel.fm_beat.enabled)) {
+  if (channel.timing_offset_samples != 0.0 || !channel.edge_smear.enabled) {
     out << YAML::Key << "timing_offset_samples" << YAML::Value
         << channel.timing_offset_samples;
   }
@@ -143,6 +133,30 @@ void EmitChannel(YAML::Emitter& out, const ChannelParameters& channel) {
         << channel.edge_smear.tau_samples;
     out << YAML::EndMap;
   }
+  out << YAML::EndMap;
+}
+
+template <typename Point, typename Fields>
+void EmitPointPairs(YAML::Emitter& out, const char* key,
+                    const std::vector<Point>& points, Fields fields) {
+  out << YAML::Key << key << YAML::Value << YAML::BeginSeq;
+  for (const Point& point : points) {
+    const auto [x, y] = fields(point);
+    out << YAML::Flow << YAML::BeginSeq << x << y << YAML::EndSeq;
+  }
+  out << YAML::EndSeq;
+}
+
+std::pair<double, double> ResponseFields(const NoiseSpectrumPoint& point) {
+  return {point.frequency_mhz, point.relative_db};
+}
+
+void EmitLaserdiscChannel(YAML::Emitter& out,
+                          const LaserdiscChannelParameters& channel) {
+  if (!channel.enabled) {
+    return;
+  }
+  out << YAML::Key << "channel" << YAML::Value << YAML::BeginMap;
   if (channel.fm_beat.enabled) {
     out << YAML::Key << "fm_beat" << YAML::Value << YAML::BeginMap;
     out << YAML::Key << "carrier_black_hz" << YAML::Value
@@ -150,6 +164,71 @@ void EmitChannel(YAML::Emitter& out, const ChannelParameters& channel) {
     out << YAML::Key << "level_db" << YAML::Value << channel.fm_beat.level_db;
     out << YAML::EndMap;
   }
+  const GroupDelayParameters& group_delay = channel.group_delay;
+  if (group_delay.enabled) {
+    out << YAML::Key << "group_delay" << YAML::Value << YAML::BeginMap;
+    if (group_delay.preset == GroupDelayPreset::kIec60856Nominal) {
+      out << YAML::Key << "preset" << YAML::Value << "iec60856_nominal";
+    } else {
+      EmitPointPairs(out, "points_ns", group_delay.points_ns,
+                     [](const GroupDelayPoint& point) {
+                       return std::pair{point.frequency_mhz, point.delay_ns};
+                     });
+    }
+    out << YAML::Key << "scale" << YAML::Value << group_delay.scale;
+    out << YAML::EndMap;
+  }
+  if (!channel.response_db.empty()) {
+    EmitPointPairs(out, "response_db", channel.response_db, ResponseFields);
+  }
+  if (!channel.response_by_picture.empty()) {
+    out << YAML::Key << "response_by_picture" << YAML::Value << YAML::BeginSeq;
+    for (const ResponseByPictureEntry& entry : channel.response_by_picture) {
+      out << YAML::BeginMap;
+      out << YAML::Key << "picture" << YAML::Value << entry.picture;
+      EmitPointPairs(out, "response_db", entry.response_db, ResponseFields);
+      out << YAML::EndMap;
+    }
+    out << YAML::EndSeq;
+  }
+  if (channel.field2_offset.enabled) {
+    out << YAML::Key << "field2_offset" << YAML::Value << YAML::BeginMap;
+    out << YAML::Key << "x_samples" << YAML::Value
+        << channel.field2_offset.x_samples;
+    out << YAML::Key << "y_lines" << YAML::Value
+        << channel.field2_offset.y_lines;
+    out << YAML::EndMap;
+  }
+  out << YAML::EndMap;
+}
+
+// Emits the project-wide `laserdisc:` block. The block must set at least one
+// key, so a laserdisc project with nothing else configured is written with
+// pilot_burst (PAL) or vbi_burst (other standards) false.
+void EmitLaserdisc(YAML::Emitter& out, const LaserdiscParameters& laserdisc,
+                   Standard standard) {
+  if (!LaserdiscBlockPresent(laserdisc)) {
+    return;
+  }
+  out << YAML::Key << "laserdisc" << YAML::Value << YAML::BeginMap;
+  if (!laserdisc.disc_type.empty()) {
+    out << YAML::Key << "disc_type" << YAML::Value << laserdisc.disc_type;
+  }
+  const bool empty = laserdisc.disc_type.empty() && !laserdisc.pilot_burst &&
+                     !laserdisc.vbi_burst && !laserdisc.efm_audio.enabled &&
+                     !laserdisc.channel.enabled;
+  if (laserdisc.pilot_burst || (empty && standard == Standard::kPal)) {
+    out << YAML::Key << "pilot_burst" << YAML::Value << laserdisc.pilot_burst;
+  }
+  if (laserdisc.vbi_burst || (empty && standard != Standard::kPal)) {
+    out << YAML::Key << "vbi_burst" << YAML::Value << laserdisc.vbi_burst;
+  }
+  if (laserdisc.efm_audio.enabled) {
+    out << YAML::Key << "efm_audio" << YAML::Value << YAML::BeginMap;
+    out << YAML::Key << "pair" << YAML::Value << laserdisc.efm_audio.pair;
+    out << YAML::EndMap;
+  }
+  EmitLaserdiscChannel(out, laserdisc.channel);
   out << YAML::EndMap;
 }
 
@@ -168,6 +247,30 @@ void EmitChromaError(YAML::Emitter& out,
     out << YAML::Key << "gain" << YAML::Value << jitter.gain;
     if (jitter.seed_specified) {
       out << YAML::Key << "seed" << YAML::Value << jitter.seed;
+    }
+    out << YAML::EndMap;
+  }
+  const DifferentialParameters& differential = chroma_error.differential;
+  if (differential.enabled) {
+    const auto fields = [](const LevelCurvePoint& point) {
+      return std::pair{point.level_ire, point.value};
+    };
+    out << YAML::Key << "differential" << YAML::Value << YAML::BeginMap;
+    if (!differential.gain.empty()) {
+      EmitPointPairs(out, "gain", differential.gain, fields);
+    }
+    if (!differential.phase_deg.empty()) {
+      EmitPointPairs(out, "phase_deg", differential.phase_deg, fields);
+    }
+    out << YAML::EndMap;
+  }
+  const CrosstalkParameters& crosstalk = chroma_error.crosstalk;
+  if (crosstalk.enabled) {
+    out << YAML::Key << "crosstalk" << YAML::Value << YAML::BeginMap;
+    out << YAML::Key << "v_to_u" << YAML::Value << crosstalk.v_to_u;
+    out << YAML::Key << "u_to_v" << YAML::Value << crosstalk.u_to_v;
+    if (crosstalk.alternate_with_switch) {
+      out << YAML::Key << "alternate_with_switch" << YAML::Value << true;
     }
     out << YAML::EndMap;
   }
@@ -197,25 +300,56 @@ void EmitLineInjectionCode(YAML::Emitter& out,
   out << YAML::EndMap;
 }
 
+// Emits the section's `laserdisc:` block: its disc area and the codes of its
+// laserdisc line injection.
+void EmitSectionLaserdisc(YAML::Emitter& out, const Section& section) {
+  bool has_codes = false;
+  for (const Section::LineInjection& injection : section.line_injections) {
+    has_codes = has_codes || injection.type == "laserdisc";
+  }
+  if (section.section_type == SectionType::kUnknown && !has_codes) {
+    return;
+  }
+  out << YAML::Key << "laserdisc" << YAML::Value << YAML::BeginMap;
+  if (section.section_type != SectionType::kUnknown) {
+    out << YAML::Key << "area" << YAML::Value
+        << SectionTypeToString(section.section_type);
+  }
+  if (has_codes) {
+    out << YAML::Key << "codes" << YAML::Value << YAML::BeginSeq;
+    for (const Section::LineInjection& injection : section.line_injections) {
+      if (injection.type != "laserdisc") {
+        continue;
+      }
+      for (const Section::LineInjectionCode& code : injection.codes) {
+        EmitLineInjectionCode(out, code);
+      }
+    }
+    out << YAML::EndSeq;
+  }
+  out << YAML::EndMap;
+}
+
+// Emits the section's remaining (non-laserdisc) line injections.
 void EmitLineInjections(YAML::Emitter& out, const Section& section) {
-  if (section.line_injections.empty()) {
+  bool any = false;
+  for (const Section::LineInjection& injection : section.line_injections) {
+    any = any || injection.type != "laserdisc";
+  }
+  if (!any) {
     return;
   }
 
   out << YAML::Key << "line_injections" << YAML::Value << YAML::BeginSeq;
   for (const Section::LineInjection& injection : section.line_injections) {
+    if (injection.type == "laserdisc") {
+      continue;
+    }
     out << YAML::BeginMap;
     out << YAML::Key << "type" << YAML::Value << injection.type;
     if (!injection.target_lines.empty()) {
       out << YAML::Key << "target_lines" << YAML::Value << YAML::Flow
           << injection.target_lines;
-    }
-    if (!injection.codes.empty()) {
-      out << YAML::Key << "codes" << YAML::Value << YAML::BeginSeq;
-      for (const Section::LineInjectionCode& code : injection.codes) {
-        EmitLineInjectionCode(out, code);
-      }
-      out << YAML::EndSeq;
     }
     out << YAML::EndMap;
   }
@@ -334,6 +468,40 @@ void EmitLumaBandwidth(YAML::Emitter& out,
         << luma_bandwidth.transition_mhz;
   }
   out << YAML::EndMap;
+}
+
+// Writes `horizontal_resample:` unless it is the nearest-pixel default.
+void EmitHorizontalResample(YAML::Emitter& out, HorizontalResample resample) {
+  if (resample == HorizontalResample::kNearest) {
+    return;
+  }
+  out << YAML::Key << "horizontal_resample" << YAML::Value << "bandlimited";
+}
+
+// Writes `chroma_line_sign:`; a component left normal is omitted.
+void EmitChromaLineSign(YAML::Emitter& out,
+                        const std::vector<ChromaLineSignRegion>& regions) {
+  if (regions.empty()) {
+    return;
+  }
+  out << YAML::Key << "chroma_line_sign" << YAML::Value << YAML::BeginSeq;
+  for (const ChromaLineSignRegion& region : regions) {
+    out << YAML::BeginMap;
+    out << YAML::Key << "region" << YAML::Value << YAML::Flow << YAML::BeginMap;
+    out << YAML::Key << "x" << YAML::Value << region.x;
+    out << YAML::Key << "y" << YAML::Value << region.y;
+    out << YAML::Key << "width" << YAML::Value << region.width;
+    out << YAML::Key << "height" << YAML::Value << region.height;
+    out << YAML::EndMap;
+    if (region.u == ChromaLineSignMode::kFollowSwitch) {
+      out << YAML::Key << "u" << YAML::Value << "follow_switch";
+    }
+    if (region.v == ChromaLineSignMode::kFollowSwitch) {
+      out << YAML::Key << "v" << YAML::Value << "follow_switch";
+    }
+    out << YAML::EndMap;
+  }
+  out << YAML::EndSeq;
 }
 
 template <typename DropoutBlock>
@@ -505,10 +673,6 @@ void EmitSection(YAML::Emitter& out, const Section& section) {
     out << YAML::Key << "duration_frames" << YAML::Value
         << section.duration_frames;
   }
-  if (section.section_type != SectionType::kUnknown) {
-    out << YAML::Key << "section_type" << YAML::Value
-        << SectionTypeToString(section.section_type);
-  }
   if (section.start_frame != 0) {
     out << YAML::Key << "start_frame" << YAML::Value << section.start_frame;
   }
@@ -516,11 +680,14 @@ void EmitSection(YAML::Emitter& out, const Section& section) {
     out << YAML::Key << "end_frame" << YAML::Value << section.end_frame;
   }
   EmitCadence(out, section.cadence);
+  EmitSectionLaserdisc(out, section);
   EmitLineInjections(out, section);
+  EmitHorizontalResample(out, section.horizontal_resample);
+  EmitChromaLineSign(out, section.chroma_line_sign);
   EmitLumaBandwidth(out, section.luma_bandwidth);
+  EmitOsd(out, section.osd);
   EmitNoise(out, section.noise);
   EmitDropouts(out, section.dropouts);
-  EmitOsd(out, section.osd);
   EmitAudio(out, section);
   out << YAML::EndMap;
 }
@@ -540,6 +707,8 @@ std::string YamlProjectEmitter::EmitString(const Project& project) const {
   EmitCvbsPresets(out, project.cvbs_presets);
   EmitOutputTargets(out, project.output);
   EmitProjectLineInjections(out, project.line_injections);
+  EmitLaserdisc(out, project.laserdisc,
+                project.cvbs_presets.video_standard_preset);
   EmitChannel(out, project.channel);
   EmitChromaError(out, project.chroma_error);
 

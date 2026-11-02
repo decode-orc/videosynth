@@ -55,31 +55,28 @@ constexpr double kPalUvCutoffHz = 1.3e6;
 constexpr double kNtscCbCrCutoffHz = 1.2e6;
 constexpr int kPalFilterTaps = 33;
 constexpr int kNtscFilterTaps = 17;
-constexpr int kChromaAxisFractionBits = 20;
-constexpr std::int64_t kChromaAxisScale = (1LL << kChromaAxisFractionBits);
 constexpr int kFirCoeffFractionBits = 30;
 constexpr std::int64_t kFirCoeffScale = (1LL << kFirCoeffFractionBits);
 
 // Overflow envelope for the int32 × int32 → int64 FIR accumulator.
 //
 // A colour-difference sample is (code − 512) × 2^20 / 448 with the code clamped
-// to [64, 960] (ExtractCb/CrAxisFixed), so its magnitude never exceeds
-// kChromaAxisScale. A single Q30 tap of a unity-DC-gain low-pass kernel is well
-// under 1.0; kMaxFirTapFixed caps it at exactly 1.0 and kMaxFirTaps caps the
-// tap count, both enforced in QuantizeKernelToFixed. The static_assert below
-// proves the worst-case accumulator stays inside int64.
+// to [64, 960] (ChromaAxisFromCode), so its magnitude never exceeds
+// kChromaAxisScale; axes handed to EncodeAxesFromPhaseStart may reach twice
+// that (kMaxChromaAxisMagnitude). A single Q30 tap of a unity-DC-gain low-pass
+// kernel is well under 1.0; kMaxFirTapFixed caps it at exactly 1.0 and
+// kMaxFirTaps caps the tap count, both enforced in QuantizeKernelToFixed. The
+// static_assert below proves the worst-case accumulator stays inside int64.
 constexpr std::int64_t kMaxFirTapFixed = kFirCoeffScale;
 constexpr int kMaxFirTaps = 129;
-static_assert(kMaxFirTaps <= (INT64_MAX / kMaxFirTapFixed) / kChromaAxisScale,
+constexpr std::int64_t kMaxChromaAxisMagnitude = 2 * kChromaAxisScale;
+static_assert(kMaxFirTaps <=
+                  (INT64_MAX / kMaxFirTapFixed) / kMaxChromaAxisMagnitude,
               "Fixed-point chroma FIR accumulator can overflow int64");
 static_assert(kMaxFirTapFixed <= INT32_MAX,
               "Quantised chroma FIR taps must fit int32");
-static_assert(kChromaAxisScale <= INT32_MAX,
+static_assert(kMaxChromaAxisMagnitude <= INT32_MAX,
               "Fixed-point colour-difference axis samples must fit int32");
-
-int ClampCode(int code, int lo, int hi) {
-  return std::max(lo, std::min(code, hi));
-}
 
 std::vector<std::int32_t> QuantizeKernelToFixed(
     const std::vector<double>& kernel) {
@@ -109,9 +106,7 @@ void ExtractCbAxisFixed(const std::vector<YCbCr444Pixel>& source_samples,
                         std::vector<std::int32_t>* axis_fixed) {
   axis_fixed->resize(source_samples.size());
   for (std::size_t index = 0; index < source_samples.size(); ++index) {
-    const int cb = ClampCode(source_samples[index].cb, 64, 960);
-    (*axis_fixed)[index] = static_cast<std::int32_t>(
-        static_cast<std::int64_t>(cb - 512) * kChromaAxisScale / 448);
+    (*axis_fixed)[index] = ChromaAxisFromCode(source_samples[index].cb);
   }
 }
 
@@ -119,9 +114,7 @@ void ExtractCrAxisFixed(const std::vector<YCbCr444Pixel>& source_samples,
                         std::vector<std::int32_t>* axis_fixed) {
   axis_fixed->resize(source_samples.size());
   for (std::size_t index = 0; index < source_samples.size(); ++index) {
-    const int cr = ClampCode(source_samples[index].cr, 64, 960);
-    (*axis_fixed)[index] = static_cast<std::int32_t>(
-        static_cast<std::int64_t>(cr - 512) * kChromaAxisScale / 448);
+    (*axis_fixed)[index] = ChromaAxisFromCode(source_samples[index].cr);
   }
 }
 
@@ -290,6 +283,27 @@ void QuadratureChromaEncoder::EncodeLineFromPhaseStart(
   ApplyFirFilterFixed(sin_axis_fixed_, filter_taps_fixed_, &filtered_sin_fixed_,
                       &fir_pad_fixed_);
   ApplyFirFilterFixed(cos_axis_fixed_, filter_taps_fixed_, &filtered_cos_fixed_,
+                      &fir_pad_fixed_);
+
+  ModulateQuadratureFromPhaseStart(filtered_sin_fixed_, filtered_cos_fixed_,
+                                   sin_scale_mv_, cos_scale_mv_,
+                                   carrier_phase_start_rad, out_chroma_mv);
+}
+
+void QuadratureChromaEncoder::EncodeAxesFromPhaseStart(
+    const std::vector<std::int32_t>& sin_axis,
+    const std::vector<std::int32_t>& cos_axis, double carrier_phase_start_rad,
+    std::vector<SampleFixed>* out_chroma_mv) const {
+  if (out_chroma_mv == nullptr) {
+    throw std::invalid_argument("Output chroma line pointer must not be null");
+  }
+  if (sin_axis.size() != cos_axis.size()) {
+    throw std::invalid_argument("Chroma axes must have the same length");
+  }
+
+  ApplyFirFilterFixed(sin_axis, filter_taps_fixed_, &filtered_sin_fixed_,
+                      &fir_pad_fixed_);
+  ApplyFirFilterFixed(cos_axis, filter_taps_fixed_, &filtered_cos_fixed_,
                       &fir_pad_fixed_);
 
   ModulateQuadratureFromPhaseStart(filtered_sin_fixed_, filtered_cos_fixed_,

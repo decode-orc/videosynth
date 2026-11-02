@@ -84,7 +84,9 @@ std::vector<VitsInjection> LaserdiscVitsSet(Standard standard);
 // catalogue is standard-specific, so entries do not carry across a standard
 // change. Under laserdisc placement the spec-required set for `new_standard` is
 // substituted; otherwise entries whose vits_type is not offered for
-// `new_standard` are dropped. disc_type and placement are preserved.
+// `new_standard` are dropped. The placement is preserved, except that SECAM
+// (which has no LaserVision format) falls back from laserdisc placement to
+// standard placement.
 ProjectLineInjections ReconcileVitsForStandard(ProjectLineInjections injections,
                                                Standard new_standard);
 

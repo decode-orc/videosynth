@@ -179,6 +179,16 @@ TEST(ValidationIssuesModelTest, ImpairmentIssuesNavigateToTheirField) {
          p->sections[1].luma_bandwidth.cutoff_mhz = 0.2;
        },
        1, IssueField::kLumaBandwidth},
+      {"chroma line sign",
+       [](Project* p) {
+         p->sections[1].chroma_line_sign.push_back(
+             ChromaLineSignRegion{.x = 700,
+                                  .y = 0,
+                                  .width = 48,
+                                  .height = 48,
+                                  .v = ChromaLineSignMode::kFollowSwitch});
+       },
+       1, IssueField::kPicture},
       {"channel",
        [](Project* p) {
          p->channel.enabled = true;
@@ -191,10 +201,11 @@ TEST(ValidationIssuesModelTest, ImpairmentIssuesNavigateToTheirField) {
          for (Section& section : p->sections) {
            section.source = "assets/ntsc.exr";
          }
-         p->channel.enabled = true;
-         p->channel.fm_beat.enabled = true;
+         p->laserdisc.enabled = true;
+         p->laserdisc.channel.enabled = true;
+         p->laserdisc.channel.fm_beat.enabled = true;
        },
-       -1, IssueField::kChannel},
+       -1, IssueField::kLaserdiscChannel},
       {"chroma error",
        [](Project* p) {
          p->chroma_error.enabled = true;

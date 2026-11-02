@@ -97,16 +97,17 @@ bool ChapterNumberGenerator::IsValidChapterNumber(int chapter_num) {
   return chapter_num >= 0 && chapter_num <= kMaxChapterNumber;
 }
 
-// IEC 60856/60857 §10.1.5 encoding:
-//   X₁ = (stop_bit << 3) | (chapter_num / 16)
-//   X₂ = chapter_num % 16
+// IEC 60856/60857 §10.1.5 encoding. The chapter number is two BCD digits, like
+// the picture number, which is why the maximum is 79 (tens digit in 3 bits):
+//   X₁ = (stop_bit << 3) | (chapter_num / 10)
+//   X₂ = chapter_num % 10
 //   Code = 0x800000 | (X₁ << 16) | (X₂ << 12) | 0xDDD
 // static
 uint32_t ChapterNumberGenerator::EncodeChapterCode(int chapter_num,
                                                    bool stop_bit) {
   const uint8_t x1_nibble = (stop_bit ? 0x08u : 0x00u) |
-                            (static_cast<uint8_t>(chapter_num / 16) & 0x07u);
-  const uint8_t x2_nibble = static_cast<uint8_t>(chapter_num % 16);
+                            (static_cast<uint8_t>(chapter_num / 10) & 0x07u);
+  const uint8_t x2_nibble = static_cast<uint8_t>(chapter_num % 10);
   return 0x800000u | (static_cast<uint32_t>(x1_nibble) << 16) |
          (static_cast<uint32_t>(x2_nibble) << 12) | kDddPattern;
 }
@@ -114,12 +115,12 @@ uint32_t ChapterNumberGenerator::EncodeChapterCode(int chapter_num,
 // IEC 60856/60857 §10.1.5 decoding:
 //   X₁ = (code >> 16) & 0x0F
 //   X₂ = (code >> 12) & 0x0F
-//   Chapter = (X₁ & 7) × 16 + X₂
+//   Chapter = (X₁ & 7) × 10 + X₂
 // static
 int ChapterNumberGenerator::DecodeChapterNumber(uint32_t code_value) {
   const uint8_t x1_nibble = static_cast<uint8_t>((code_value >> 16) & 0x0Fu);
   const uint8_t x2_nibble = static_cast<uint8_t>((code_value >> 12) & 0x0Fu);
-  return static_cast<int>((x1_nibble & 0x07u) * 16u + x2_nibble);
+  return static_cast<int>((x1_nibble & 0x07u) * 10u + x2_nibble);
 }
 
 // IEC 60856/60857 §10.1.5 decoding:

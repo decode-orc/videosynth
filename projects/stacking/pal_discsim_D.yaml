@@ -29,16 +29,18 @@ cvbs_presets:
   video_standard_preset: PAL
   sample_encoding_preset: CVBS_U10_4FSC
   signal_state_preset: STANDARD_STABLE_LOCKED
-  pal_laserdisc_pilot_burst: true
 
 output:
   video_path: "{output}/videosynth_pal_discsim_D.cvbs"
 
 line_injections:
-  disc_type: CAV
   vits:
     - vits_type: uk-national
       target_lines: [19]
+
+laserdisc:
+  disc_type: CAV
+  pilot_burst: true
 
 sections:
 
@@ -49,7 +51,13 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x576/100_BARS.exr"
     duration_frames: 1
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 8
+        - code_type: programme_status
+          programme_status: "0x8DC000"
     noise:
       noise_db: 33.0
       noise_spread_db: 4.0
@@ -63,13 +71,6 @@ sections:
         scale: 14
         seed: 4004
         anchor: disc
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 8
-          - code_type: programme_status
-            programme_status: "0x8DC000"
     osd:
       overlays:
         - text: "PN:{picture_number} HEX:{biphase_hex} PHASE:{phase_id}"
@@ -86,7 +87,13 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x576/TESTCARD-F.exr"
     duration_frames: 8
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 9
+        - code_type: programme_status
+          programme_status: "0x8DC000"
     noise:
       noise_db: 33.0
       noise_spread_db: 4.0
@@ -100,13 +107,6 @@ sections:
         scale: 14
         seed: 4004
         anchor: disc
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 9
-          - code_type: programme_status
-            programme_status: "0x8DC000"
     osd:
       overlays:
         - text: "PN:{picture_number} HEX:{biphase_hex} PHASE:{phase_id}"
@@ -123,7 +123,13 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x576/MULTIBURST.exr"
     duration_frames: 8
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 17
+        - code_type: programme_status
+          programme_status: "0x8DC000"
     noise:
       noise_db: 33.0
       noise_spread_db: 4.0
@@ -137,13 +143,6 @@ sections:
         scale: 14
         seed: 4004
         anchor: disc
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 17
-          - code_type: programme_status
-            programme_status: "0x8DC000"
     osd:
       overlays:
         - text: "PN:{picture_number} HEX:{biphase_hex} PHASE:{phase_id}"
@@ -160,7 +159,13 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x576/TARTAN.exr"
     duration_frames: 3
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 25
+        - code_type: programme_status
+          programme_status: "0x8DC000"
     noise:
       noise_db: 33.0
       noise_spread_db: 4.0
@@ -174,13 +179,6 @@ sections:
         scale: 14
         seed: 4004
         anchor: disc
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 25
-          - code_type: programme_status
-            programme_status: "0x8DC000"
     osd:
       overlays:
         - text: "PN:{picture_number} HEX:{biphase_hex} PHASE:{phase_id}"
@@ -197,7 +195,13 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x576/TARTAN.exr"
     duration_frames: 8
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 25
+        - code_type: programme_status
+          programme_status: "0x8DC000"
     noise:
       noise_db: 33.0
       noise_spread_db: 4.0
@@ -211,13 +215,6 @@ sections:
         scale: 14
         seed: 4004
         anchor: disc
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 25
-          - code_type: programme_status
-            programme_status: "0x8DC000"
     osd:
       overlays:
         - text: "PN:{picture_number} HEX:{biphase_hex} PHASE:{phase_id}"
@@ -234,7 +231,13 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x576/Y_CB_CR_RAMPS.exr"
     duration_frames: 2
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 33
+        - code_type: programme_status
+          programme_status: "0x8DC000"
     noise:
       noise_db: 33.0
       noise_spread_db: 4.0
@@ -248,13 +251,6 @@ sections:
         scale: 14
         seed: 4004
         anchor: disc
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 33
-          - code_type: programme_status
-            programme_status: "0x8DC000"
     osd:
       overlays:
         - text: "PN:{picture_number} HEX:{biphase_hex} PHASE:{phase_id}"
@@ -271,7 +267,13 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x576/Y_CB_CR_RAMPS.exr"
     duration_frames: 4
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 37
+        - code_type: programme_status
+          programme_status: "0x8DC000"
     noise:
       noise_db: 33.0
       noise_spread_db: 4.0
@@ -285,13 +287,6 @@ sections:
         scale: 14
         seed: 4004
         anchor: disc
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 37
-          - code_type: programme_status
-            programme_status: "0x8DC000"
     osd:
       overlays:
         - text: "PN:{picture_number} HEX:{biphase_hex} PHASE:{phase_id}"

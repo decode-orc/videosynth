@@ -32,6 +32,7 @@
 #include <QStringList>
 #include <QTimer>
 #include <QUrl>
+#include <algorithm>
 #include <vector>
 
 #include "asset_roots.h"
@@ -698,13 +699,23 @@ void MainWindow::EditProject(IssueField field) {
   }
   const Project edited = dialog.project();
   // Each setter is a no-op when its slice is unchanged, so only actual edits
-  // mark the document modified.
+  // mark the document modified; together they form one undo step.
+  const ScopedUndoBatch batch(document_, tr("Edit project settings"));
   document_->SetProjectInfo(edited.name, edited.version, edited.description);
   document_->SetCvbsPresets(edited.cvbs_presets);
   document_->SetProjectLineInjections(edited.line_injections);
   document_->SetOutputTargets(edited.output);
+  document_->SetLaserdisc(edited.laserdisc);
   document_->SetChannel(edited.channel);
   document_->SetChromaError(edited.chroma_error);
+  // The settings can rewrite sections too: removing the laserdisc block
+  // clears every section's disc area and codes.
+  const int section_count = std::min(document_->section_count(),
+                                     static_cast<int>(edited.sections.size()));
+  for (int index = 0; index < section_count; ++index) {
+    document_->SetSection(index,
+                          edited.sections[static_cast<std::size_t>(index)]);
+  }
   statusBar()->showMessage(tr("Project settings updated"), 3000);
 }
 

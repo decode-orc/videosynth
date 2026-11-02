@@ -33,6 +33,12 @@ namespace videosynth {
 // zero-centred and is not clamped: saturated chroma may legitimately exceed
 // the composite limits, and the output stage quantises it.
 //
+// Before the rotation, crosstalk (when set) demodulates each line against
+// the subcarrier reference generation modulated it with, mixes the decoded U
+// and V by the crosstalk matrix, and remodulates. Differential gain and phase
+// (when set) multiply g and add to t sample by sample, from the luma level
+// under each sample in IRE (100 (Y - blanking) / (white - blanking)).
+//
 // t and g are the configured constants plus optional per-line Gaussian
 // jitter. Chroma error is a capture property, so the jitter RNG is keyed by
 // (seed, output frame index) and drawn line by line in frame order. The stage
@@ -53,6 +59,17 @@ class ChromaErrorStage {
 
   // True when the parameters change the signal.
   static bool IsActive(const ChromaErrorParameters& chroma_error);
+  // True when differential gain or phase is configured and not the identity.
+  static bool DifferentialIsActive(const ChromaErrorParameters& chroma_error);
+  // True when crosstalk is configured with a non-zero term.
+  static bool CrosstalkIsActive(const ChromaErrorParameters& chroma_error);
+
+  // As below, without luma: differential gain and phase are not applied.
+  void ApplyChromaError(
+      const Project& project,
+      const std::vector<IGenerationStage::FrameScheduleItem>& schedule,
+      std::size_t frame_offset, std::size_t frame_count,
+      std::vector<SampleFixed>* c_mv) const;
 
   // Applies the chroma error to a batch of frames in place.
   //
@@ -62,11 +79,15 @@ class ChromaErrorStage {
   //   schedule:     Frame schedule; its indices are output frame indices.
   //   frame_offset: Index into schedule of the first frame in this batch.
   //   frame_count:  Number of frames in this batch.
+  //   y_mv:         Y-channel mV buffer (frame_count x samples_per_frame),
+  //                 read for differential gain and phase; may be null when
+  //                 the project has none.
   //   c_mv:         C-channel mV buffer (frame_count x samples_per_frame).
   void ApplyChromaError(
       const Project& project,
       const std::vector<IGenerationStage::FrameScheduleItem>& schedule,
       std::size_t frame_offset, std::size_t frame_count,
+      const std::vector<SampleFixed>* y_mv,
       std::vector<SampleFixed>* c_mv) const;
 
  private:

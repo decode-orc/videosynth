@@ -48,7 +48,7 @@ A section may carry any number of overlays.
 |-------|-------------|
 | `{picture_number}` | The CAV picture number written into this frame's VBI, zero-padded to five digits |
 | `{biphase_hex}` | The 6-digit uppercase hex biphase code words for this frame, space separated |
-| `{phase_id}` | The colour-frame sequence index — 0–3 for PAL, 0–1 for NTSC |
+| `{phase_id}` | The colour-frame sequence index — 0–3 for PAL and PAL-M, 0–1 for NTSC |
 | `{section_name}` | The section's `name:` field, verbatim |
 | `{timecode}` | CLV programme timecode `HH:MM:SS:FF` |
 | `{frame_number}` | 1-based position of this frame in the whole output, zero-padded to five digits |

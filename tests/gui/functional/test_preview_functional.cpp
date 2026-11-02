@@ -175,8 +175,8 @@ std::shared_ptr<const PreviewFrameData> PreviewFirstFrame(
 
 // Edits made through the editors' document commands reach the preview: each
 // fires DocumentChanged (which drives the preview pane's debounced refresh),
-// and the refreshed frame carries the channel, chroma error and luma
-// bandwidth exactly as the pipeline applies them.
+// and the refreshed frame carries the channel, the LaserVision channel, the
+// chroma error and the luma bandwidth exactly as the pipeline applies them.
 TEST(PreviewFunctionalTest, ImpairmentEditsAreReflectedInThePreview) {
   const Project clean = MakeColourBarProject(
       Standard::kPal,
@@ -191,8 +191,12 @@ TEST(PreviewFunctionalTest, ImpairmentEditsAreReflectedInThePreview) {
   SetChannelEnabled(&channel, true);
   channel.timing_offset_samples = 0.25;
   SetEdgeSmearEnabled(&channel, true);
-  SetFmBeatEnabled(&channel, true);
   ASSERT_TRUE(document.SetChannel(channel));
+  LaserdiscParameters laserdisc = document.project().laserdisc;
+  SetFmBeatEnabled(&laserdisc, true);
+  SetGroupDelayEnabled(&laserdisc, true, Standard::kPal);
+  SetReplayResponseMode(&laserdisc, ReplayResponseMode::kFixed);
+  ASSERT_TRUE(document.SetLaserdisc(laserdisc));
   ChromaErrorParameters chroma_error = document.project().chroma_error;
   SetChromaErrorEnabled(&chroma_error, true);
   chroma_error.gain = 0.9;
@@ -201,7 +205,7 @@ TEST(PreviewFunctionalTest, ImpairmentEditsAreReflectedInThePreview) {
   Section section = document.project().sections[0];
   SetLumaBandwidthEnabled(&section, true);
   ASSERT_TRUE(document.SetSection(0, section));
-  EXPECT_EQ(document_changes, 3);
+  EXPECT_EQ(document_changes, 4);
 
   const Project& impaired = document.project();
   const std::shared_ptr<const PreviewFrameData> clean_frame =

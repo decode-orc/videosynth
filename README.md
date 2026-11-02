@@ -33,16 +33,19 @@ The project ships two front ends built from the same pipeline:
 - **Composite or Y/C output** (`output.signal_type: composite | yc`).
 - **Frame content** from validated progressive source profiles (EXR stills and
   MKV/MP4 video in any FFmpeg-decodable codec, colour-normalised to BT.601).
-- **Line injections** for VBI content: VITS test signals, and laserdisc
-  biphase and FM codes (IEC 60856/60857).
-- **Laserdisc disc simulation**: CAV/CLV picture numbers, chapters, programme
-  status codes, lead-in/out, picture stop, PAL pilot burst.
+- **VITS test signals** on the VBI lines, project-wide.
 - **Impairments**: two-component Gaussian noise (floor plus proportional)
   with optional spectral shaping and a shared pressing layer; dropout
   injection (random surface dropouts and persistent scratches) with a SQLite
   dropout sidecar, flagged or unflagged; pressing channel effects (sub-sample
-  timing offset, edge smear, PAL FM-beat herringbone); chroma gain and phase
-  error; and a per-section luma bandwidth limit.
+  timing offset, edge smear); chroma gain, phase, differential gain and
+  phase, and U/V crosstalk error; and a per-section luma bandwidth limit.
+- **LaserDisc simulation**, all in optional `laserdisc:` blocks: CAV/CLV
+  biphase and FM codes (IEC 60856/60857) — picture numbers, chapters,
+  programme status, lead-in/out, picture stop; the PAL pilot burst and NTSC
+  VBI burst; EFM digital audio; and the LaserVision channel (PAL FM-beat
+  herringbone, IEC 60856 group delay, replay response by disc position,
+  field-2 misregistration).
 - **Multi-track audio**: up to eight stereo channel pairs at 48 kHz/24-bit,
   each carrying test tones, a WAV/FLAC file or the source video's soundtrack,
   plus EFM audio for laserdisc projects.
@@ -201,7 +204,7 @@ nix develop "path:$PWD" --command ./build/videosynth-gui
 `videosynth-gui` accepts the same `--log-level` and `--log-file` options, which
 override the persisted preferences for the session. It opens on a welcome page:
 create a project (the video standard is fixed at creation time), add sections,
-edit line injections, impairments and audio, preview frames in the preview
+edit VITS, LaserDisc codes, impairments and audio, preview frames in the preview
 dock, then generate. Validation runs continuously in the background
 and reports into the issues dock.
 
@@ -209,8 +212,8 @@ and reports into the issues dock.
 
 ## Projects
 
-A project is a YAML file describing the output, the global line injections and
-an ordered list of sections. A minimal example:
+A project is a YAML file describing the output, the project-wide VITS set,
+optional LaserDisc settings and an ordered list of sections. A minimal example:
 
 ```yaml
 project:
@@ -238,9 +241,11 @@ sections:
     duration_frames: 1
 ```
 
-The full schema is documented in
-[docs-tech/design/high-level-design.md](docs-tech/design/high-level-design.md) §7–§11;
-laserdisc biphase authoring is covered in
+The full schema is documented in the project file reference
+([docs/reference/overview.md](docs/reference/overview.md)); everything
+LaserDisc-specific is in its `laserdisc:` blocks
+([docs/reference/laserdisc.md](docs/reference/laserdisc.md)). Laserdisc biphase
+authoring is covered in
 [docs-tech/user/biphase-design.md](docs-tech/user/biphase-design.md).
 
 ### Logical asset roots
@@ -270,7 +275,8 @@ All artefacts are colocated with `output.video_path`:
 | `<name>.meta` | SQLite metadata sidecar |
 | `<name>.dropouts.meta` | SQLite dropout sidecar (schema v5), when any section injects dropouts |
 | `<name>_audio_<pair>.wav` | 48 kHz/24-bit stereo audio per channel pair |
-| `<name>.efm` / `<name>.efm.meta` | LaserDisc digital audio channel stream and its frame index, when `output.efm_audio` is set |
+| `<name>.efm` / `<name>.efm.meta` | LaserDisc digital audio channel stream and its frame index, when `laserdisc.efm_audio` is set |
+| `<name>.truth` / `<name>.truth.meta` | Picture truth (planar float32 Y/U/V at 4fsc over the active window) and its SQLite sidecar, when `output.truth` is set |
 
 ---
 
@@ -280,7 +286,7 @@ Hand-authored projects live in [projects/](projects/):
 
 | Directory | Contents |
 |-----------|----------|
-| [projects/general/](projects/general/) | Feature examples — audio, EFM audio, VITS, progressive EXR/MKV sources, PAL pilot burst, NTSC 2:3 pulldown film (composite) |
+| [projects/general/](projects/general/) | Feature examples — audio, EFM audio, VITS, progressive EXR/MKV sources (including SECAM), PAL pilot burst, NTSC VBI burst, PAL LaserVision channel, NTSC 2:3 pulldown film, PAL decoder-stress card and zone plates with picture truth (composite) |
 | [projects/general-yc/](projects/general-yc/) | PAL and NTSC audio examples with Y/C output |
 | [projects/stacking/](projects/stacking/) | Laserdisc disc simulation and multi-source stacking sets for PAL, PAL-M and NTSC |
 | [projects/long-form/](projects/long-form/) | Three-hour capture-sized PAL and NTSC examples (VITS, analogue stereo audio) for testing against realistic file sizes |
@@ -293,7 +299,8 @@ excluded from the suites below; run them by hand with `--output-root` pointing
 at storage that can hold the result.
 
 Derived variants (the `stacking-captures` set, the impairment-free
-`stacking-clean` set and the Y/C `stacking-yc` set) are generated into `build/generated-projects/` at build time
+`stacking-clean` set, the Y/C `stacking-yc` set and the `film-clv` and
+`film-pal-m` film sets) are generated into `build/generated-projects/` at build time
 by [scripts/generate_test_projects.py](scripts/generate_test_projects.py) and
 are not committed. Add a variant by editing `variants.json`, not by copying
 YAML.
@@ -372,11 +379,14 @@ scripts/output-hashes.sh
 | Script | Purpose |
 |--------|---------|
 | [scripts/generate_test_projects.py](scripts/generate_test_projects.py) | Derive variant projects from `projects/` (run automatically by the build) |
+| [scripts/migrate_laserdisc_keys.py](scripts/migrate_laserdisc_keys.py) | Rewrite project files that carry LaserDisc keys outside the `laserdisc:` blocks |
+| [scripts/generate_fm_beat_reference.py](scripts/generate_fm_beat_reference.py) | Rewrite the FM-beat golden vectors from the reference beat model (needs numpy and scipy; not part of the build) |
 | [scripts/compare_frames.py](scripts/compare_frames.py) | Bit-exact comparison of a picture number across stacking sources |
 | [scripts/compare_frames_detail.py](scripts/compare_frames_detail.py) | As above, split by VBI vs active video |
 | [scripts/convert_progressive_raw_to_exr.py](scripts/convert_progressive_raw_to_exr.py) | Convert raw yuv422p10le stills to OpenEXR fixtures |
 | [scripts/run_stage1_raw_to_exr_conversion.sh](scripts/run_stage1_raw_to_exr_conversion.sh) | Run the EXR conversion in an ad-hoc Nix shell |
 | [scripts/render-icons.sh](scripts/render-icons.sh) | Render the application icon PNG set from the logo SVG |
+| [scripts/prepare-flatpak-manifest.py](scripts/prepare-flatpak-manifest.py) | Write a copy of the Flatpak manifest with the release version and date filled in |
 
 ---
 

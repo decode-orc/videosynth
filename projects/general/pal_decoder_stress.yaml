@@ -1,0 +1,46 @@
+project:
+  name: PALDecoderStressFixture
+  version: "1.0"
+  description: >-
+    PAL decoder-stress card with line-alternating +/-(R-Y) and +/-(B-Y) strips,
+    and static luma and chroma zone plates, all band-limited and written with
+    their picture truth
+
+cvbs_presets:
+  video_standard_preset: PAL
+  sample_encoding_preset: CVBS_TPG21_4FSC
+  signal_state_preset: STANDARD_STABLE_LOCKED
+
+output:
+  video_path: "{output}/videosynth_pal_decoder_stress.cvbs"
+  truth: true
+
+sections:
+  - name: PalStress
+    type: progressive
+    source: "{bundled}/exr/720x576/PAL_STRESS.exr"
+    duration_frames: 8
+    horizontal_resample: bandlimited
+    chroma_line_sign:
+      # Left outer strip: unswitched V carrier, so V alternates line by line
+      # after the decoder's V-switch (colourless +/-(R-Y)).
+      - region: {x: 26, y: 16, width: 38, height: 544}
+        v: follow_switch
+      # Right outer strip: U alternates with the V-switch (colourless
+      # +/-(B-Y), anti-PAL).
+      - region: {x: 656, y: 16, width: 38, height: 544}
+        u: follow_switch
+      # Burst-gate check: line-alternating (R-Y) on black in the far
+      # left-hand castellation.
+      - region: {x: 0, y: 100, width: 24, height: 40}
+        v: follow_switch
+  - name: PalLumaZonePlate
+    type: progressive
+    source: "{bundled}/exr/720x576/LUMA_ZONE_PLATE.exr"
+    duration_frames: 4
+    horizontal_resample: bandlimited
+  - name: PalChromaZonePlate
+    type: progressive
+    source: "{bundled}/exr/720x576/CHROMA_ZONE_PLATE.exr"
+    duration_frames: 4
+    horizontal_resample: bandlimited

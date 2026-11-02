@@ -167,9 +167,13 @@ add_library(videosynth_core
     src/noise_injection_stage.cpp
     src/noise_spectrum_filter.cpp
     src/channel_stage.cpp
+    src/replay_channel_filter.cpp
+    src/field_offset_filter.cpp
     src/chroma_error_stage.cpp
     src/edge_smear_filter.cpp
     src/luma_bandwidth_filter.cpp
+    src/horizontal_resampler.cpp
+    src/picture_truth_writer.cpp
     src/fm_beat_model.cpp
     src/picture_chroma.cpp
     src/timing_offset_filter.cpp
@@ -271,6 +275,10 @@ if(VIDEOSYNTH_BUILD_GUI)
         src/gui/main_window.h
         src/gui/noise_level_curve_editor.cpp
         src/gui/noise_level_curve_editor.h
+        src/gui/chroma_line_sign_editor.cpp
+        src/gui/chroma_line_sign_editor.h
+        src/gui/curve_points_editor.cpp
+        src/gui/curve_points_editor.h
         src/gui/noise_spectrum_editor.cpp
         src/gui/noise_spectrum_editor.h
         src/gui/new_project_dialog.cpp
@@ -295,6 +303,8 @@ if(VIDEOSYNTH_BUILD_GUI)
         src/gui/project_settings_editor.h
         src/gui/project_settings_presenter.cpp
         src/gui/project_settings_presenter.h
+        src/gui/response_by_picture_editor.cpp
+        src/gui/response_by_picture_editor.h
         src/gui/project_templates.cpp
         src/gui/project_templates.h
         src/gui/qt_message_bridge.cpp

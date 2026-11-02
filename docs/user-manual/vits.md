@@ -50,7 +50,7 @@ Remember that line numbers are sequential across the whole frame, so 280–331 a
 
 ### `standard` (default)
 
-Each VITS type must sit on its broadcast recommended line, as listed above. Any other line is rejected. `virs` has no fixed line, so it may go on any line. This is what you want for broadcast-style test material, and it is what projects written before the field existed get.
+Each VITS type must sit on its broadcast recommended line, as listed above. Any other line is rejected. `virs` has no fixed line, so it may go on any line. This is what you want for broadcast-style test material, and it is what a project without a `placement` key gets.
 
 ```yaml
 line_injections:
@@ -78,24 +78,28 @@ Selecting this policy in the GUI seeds the spec-required set for the standard:
 
 ```yaml
 line_injections:
-  disc_type: CAV
   placement: laserdisc
   vits:
     - vits_type: uk-national
       target_lines: [19, 332]
     - vits_type: vits20
       target_lines: [20, 333]
+
+laserdisc:
+  disc_type: CAV
 ```
+
+The placement policy stays in `line_injections`; the disc format is in the project's [`laserdisc:`](../reference/laserdisc.md#disc_type) block.
 
 ### `custom`
 
-VITS may sit on any valid VBI line. The validator still rejects overlapping lines, and when `line_injections.disc_type` is set it still rejects the reserved address-code ranges.
+VITS may sit on any valid VBI line. The validator still rejects overlapping lines, and when [`laserdisc.disc_type`](../reference/laserdisc.md#disc_type) is set it still rejects the reserved address-code ranges.
 
 Use this when you are deliberately producing non-conforming material — testing how a decoder copes with a signal on the wrong line, for instance.
 
 ## VITS and laserdisc together
 
-The laserdisc address codes reserve whole VBI ranges, and no VITS may target a line inside them when the project sets `line_injections.disc_type`:
+The laserdisc address codes reserve whole VBI ranges, and no VITS may target a line inside them when the project sets `laserdisc.disc_type`, whether or not any section carries codes:
 
 | Standard | Field 1 | Field 2 |
 |----------|---------|---------|
@@ -126,7 +130,7 @@ That rules out most of the broadcast VITS lines on a disc:
 | `virs` | 19, 282 | **Required** |
 
 !!! important "NTSC discs must carry VIRS"
-    IEC 60857 §9.1.3 makes the Video Index Reference Signal mandatory on NTSC laserdiscs. An NTSC or PAL-M project that sets `line_injections.disc_type` and has no `virs` entry in the project-level VITS set is a validation error.
+    IEC 60857 §9.1.3 makes the Video Index Reference Signal mandatory on NTSC laserdiscs. An NTSC or PAL-M project that sets `laserdisc.disc_type` and has no `virs` entry in the project-level VITS set is a validation error.
 
 ## VITS and noise measurement
 

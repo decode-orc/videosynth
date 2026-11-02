@@ -44,7 +44,7 @@ Start with `CVBS_U10_4FSC`. It is what the decoding tool chain expects and it is
 Choose a **signed** preset — `CVBS_S16_4FSC` — or a raw preset when the signal contains **excursions below the 10-bit legal-code floor**. The clearest case is the PAL laserdisc pilot burst, whose trough reaches −600 mV, well under the −300 mV that the unsigned presets can represent. The NTSC laserdisc VBI burst is the other: on the broad field-sync pulses it reaches −60 IRE, below sync tip. Generating either with an unsigned preset is legal, and videosynth warns you that the burst trough is being clipped:
 
 ```text
-[warning] pal_laserdisc_pilot_burst warning: preset 'CVBS_U10_4FSC' clips
+[warning] laserdisc.pilot_burst warning: preset 'CVBS_U10_4FSC' clips
 sub-sync excursions below -300 mV; the pilot burst trough reaches -600 mV.
 Use CVBS_S16_4FSC or RAW_S16_28M/RAW_S16_40M to preserve the full burst waveform.
 ```
@@ -77,17 +77,6 @@ Luma and chroma are generated independently regardless, and combined only at the
 
 ## Standard-specific options
 
-### PAL laserdisc pilot burst
-
-```yaml
-cvbs_presets:
-  pal_laserdisc_pilot_burst: true
-```
-
-Superimposes a 3.75 MHz (240 × f_H) sinusoidal burst at ±300 mV on **every** sync pulse in the luma channel, per IEC 60856 §9.1.2. Laserdisc players use it as a tracking reference.
-
-PAL only — enabling it on an NTSC project is a validation error. Pair it with a signed or raw sample encoding so the −600 mV trough survives quantisation.
-
 ### SECAM chroma
 
 ```yaml
@@ -114,21 +103,10 @@ The D'R/D'B line sequence follows BT.1700 Figure 16 — line 7 of the first fram
 
 OSD overlays carry the undeviated subcarrier under their text, as a colourless area of a SECAM picture does. The subcarrier phase restarts at the edges of the text, so a decoder may show a brief transient there.
 
-SECAM projects cannot use the laserdisc features: there is no SECAM LaserVision format, so laserdisc line injections, `line_injections.disc_type`, laserdisc VITS placement, the pilot burst and EFM digital audio are validation errors.
+SECAM projects cannot use the LaserDisc features: there is no SECAM LaserVision format, so the project and section [`laserdisc:`](../reference/laserdisc.md) blocks and laserdisc VITS placement are validation errors.
 
 !!! note "Limitations"
     VITS test signals use the 625-line PAL catalogue, so any chroma packet in them is PAL-modulated; a SECAM project with VITS produces a validation warning. The luminance intermodulation correction that BT.470 allows for SECAM is not applied.
-
-### NTSC laserdisc VBI burst
-
-```yaml
-cvbs_presets:
-  ntsc_laserdisc_vbi_burst: true
-```
-
-Standard NTSC suppresses the colour burst on the equalising and broad sync lines of the vertical interval. An NTSC LaserDisc keeps it there: IEC 60857 §9.1.2 requires the burst on every line, once per line at its normal position after 0H (Figure 6a). With this option the burst continues through lines 1–9 and 264–272 with the same amplitude and the same continuous subcarrier phase as every other line. The burst is added in the chroma channel, so on the equalising lines it sits at blanking and on the broad field-sync lines, where the gate falls inside the broad pulse, it is centred on sync tip.
-
-NTSC only — enabling it on a PAL, PAL-M or SECAM project is a validation error. The burst on the broad pulses dips to −60 IRE, below the NTSC 10-bit legal-code floor at sync tip, so pair it with a signed or raw sample encoding to keep the whole waveform; an unsigned preset clips it and produces a warning.
 
 ### NTSC black setup
 
@@ -140,6 +118,57 @@ cvbs_presets:
 NTSC (and PAL-M) place black at 7.5 IRE above blanking by default — the "setup" pedestal. Setting `0.0` puts black at blanking instead, which is how Japanese NTSC and much digital-origin material behave.
 
 Only `7.5` and `0.0` are accepted, and only on NTSC or PAL-M projects. Specifying it on a PAL project is a validation error.
+
+## LaserDisc signal options
+
+Two LaserVision signal features are set in the project's [`laserdisc:`](../reference/laserdisc.md) block rather than in `cvbs_presets`, with the rest of the LaserDisc settings. A project that is not a disc can ignore this section. See [Laserdisc discs](laserdisc.md) for the rest of a disc project.
+
+### PAL pilot burst
+
+```yaml
+laserdisc:
+  pilot_burst: true
+```
+
+Superimposes a 3.75 MHz (240 × f_H) sinusoidal burst at ±300 mV on **every** sync pulse in the luma channel, per IEC 60856 §9.1.2. Laserdisc players use it as a tracking reference.
+
+PAL only — enabling it on an NTSC project is a validation error. Pair it with a signed or raw sample encoding so the −600 mV trough survives quantisation.
+
+### NTSC VBI burst
+
+```yaml
+laserdisc:
+  vbi_burst: true
+```
+
+Standard NTSC suppresses the colour burst on the equalising and broad sync lines of the vertical interval. An NTSC LaserDisc keeps it there: IEC 60857 §9.1.2 requires the burst on every line, once per line at its normal position after 0H (Figure 6a). With this option the burst continues through lines 1–9 and 264–272 with the same amplitude and the same continuous subcarrier phase as every other line. The burst is added in the chroma channel, so on the equalising lines it sits at blanking and on the broad field-sync lines, where the gate falls inside the broad pulse, it is centred on sync tip.
+
+NTSC only — enabling it on a PAL, PAL-M or SECAM project is a validation error. The burst on the broad pulses dips to −60 IRE, below the NTSC 10-bit legal-code floor at sync tip, so pair it with a signed or raw sample encoding to keep the whole waveform; an unsigned preset clips it and produces a warning.
+
+## Active picture
+
+Each active line takes one row of the source picture. The upper field (field 1 on 625-line systems, field 2 on 525-line) reads the even rows and the other field the odd rows. The 720 source pixels are mapped onto the 52 µs active window at 4fsc, the luma is painted as millivolts, and the two colour-difference components are low-pass filtered (33-tap Hamming-windowed 1.3 MHz for PAL and PAL-M, 17-tap 1.2 MHz for NTSC) and modulated onto the subcarrier. Two section keys change that path, and one output option records its result.
+
+### Horizontal mapping
+
+By default each 4fsc sample takes the nearest source pixel at or to its left — a zero-order hold. The hold leaves images of the source spectrum across the band. A source component at *f* reappears at 13.5 MHz − *f*, folded back by the 4fsc sampling: low-frequency picture detail in a PAL picture leaves energy around 4.4 MHz, which a chroma decoder rightly reads as cross-colour.
+
+[`horizontal_resample: bandlimited`](../reference/sections.md#horizontal_resample) replaces the hold with a polyphase Kaiser-windowed sinc at the source Nyquist frequency. It removes those images and the hold's in-band droop, for luma and chroma alike, and leaves flat areas and edge positions where the hold puts them. Use it for still-image decoder testing, where the cross-colour a decoder produces should come from the picture and not from the mapping.
+
+A [`luma_bandwidth`](../reference/sections.md#luma_bandwidth) limit removes the images above its cutoff, but not the droop, and it does not touch the chroma.
+
+### PAL decoder-stress regions
+
+A PAL decoder removes the V-switch line by line. A [`chroma_line_sign`](../reference/sections.md#chroma_line_sign) region multiplies its U or V by each line's switch sign before modulation, which builds the PAL delay-line and demodulator traps of cards such as the Philips PM5544:
+
+- **`v: follow_switch`** — the transmitted V carrier is unswitched, so the decoded V alternates line by line. A correct delay-line decoder shows grey; delay-line amplitude errors show as "Venetian blinds" and a non-orthogonal demodulator colours the bar. The unswitched V lands where U would be in the vertical spectrum, so a 2D or Transform PAL decoder cannot separate it from U by position alone.
+- **`u: follow_switch`** — U alternates with the switch: the "+V/±U anti-PAL" field.
+
+The switch sign belongs to the line and flips every frame for a given frame line, so this cannot be drawn into a still image. The bundled [`PAL_STRESS.exr`](sources.md#stills-exr) card carries the bars; its regions are set in the `pal_decoder_stress.yaml` [example project](../misc/example-projects.md#decoder-stress-and-zone-plates).
+
+### Picture truth
+
+[`output.truth: true`](../reference/output.md#truth) writes the Y, U and V that went into the modulator — after the horizontal mapping, the luma bandwidth limit, the chroma low-pass and any chroma line sign regions, and before any impairment — as planar `float32` at 4fsc over the active window, with a SQLite sidecar like the other `.meta` files. A decoder's output can then be scored against exactly what was encoded rather than against a re-derivation of videosynth's filters, which could drift silently from them. PAL, NTSC and PAL-M only; OSD text is not included. See [Output files](outputs.md#picture-truth).
 
 ## Field and line structure
 

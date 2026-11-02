@@ -29,13 +29,17 @@
 #include "videosynth/biphase_injection_manager.h"
 #include "videosynth/chroma_encoder.h"
 #include "videosynth/clv_code_generator.h"
+#include "videosynth/colour_sequence.h"
+#include "videosynth/field_offset_filter.h"
 #include "videosynth/film_cadence.h"
 #include "videosynth/fixed_point.h"
 #include "videosynth/frame_enrichment.h"
 #include "videosynth/frame_line_layout.h"
+#include "videosynth/horizontal_resampler.h"
 #include "videosynth/luma_bandwidth_filter.h"
 #include "videosynth/osd_renderer.h"
 #include "videosynth/osd_token_resolver.h"
+#include "videosynth/picture_truth.h"
 #include "videosynth/progressive_frame_source.h"
 #include "videosynth/secam_chroma_encoder.h"
 #include "videosynth/signal_shaping.h"
@@ -163,28 +167,6 @@ constexpr double kPi = 3.14159265358979323846;
 constexpr double kTwoPi = 2.0 * kPi;
 constexpr double kQuarterWaveRad = kPi / 2.0;
 
-// Samples per subcarrier cycle at 4fsc. The carrier advances exactly π/2 per
-// sample, so its phase is a pure function of the sample index modulo this
-// value; see docs-tech/design/high-level-design.md, "Subcarrier Lock
-// Implementation".
-constexpr std::size_t kSubcarrierLatticeSamples = 4U;
-
-// Number of frames after which a clean synthesised frame repeats exactly for
-// identical source content. The subcarrier lattice position advances by
-// (samples per frame mod 4) each frame — period 4 for PAL (709,379 ≡ 3) and
-// PAL-M (477,225 ≡ 1), period 2 for NTSC (477,750 ≡ 2) — and the PAL/PAL-M
-// burst meander and V-switch have period 2, which divides 4. The LaserDisc
-// pilot burst is period 1 (17,734,475 = 25 × 709,379). SECAM chroma is
-// rendered from 0H of every line, independent of the lattice position, and
-// its D'R/D'B sequence and phase inversion repeat every 2 frames (ITU-R
-// BT.1700 Annex 1 Part C Figure 16, Table 4 Note 1). Every use of the disc
-// frame index in clean synthesis therefore depends only on the index modulo
-// this period.
-std::size_t ColourSequencePeriodFrames(Standard standard) {
-  return (standard == Standard::kNtsc || standard == Standard::kSecam) ? 2U
-                                                                       : 4U;
-}
-
 // Reduces a phase argument into [0, 2π).
 //
 // Every phase in the synthesiser is periodic, so this is mathematically a
@@ -199,32 +181,11 @@ double WrapPhaseRad(double phase_rad) {
   return wrapped;
 }
 
-// Phase of the colour subcarrier at an absolute sample index, exactly.
-//
-// Reducing the index onto the 4-sample lattice before the multiply keeps the
-// result exact for the life of the render: sin/cos see one of four bounded
-// arguments rather than (π/2) × an index that reaches 1.9 × 10^11 on a
-// three-hour disc.
-double SubcarrierPhaseRad(std::size_t absolute_sample_index) {
-  return kQuarterWaveRad *
-         static_cast<double>(absolute_sample_index % kSubcarrierLatticeSamples);
-}
-
 // IEC 60856 §9.1.2: pilot burst frequency is 240 × fH = 3.75 MHz and
 // amplitude is 6/7 of (white - blanking) = 6/7 × 700 mV = 600 mV p-p,
 // centred on sync tip (−300 mV), giving ±300 mV swing.
 constexpr double kPilotBurstFreqHz = 3.75e6;
 constexpr double kPilotBurstAmplitudeMv = 300.0;
-
-// ITU-R BT.1700 Annex 1 Part B Figure 8 with Table 1 item 10f: the 8-field
-// PAL sequence pairs each burst-blanking meander position with a specific
-// subcarrier-to-frame phase. Rotating the subcarrier lattice by 270° anchors
-// disc frame 0 (meander parity 0, fields I/II) to the subcarrier phase that
-// decoders identify as colour fields 1/2. Validated against the
-// ld-decode/decode-orc field-phase detection: without this anchor the two
-// fields of a frame decode as non-consecutive field IDs. The anchor applies
-// to 625-line PAL only; PAL-M keeps a zero anchor.
-constexpr double kPalSubcarrierAnchorRad = 3.0 * kPi / 2.0;
 
 double SyncEdgeRiseTimeSeconds(Standard standard);
 double BurstEnvelopeRiseTimeSeconds(Standard standard);
@@ -738,20 +699,6 @@ double BurstEnvelopeRiseTimeSeconds(Standard standard) {
   return 300.0e-9;
 }
 
-int PalBurstSequenceIndex(std::size_t frame_index, int field_index_1based) {
-  // ITU-R BT.1700 Annex 1 Part B Table 1 item 10f: defines sequence I/II/III/IV
-  // repeating over colour fields. A frame contains two consecutive fields.
-  return static_cast<int>(
-      ((2U * frame_index) + static_cast<std::size_t>(field_index_1based - 1)) %
-      4U);
-}
-
-bool PalBurstPositiveOnOddLine(int burst_sequence_index) {
-  // Sequence I/II: odd lines use +135 deg, even lines use -135 deg.
-  // Sequence III/IV: odd lines use -135 deg, even lines use +135 deg.
-  return burst_sequence_index == 0 || burst_sequence_index == 1;
-}
-
 bool IsPalBurstBlankedLine(int line_1based, int colour_frame_parity) {
   // ITU-R BT.1700 Annex 1 Part B Figure 8: the four 9-line burst-blanking
   // windows are defined in frame-line numbers and span frame boundaries:
@@ -787,16 +734,6 @@ bool IsPalMBurstBlankedLine(int line_1based, int colour_frame_parity) {
          line_1based >= 523;
 }
 
-double PalBurstPhaseRadForLine(std::size_t frame_index,
-                               const LineTimingPrimitive& line) {
-  const int burst_sequence_index =
-      PalBurstSequenceIndex(frame_index, line.field_index_1based);
-  const bool line_is_odd = (line.line_number_1based % 2) == 1;
-  const bool positive_on_odd = PalBurstPositiveOnOddLine(burst_sequence_index);
-  const bool positive_phase = line_is_odd ? positive_on_odd : !positive_on_odd;
-  return positive_phase ? (3.0 * kPi / 4.0) : (-3.0 * kPi / 4.0);
-}
-
 bool PalBurstEnabledForLine(std::size_t frame_index,
                             const LineTimingPrimitive& line) {
   if (line.sync_pulse_kind != SyncPulseKind::kHorizontal) {
@@ -813,11 +750,6 @@ bool PalMBurstEnabledForLine(std::size_t frame_index,
   }
   const int colour_frame_parity = static_cast<int>(frame_index % 2U);
   return !IsPalMBurstBlankedLine(line.line_number_1based, colour_frame_parity);
-}
-
-bool PalInvertVAxisForLine(std::size_t frame_index,
-                           const LineTimingPrimitive& line) {
-  return PalBurstPhaseRadForLine(frame_index, line) < 0.0;
 }
 
 using RenderedVitsLineMap =
@@ -1006,6 +938,23 @@ struct GenerationStage::SynthesisResources {
   std::vector<SampleFixed> line_luma;
   std::vector<SampleFixed> filtered_line_luma;
 
+  // The line's colour-difference axes handed to a quadrature encoder (Q20,
+  // one entry per active-window sample), or, on a band-limited SECAM line,
+  // its resampled Cb/Cr codes.
+  std::vector<std::int32_t> line_u_axis;
+  std::vector<std::int32_t> line_v_axis;
+
+  // Band-limited horizontal mapping for the source most recently synthesised
+  // by this worker, rebuilt only when the source raster changes, and the
+  // per-source-column rows it resamples from.
+  std::unique_ptr<BandlimitedHorizontalResampler> resampler;
+  std::vector<SampleFixed> row_luma;
+  std::vector<std::int32_t> row_u_axis;
+  std::vector<std::int32_t> row_v_axis;
+
+  // Where the picture truth sits; rows == 0 when the standard has none.
+  PictureTruthLayout truth_layout;
+
   // The blanking waveform (sync pulses, chroma at zero) past the end of a
   // half-picture line's picture, saved before the picture is painted over it
   // and restored afterwards.
@@ -1144,10 +1093,10 @@ bool GenerationStage::SynthesisResourceCache::Build(
                            out->synth.burst_rise_samples);
   }
 
-  out->ntsc_vbi_burst = project.cvbs_presets.ntsc_laserdisc_vbi_burst &&
-                        standard == Standard::kNtsc;
-  out->pal_pilot_burst = project.cvbs_presets.pal_laserdisc_pilot_burst &&
-                         standard == Standard::kPal;
+  out->ntsc_vbi_burst =
+      project.laserdisc.vbi_burst && standard == Standard::kNtsc;
+  out->pal_pilot_burst =
+      project.laserdisc.pilot_burst && standard == Standard::kPal;
   out->pilot_omega =
       out->pal_pilot_burst
           ? (2.0 * kPi * kPilotBurstFreqHz / out->timing.sample_rate_4fsc_hz)
@@ -1250,6 +1199,11 @@ bool GenerationStage::SynthesisResourceCache::Build(
                         0);
   out->filtered_line_luma.assign(
       static_cast<std::size_t>(out->active_window_samples), 0);
+  out->line_u_axis.assign(static_cast<std::size_t>(out->active_window_samples),
+                          0);
+  out->line_v_axis.assign(static_cast<std::size_t>(out->active_window_samples),
+                          0);
+  out->truth_layout = BuildPictureTruthLayout(project.cvbs_presets);
   out->half_picture_luma_tail.assign(
       static_cast<std::size_t>(out->synth.max_line_samples), 0);
   out->half_picture_chroma_tail.assign(
@@ -1267,17 +1221,21 @@ bool GenerationStage::SynthesisResourceCache::Build(
 struct GenerationStage::FrameTemplate {
   std::vector<SampleFixed> y_mv;
   std::vector<SampleFixed> c_mv;
+  // Filled only when the cache was populated for truth-producing requests.
+  PictureTruthFrame truth;
 };
 
 // Bounded cache of clean frame templates, shared by all worker threads.
 //
 // Key: (source path, source frame identity, colour sequence phase, section
-// type, luma bandwidth limit). The clean frame depends on the section only
-// through its decoded source, its progressive/interlaced row pairing and its
-// luma bandwidth limit, so sections sharing those share templates. Everything
-// else the clean frame depends on — the CVBS presets (standard, levels, pilot
-// burst) and the project VITS set — is held as the cache configuration: a
-// lookup against a different configuration clears the cache first.
+// type, luma bandwidth limit, horizontal mapping, chroma line sign regions).
+// The clean frame depends on the section only through its decoded source, its
+// progressive/interlaced row pairing and its picture settings, so sections
+// sharing those share templates. Everything else the clean frame depends on —
+// the CVBS presets (standard, levels, pilot burst), the project VITS set and
+// whether templates carry a picture truth — is held as the cache
+// configuration: a lookup against a different configuration clears the cache
+// first.
 //
 // Admission: a template is built and stored only on a key's second request
 // (misses record the key in a ghost set and synthesise directly), so sources
@@ -1323,7 +1281,7 @@ class GenerationStage::TemplateCache {
   std::shared_ptr<const FrameTemplate> Acquire(
       const Project& project, const Section& section,
       const std::array<int, 2>& field_source_frames, std::size_t sequence_phase,
-      std::size_t template_bytes,
+      bool with_truth, std::size_t template_bytes,
       const std::function<void(FrameTemplate*)>& synthesise) {
     std::shared_ptr<Slot> slot;
     {
@@ -1333,17 +1291,24 @@ class GenerationStage::TemplateCache {
       }
 
       if (!configuration_valid_ || !(presets_ == project.cvbs_presets) ||
-          !(vits_ == project.line_injections.vits)) {
+          !(vits_ == project.line_injections.vits) ||
+          with_truth_ != with_truth) {
         slots_.clear();
         requested_once_.clear();
         reserved_bytes_ = 0;
         presets_ = project.cvbs_presets;
         vits_ = project.line_injections.vits;
+        with_truth_ = with_truth;
         configuration_valid_ = true;
       }
 
-      SlotKey key{section.source, section.type, section.luma_bandwidth,
-                  field_source_frames, sequence_phase};
+      SlotKey key{section.source,
+                  section.type,
+                  section.luma_bandwidth,
+                  section.horizontal_resample,
+                  section.chroma_line_sign,
+                  field_source_frames,
+                  sequence_phase};
       auto it = slots_.find(key);
       if (it == slots_.end()) {
         // Admission on second request: a template is only worth building and
@@ -1388,6 +1353,8 @@ class GenerationStage::TemplateCache {
     std::string source;
     std::string section_type;
     LumaBandwidthParameters luma_bandwidth;
+    HorizontalResample horizontal_resample = HorizontalResample::kNearest;
+    std::vector<ChromaLineSignRegion> chroma_line_sign;
     // Source frame of field 1 and field 2.
     std::array<int, 2> field_source_frames{};
     std::size_t sequence_phase = 0;
@@ -1396,7 +1363,9 @@ class GenerationStage::TemplateCache {
       return field_source_frames == other.field_source_frames &&
              sequence_phase == other.sequence_phase && source == other.source &&
              section_type == other.section_type &&
-             luma_bandwidth == other.luma_bandwidth;
+             luma_bandwidth == other.luma_bandwidth &&
+             horizontal_resample == other.horizontal_resample &&
+             chroma_line_sign == other.chroma_line_sign;
     }
   };
 
@@ -1430,6 +1399,7 @@ class GenerationStage::TemplateCache {
   bool configuration_valid_ = false;
   CvbsPresets presets_;
   std::vector<VitsInjection> vits_;
+  bool with_truth_ = false;
   std::unordered_map<SlotKey, std::shared_ptr<Slot>, SlotKeyHash> slots_;
   // Keys requested exactly once and not (yet) admitted.
   std::unordered_set<SlotKey, SlotKeyHash> requested_once_;
@@ -1471,7 +1441,7 @@ bool GenerationStage::BuildFrameSchedule(
   template_cache_->Clear();
   biphase_manager_.Reset();
   biphase_manager_.SetProjectDiscType(
-      DiscTypeFromString(project.line_injections.disc_type));
+      DiscTypeFromString(project.laserdisc.disc_type));
 
   // Compute disc_frame_offset = (first_PN - 1) from the first CAV
   // picture_number code. This offset is added to global_frame_index when
@@ -1557,10 +1527,22 @@ bool GenerationStage::BuildFrameSchedule(
   const int active_window_start =
       std::max(0, std::min(synth.active.active_window_start_samples,
                            synth.max_line_samples - 1));
+  // Chapter stop-bit exceptions depend on chapter lengths, which are only
+  // known once the whole schedule exists (IEC 60856/60857 §10.1.5).
+  std::vector<ScheduledSectionSpan> spans;
+  for (const FrameScheduleItem& item : *out_schedule) {
+    if (spans.empty() || spans.back().section != item.section) {
+      spans.push_back({.section = item.section});
+    }
+    ++spans.back().frames;
+  }
+  biphase_manager_.SetChapterStopBitOne(ResolveChapterStopBitOne(
+      spans, DiscTypeFromString(project.laserdisc.disc_type)));
+
   // The {timecode} OSD token is a continuous CLV programme timecode; it is only
   // meaningful on CLV discs, where it runs from the start of the output.
   const bool disc_is_clv =
-      DiscTypeFromString(project.line_injections.disc_type) == DiscType::kCLV;
+      DiscTypeFromString(project.laserdisc.disc_type) == DiscType::kCLV;
   for (std::size_t frame_index = 0; frame_index < out_schedule->size();
        ++frame_index) {
     FrameScheduleItem& item = (*out_schedule)[frame_index];
@@ -1640,7 +1622,8 @@ bool GenerationStage::BuildFrameSchedule(
 void GenerationStage::SynthesiseTemplate(
     SynthesisResources& resources, const Section& section,
     const std::array<const FrameSourceImage*, 2>& field_sources,
-    std::size_t sequence_phase, SampleFixed* y_out, SampleFixed* c_out) {
+    std::size_t sequence_phase, SampleFixed* y_out, SampleFixed* c_out,
+    PictureTruthFrame* truth) {
   const SignalLevels& levels = resources.levels;
   const generation_detail::SampledSynthesisContext& synth = resources.synth;
   const Standard video_standard = synth.standard;
@@ -1879,9 +1862,7 @@ void GenerationStage::SynthesiseTemplate(
         // additionally carries the subcarrier anchor so picture chroma stays
         // phase-coherent with the anchored burst.
         const double phase_offset =
-            (video_standard == Standard::kNtsc)
-                ? (line.burst_phase_rad + kPi)
-                : (is_pal ? kPalSubcarrierAnchorRad : 0.0);
+            PictureChromaPhaseOffsetRad(video_standard, line);
         const double phase_start =
             WrapPhaseRad(SubcarrierPhaseRad(active_window_line_start_absolute) +
                          phase_offset);
@@ -1917,50 +1898,163 @@ void GenerationStage::SynthesiseTemplate(
             (painted_sample_count > 0) ? &source_frame.PixelAt(0, source_row)
                                        : nullptr;
 
-        for (int x_sample = 0; x_sample < painted_sample_count; ++x_sample) {
-          const int sample_index = active_line_sample_base + x_sample;
-          const std::size_t sample_slot = static_cast<std::size_t>(x_sample);
-          const YCbCr444Pixel& pixel =
-              source_row_pixels[column_map.pixel_x[sample_slot]];
+        // ITU-R BT.1700 Annex 1 Part B Table 1 item 10f: PAL V-axis switching
+        // follows the burst-sequence-dependent odd/even polarity map. The
+        // transmitted V is the source V times this sign; negating the Q20
+        // axis is exactly what inverting the Cr code about 512 gives.
+        const std::int32_t v_switch_sign = invert_pal_v_axis ? -1 : 1;
+        // A chroma_line_sign component multiplied by a +1 switch sign is left
+        // as it is, so the regions only change lines whose V axis is inverted.
+        const bool apply_line_sign =
+            invert_pal_v_axis && !section.chroma_line_sign.empty();
+        const bool bandlimited =
+            section.horizontal_resample == HorizontalResample::kBandlimited &&
+            painted_sample_count > 0;
+        const bool collect_luma = luma_filter != nullptr || bandlimited;
+        std::vector<std::int32_t>& line_u_axis = resources.line_u_axis;
+        std::vector<std::int32_t>& line_v_axis = resources.line_v_axis;
 
-          active_sample_indices[sample_slot] = sample_index;
-          line_source_samples[sample_slot] = pixel;
+        if (bandlimited) {
+          // Every source column of the row is converted once, signed, and
+          // resampled onto the active window. SECAM carries Cb/Cr codes
+          // through the resampler rather than quadrature axes.
+          const int width = source_frame.width;
+          if (resources.resampler == nullptr ||
+              !resources.resampler->Matches(active_window_samples,
+                                            source_frame.active_width,
+                                            source_frame.active_x, width)) {
+            resources.resampler =
+                std::make_unique<BandlimitedHorizontalResampler>(
+                    active_window_samples, source_frame.active_width,
+                    source_frame.active_x, width);
+          }
+          std::vector<SampleFixed>& row_luma = resources.row_luma;
+          std::vector<std::int32_t>& row_u_axis = resources.row_u_axis;
+          std::vector<std::int32_t>& row_v_axis = resources.row_v_axis;
+          row_luma.resize(static_cast<std::size_t>(width));
+          row_u_axis.resize(static_cast<std::size_t>(width));
+          row_v_axis.resize(static_cast<std::size_t>(width));
+          for (int column = 0; column < width; ++column) {
+            const std::size_t slot = static_cast<std::size_t>(column);
+            const YCbCr444Pixel& pixel = source_row_pixels[column];
+            row_luma[slot] = LumaFixedFromCode(pixel.y);
+            if (secam_encoder != nullptr) {
+              row_u_axis[slot] = pixel.cb;
+              row_v_axis[slot] = pixel.cr;
+            } else {
+              row_u_axis[slot] = ChromaAxisFromCode(pixel.cb);
+              row_v_axis[slot] = v_switch_sign * ChromaAxisFromCode(pixel.cr);
+            }
+          }
+          if (apply_line_sign) {
+            for (const ChromaLineSignRegion& region :
+                 section.chroma_line_sign) {
+              if (source_row < region.y ||
+                  source_row >= region.y + region.height) {
+                continue;
+              }
+              const int column_end = std::min(width, region.x + region.width);
+              for (int column = std::max(0, region.x); column < column_end;
+                   ++column) {
+                const std::size_t slot = static_cast<std::size_t>(column);
+                if (region.u == ChromaLineSignMode::kFollowSwitch) {
+                  row_u_axis[slot] = -row_u_axis[slot];
+                }
+                if (region.v == ChromaLineSignMode::kFollowSwitch) {
+                  row_v_axis[slot] = -row_v_axis[slot];
+                }
+              }
+            }
+          }
+          resources.resampler->Apply(row_luma.data(), line_luma.data());
+          resources.resampler->Apply(row_u_axis.data(), line_u_axis.data());
+          resources.resampler->Apply(row_v_axis.data(), line_v_axis.data());
+          for (int x_sample = 0; x_sample < painted_sample_count; ++x_sample) {
+            const std::size_t sample_slot = static_cast<std::size_t>(x_sample);
+            active_sample_indices[sample_slot] =
+                active_line_sample_base + x_sample;
+            if (secam_encoder != nullptr) {
+              line_source_samples[sample_slot] = YCbCr444Pixel{
+                  .y = 64,
+                  .cb = static_cast<std::int16_t>(
+                      std::clamp(line_u_axis[sample_slot], 0, 1023)),
+                  .cr = static_cast<std::int16_t>(
+                      std::clamp(line_v_axis[sample_slot], 0, 1023)),
+              };
+            }
+          }
+        } else {
+          for (int x_sample = 0; x_sample < painted_sample_count; ++x_sample) {
+            const int sample_index = active_line_sample_base + x_sample;
+            const std::size_t sample_slot = static_cast<std::size_t>(x_sample);
+            const YCbCr444Pixel& pixel =
+                source_row_pixels[column_map.pixel_x[sample_slot]];
 
-          if (invert_pal_v_axis) {
-            // ITU-R BT.1700 Annex 1 Part B Table 1 item 10f: PAL V-axis
-            // switching follows the burst-sequence-dependent odd/even
-            // polarity map.
-            line_source_samples[sample_slot].cr =
-                static_cast<std::int16_t>(InvertCenteredChromaCode(pixel.cr));
+            active_sample_indices[sample_slot] = sample_index;
+            if (secam_encoder != nullptr) {
+              line_source_samples[sample_slot] = pixel;
+            } else {
+              line_u_axis[sample_slot] = ChromaAxisFromCode(pixel.cb);
+              line_v_axis[sample_slot] =
+                  v_switch_sign * ChromaAxisFromCode(pixel.cr);
+            }
+
+            if (collect_luma) {
+              line_luma[sample_slot] = LumaFixedFromCode(pixel.y);
+              continue;
+            }
+
+            // Preserve any sync-domain sample already placed for this line;
+            // only paint active luma where the waveform is at/above blanking
+            // level.
+            SampleFixed& luma_sample =
+                y_out[static_cast<std::size_t>(sample_index)];
+            if (luma_sample >= blanking_fixed) {
+              luma_sample = LumaFixedFromCode(pixel.y);
+            }
           }
 
-          if (luma_filter != nullptr) {
-            line_luma[sample_slot] = LumaFixedFromCode(pixel.y);
-            continue;
-          }
-
-          // Preserve any sync-domain sample already placed for this line;
-          // only paint active luma where the waveform is at/above blanking
-          // level.
-          SampleFixed& luma_sample =
-              y_out[static_cast<std::size_t>(sample_index)];
-          if (luma_sample >= blanking_fixed) {
-            luma_sample = LumaFixedFromCode(pixel.y);
+          if (apply_line_sign) {
+            for (const ChromaLineSignRegion& region :
+                 section.chroma_line_sign) {
+              if (source_row < region.y ||
+                  source_row >= region.y + region.height) {
+                continue;
+              }
+              for (int x_sample = 0; x_sample < painted_sample_count;
+                   ++x_sample) {
+                const std::size_t sample_slot =
+                    static_cast<std::size_t>(x_sample);
+                const int column = column_map.pixel_x[sample_slot];
+                if (column < region.x || column >= region.x + region.width) {
+                  continue;
+                }
+                if (region.u == ChromaLineSignMode::kFollowSwitch) {
+                  line_u_axis[sample_slot] = -line_u_axis[sample_slot];
+                }
+                if (region.v == ChromaLineSignMode::kFollowSwitch) {
+                  line_v_axis[sample_slot] = -line_v_axis[sample_slot];
+                }
+              }
+            }
           }
         }
 
-        // A band-limited section paints the line's luma once it has been
-        // filtered as a whole, under the same blanking-level guard.
-        if (luma_filter != nullptr && painted_sample_count > 0) {
-          luma_filter->Apply(line_luma.data(),
-                             static_cast<std::size_t>(painted_sample_count),
-                             filtered_line_luma.data());
+        // A band-limited or resampled line paints its luma once it is
+        // complete, under the same blanking-level guard.
+        if (collect_luma && painted_sample_count > 0) {
+          const SampleFixed* painted_luma = line_luma.data();
+          if (luma_filter != nullptr) {
+            luma_filter->Apply(line_luma.data(),
+                               static_cast<std::size_t>(painted_sample_count),
+                               filtered_line_luma.data());
+            painted_luma = filtered_line_luma.data();
+          }
           for (int x_sample = 0; x_sample < painted_sample_count; ++x_sample) {
             SampleFixed& luma_sample = y_out[static_cast<std::size_t>(
                 active_line_sample_base + x_sample)];
             if (luma_sample >= blanking_fixed) {
-              luma_sample =
-                  filtered_line_luma[static_cast<std::size_t>(x_sample)];
+              luma_sample = painted_luma[static_cast<std::size_t>(x_sample)];
             }
           }
         }
@@ -1969,12 +2063,12 @@ void GenerationStage::SynthesiseTemplate(
         // so the chroma encoder sees neutral pixels there and the accumulate
         // step folds their output onto the line's first sample, exactly as
         // the per-sample skip used to.
-        std::fill(line_source_samples.begin() + painted_sample_count,
-                  line_source_samples.end(), YCbCr444Pixel{});
         std::fill(active_sample_indices.begin() + painted_sample_count,
                   active_sample_indices.end(), line_base);
 
         if (secam_encoder != nullptr) {
+          std::fill(line_source_samples.begin() + painted_sample_count,
+                    line_source_samples.end(), YCbCr444Pixel{});
           // The SECAM encoder emits the whole line from 0H: subcarrier
           // blanking, the undeviated back-porch reference and the
           // frequency-modulated picture chroma. Neutral placeholder pixels in
@@ -1991,8 +2085,12 @@ void GenerationStage::SynthesiseTemplate(
                 secam_line_chroma[static_cast<std::size_t>(i)];
           }
         } else {
-          chroma_encoder->EncodeLineFromPhaseStart(
-              line_source_samples, phase_start, &encoded_line_chroma);
+          std::fill(line_u_axis.begin() + painted_sample_count,
+                    line_u_axis.end(), 0);
+          std::fill(line_v_axis.begin() + painted_sample_count,
+                    line_v_axis.end(), 0);
+          chroma_encoder->EncodeAxesFromPhaseStart(
+              line_u_axis, line_v_axis, phase_start, &encoded_line_chroma);
           for (int x_sample = 0; x_sample < active_window_samples; ++x_sample) {
             c_out[static_cast<std::size_t>(
                 active_sample_indices[static_cast<std::size_t>(x_sample)])] +=
@@ -2005,6 +2103,47 @@ void GenerationStage::SynthesiseTemplate(
                       y_out + line_base + picture_end);
           std::copy_n(resources.half_picture_chroma_tail.begin(), tail_samples,
                       c_out + line_base + picture_end);
+        }
+
+        if (truth != nullptr && secam_encoder == nullptr) {
+          // The truth row is the progressive row the line was drawn from.
+          // Y is read back from the painted line (after the luma bandwidth
+          // limit) and U/V are the encoder's filtered axes, exactly as
+          // modulated, with the V-switch removed. Samples past the end of a
+          // half-picture line carry no picture and stay zero.
+          const int truth_row =
+              (2 * field_line) +
+              ((line.field_index_1based == upper_field_index_1based) ? 0 : 1);
+          const std::size_t row_offset =
+              static_cast<std::size_t>(truth_row) *
+              static_cast<std::size_t>(active_window_samples);
+          const int truth_samples =
+              std::max(0, std::min({active_window_samples,
+                                    picture_end - active_window_start,
+                                    line_samples - active_window_start}));
+          const std::vector<std::int32_t>& filtered_u =
+              chroma_encoder->filtered_sin_axis();
+          const std::vector<std::int32_t>& filtered_v =
+              chroma_encoder->filtered_cos_axis();
+          const double u_mv_per_unit = chroma_encoder->sin_scale_mv() /
+                                       static_cast<double>(kChromaAxisScale);
+          const double v_mv_per_unit = static_cast<double>(v_switch_sign) *
+                                       chroma_encoder->cos_scale_mv() /
+                                       static_cast<double>(kChromaAxisScale);
+          float* const truth_y = truth->y_mv.data() + row_offset;
+          float* const truth_u = truth->u_mv.data() + row_offset;
+          float* const truth_v = truth->v_mv.data() + row_offset;
+          for (int x_sample = 0; x_sample < truth_samples; ++x_sample) {
+            const std::size_t slot = static_cast<std::size_t>(x_sample);
+            truth_y[slot] = static_cast<float>(SampleFixedToMillivolts(
+                y_out[static_cast<std::size_t>(active_line_sample_base +
+                                               x_sample)] -
+                blanking_fixed));
+            truth_u[slot] = static_cast<float>(
+                static_cast<double>(filtered_u[slot]) * u_mv_per_unit);
+            truth_v[slot] = static_cast<float>(
+                static_cast<double>(filtered_v[slot]) * v_mv_per_unit);
+          }
         }
       }
     }
@@ -2046,6 +2185,29 @@ bool GenerationStage::GenerateFrameBatch(
     std::size_t start_frame, std::size_t frame_count,
     std::vector<SampleFixed>* out_y_mv, std::vector<SampleFixed>* out_c_mv,
     std::vector<std::string>* errors) {
+  return GenerateFrames(project, schedule, start_frame, frame_count, out_y_mv,
+                        out_c_mv, nullptr, errors);
+}
+
+bool GenerationStage::GenerateFrameBatchWithTruth(
+    const Project& project, const std::vector<FrameScheduleItem>& schedule,
+    std::size_t start_frame, std::size_t frame_count,
+    std::vector<SampleFixed>* out_y_mv, std::vector<SampleFixed>* out_c_mv,
+    std::vector<PictureTruthFrame>* out_truth,
+    std::vector<std::string>* errors) {
+  if (out_truth == nullptr) {
+    return false;
+  }
+  return GenerateFrames(project, schedule, start_frame, frame_count, out_y_mv,
+                        out_c_mv, out_truth, errors);
+}
+
+bool GenerationStage::GenerateFrames(
+    const Project& project, const std::vector<FrameScheduleItem>& schedule,
+    std::size_t start_frame, std::size_t frame_count,
+    std::vector<SampleFixed>* out_y_mv, std::vector<SampleFixed>* out_c_mv,
+    std::vector<PictureTruthFrame>* out_truth,
+    std::vector<std::string>* errors) {
   if (out_y_mv == nullptr || out_c_mv == nullptr || errors == nullptr) {
     return false;
   }
@@ -2059,6 +2221,9 @@ bool GenerationStage::GenerateFrameBatch(
   if (frame_count == 0U) {
     out_y_mv->clear();
     out_c_mv->clear();
+    if (out_truth != nullptr) {
+      out_truth->clear();
+    }
     return true;
   }
 
@@ -2097,7 +2262,20 @@ bool GenerationStage::GenerateFrameBatch(
 
   const std::size_t sequence_period =
       ColourSequencePeriodFrames(video_standard);
-  const std::size_t template_bytes = frame_span * sizeof(SampleFixed) * 2U;
+  const bool with_truth = out_truth != nullptr;
+  const PictureTruthLayout& truth_layout = resources->truth_layout;
+  if (with_truth) {
+    if (truth_layout.rows <= 0) {
+      errors->push_back(
+          "Truth output is only available for PAL, NTSC and PAL-M projects.");
+      return false;
+    }
+    // Recycled frames keep their plane storage; Reset re-zeroes it.
+    out_truth->resize(frame_count);
+  }
+  const std::size_t template_bytes =
+      (frame_span * sizeof(SampleFixed) * 2U) +
+      (with_truth ? truth_layout.PlaneSamples() * sizeof(float) * 3U : 0U);
 
   for (std::size_t local_frame_index = 0; local_frame_index < frame_count;
        ++local_frame_index) {
@@ -2187,6 +2365,22 @@ bool GenerationStage::GenerateFrameBatch(
         return false;
       }
     }
+    // laserdisc.channel.field2_offset misregisters field 2 in the picture
+    // domain: field 2 reads its rows from an offset copy of its source. The
+    // offset is in 4fsc samples across the active window and in frame lines,
+    // so it converts to source pixels and rows here.
+    const Field2OffsetParameters& field2_offset =
+        project.laserdisc.channel.field2_offset;
+    if (project.laserdisc.channel.enabled && field2_offset.enabled &&
+        (field2_offset.x_samples != 0.0 || field2_offset.y_lines != 0.0)) {
+      const FrameSourceImage& field2_source = *field_images[1];
+      const double dx_pixels =
+          field2_offset.x_samples *
+          static_cast<double>(field2_source.active_width) /
+          static_cast<double>(resources->active_window_samples);
+      field_images[1] = std::make_shared<const FrameSourceImage>(
+          OffsetSourceImage(field2_source, dx_pixels, field2_offset.y_lines));
+    }
     const std::array<const FrameSourceImage*, 2> field_sources = {
         field_images[0].get(), field_images[1].get()};
 
@@ -2216,13 +2410,20 @@ bool GenerationStage::GenerateFrameBatch(
     const std::shared_ptr<const FrameTemplate> frame_template =
         template_cache_->Acquire(
             project, *section, source_frame_identity, sequence_phase,
-            template_bytes, [&](FrameTemplate* out) {
+            with_truth, template_bytes, [&](FrameTemplate* out) {
               out->y_mv.resize(frame_span);
               out->c_mv.resize(frame_span);
+              PictureTruthFrame* truth = nullptr;
+              if (with_truth) {
+                out->truth.Reset(truth_layout);
+                truth = &out->truth;
+              }
               SynthesiseTemplate(*resources, *section, field_sources,
                                  sequence_phase, out->y_mv.data(),
-                                 out->c_mv.data());
+                                 out->c_mv.data(), truth);
             });
+    PictureTruthFrame* const frame_truth =
+        with_truth ? &(*out_truth)[local_frame_index] : nullptr;
     if (frame_template != nullptr) {
       // Cached clean frame: delivery is a copy, no line-loop work.
       if (single_frame_request) {
@@ -2237,15 +2438,21 @@ bool GenerationStage::GenerateFrameBatch(
         std::copy(frame_template->c_mv.begin(), frame_template->c_mv.end(),
                   out_c_mv->data() + local_frame_base);
       }
+      if (frame_truth != nullptr) {
+        *frame_truth = frame_template->truth;
+      }
     } else {
       // Cache disabled or full: synthesise the clean frame in place.
       if (single_frame_request) {
         out_y_mv->resize(sample_count);
         out_c_mv->resize(sample_count);
       }
+      if (frame_truth != nullptr) {
+        frame_truth->Reset(truth_layout);
+      }
       SynthesiseTemplate(*resources, *section, field_sources, sequence_phase,
                          out_y_mv->data() + local_frame_base,
-                         out_c_mv->data() + local_frame_base);
+                         out_c_mv->data() + local_frame_base, frame_truth);
     }
 
     if (enrichment != nullptr) {

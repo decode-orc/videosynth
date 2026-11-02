@@ -5,7 +5,8 @@ set -euo pipefail
 # can be asserted byte-identical to a recorded baseline.
 #
 # Hashed artefacts per suite output tree: .cvbs, .cvbsy, .cvbsc composite/Y/C
-# samples, _audio_<pair>.wav audio, and the .meta SQLite sidecar. The sidecar is
+# samples, _audio_<pair>.wav audio, the .truth picture truth, and the .meta
+# SQLite sidecars (.truth.meta included). The sidecar is
 # hashed as its canonical `sqlite3 .dump` text rather than as raw bytes: page
 # layout can differ between SQLite builds while the recorded rows are identical,
 # and the rows are what the format specifies.
@@ -133,7 +134,7 @@ write_manifest() {
     printf '%s  %s\n' "$digest" "$rel" >>"$manifest.unsorted"
   done < <(find "$suite_output" -type f \
     \( -name '*.cvbs' -o -name '*.cvbsy' -o -name '*.cvbsc' \
-    -o -name '*.meta' -o -name '*.wav' \) -print0)
+    -o -name '*.meta' -o -name '*.wav' -o -name '*.truth' \) -print0)
 
   LC_ALL=C sort -k2 "$manifest.unsorted" >"$manifest"
   rm -f "$manifest.unsorted"

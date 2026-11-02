@@ -26,8 +26,8 @@ No other key is accepted. A section may carry any number of overlays.
 | Key | Type | Required | Range / Values | Default |
 |-----|------|----------|----------------|---------|
 | `text` | string | No | Literal text, optionally with tokens | empty (draws nothing) |
-| `x` | int | No | Active-area pixels | `0` |
-| `y` | int | No | Active-area pixels | `0` |
+| `x` | int | No | 4fsc samples from the start of the active window | `0` |
+| `y` | int | No | Lines from the first active line of each field | `0` |
 | `scale` | int | No | 1–4 | `1` |
 | `fg_luma` | string | No | `white`, `light_grey`, `dark_grey`, `black` | `white` |
 | `bg_luma` | string | No | `transparent`, `white`, `light_grey`, `dark_grey`, `black` | `transparent` |
@@ -44,7 +44,7 @@ No other key is accepted.
 | `black` | 0.0 |
 | `transparent` | Background only — writes nothing, leaving the picture visible |
 
-Only the **luma** channel is written; chroma is untouched, so overlays are monochrome. `white` on `black` is the most legible combination over arbitrary picture content.
+Each written pixel takes the luma level, and its chroma is set to neutral (zero; on SECAM, the undeviated subcarrier), so overlays are monochrome and the picture's colour does not show through them. `transparent` background pixels are not written, so the picture there keeps its luma and chroma. `white` on `black` is the most legible combination over arbitrary picture content.
 
 ## Tokens
 
@@ -80,7 +80,7 @@ token '{pn}'. Supported tokens: {picture_number}, {biphase_hex}, {phase_id},
 ## Rendering
 
 - Static 96-glyph 8×8 bitmap font covering printable ASCII 0x20–0x7F.
-- Each glyph pixel becomes a `scale` × `scale` block.
+- Each glyph pixel becomes a block `scale` samples wide and `scale` field lines high.
 - Rendered after active video and after VBI injection, so tokens report what the frame actually carries.
 - Rendered once per field, at the same y-offset within each field's active picture, so text is stable rather than interlace-flickering.
 - Pixels outside the active picture area are silently clipped.

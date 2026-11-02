@@ -88,7 +88,7 @@ class FmEncoder {
 
   // Returns samples for the raw 40-bit FM waveform (no line padding).
   //
-  // The returned vector length is 40 * bit_cell_samples().
+  // The returned vector length is BitCellStart(40).
   // Bits are transmitted according to the IEC 60857 §10.2 Figure 13 pattern.
   //
   // Args:
@@ -132,8 +132,23 @@ class FmEncoder {
       Standard standard, double peak_level_mv,
       double baseline_level_mv = 0.0) const;
 
-  // Number of samples per bit cell at the configured sample rate.
+  // Bit cell length rounded to whole samples. The 1.0 µs cell is not a whole
+  // number of 4fsc samples, so cells inside a code are this length ± 1: cell
+  // boundaries and pip transitions sit on the exact grid rounded to the
+  // nearest sample (BitCellStart), and the code length does not drift.
   int bit_cell_samples() const { return bit_cell_samples_; }
+
+  // Exact bit cell length in samples (may be fractional).
+  double bit_cell_exact() const { return bit_cell_exact_; }
+
+  // First sample of bit cell bit_index within a code: bit_index × the exact
+  // cell length, rounded to the nearest sample. BitCellStart(40) is the code
+  // length.
+  int BitCellStart(int bit_index) const;
+
+  // Sample half a cell into bit cell bit_index (a '1' bit's pip), rounded the
+  // same way.
+  int BitCellCentre(int bit_index) const;
 
   // Number of samples spanning the full 0%-100% S-curve transition.
   // The 10%-90% measured transition time equals transition_duration_ns.
@@ -145,6 +160,7 @@ class FmEncoder {
 
  private:
   int ramp_samples_;
+  double bit_cell_exact_;
   int bit_cell_samples_;
 
   // Applies a single shaped step transition centred at center_sample.
@@ -155,7 +171,7 @@ class FmEncoder {
                            double peak_level_mv) const;
 
   // Encodes `bits` as an FM waveform (IEC 60857 §10.2 Figure 13).
-  // Returns 40 * bit_cell_samples() samples starting at peak_level_mv.
+  // Returns BitCellStart(40) samples starting at peak_level_mv.
   std::vector<SampleFixed> GenerateBitsFM(const std::array<bool, 40>& bits,
                                           double baseline_level_mv,
                                           double peak_level_mv) const;

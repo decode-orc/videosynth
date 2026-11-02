@@ -593,6 +593,9 @@ bool ProgressiveFrameSource::EnsureVideoReady(DecodedSource* entry,
   entry->request.video_start_offset_seconds =
       std::max(0.0, profile.video_start_time_seconds -
                         profile.container_start_time_seconds);
+  // Seeks convert frame indices with the source's own rate: a film clip in a
+  // 2:3 section is 24000/1001, not the standard's rate.
+  entry->request.frame_rate_hz = profile.frame_rate_hz;
   entry->request.filter_chain =
       PlanSourceColourConversion(profile, entry->standard).filter_chain;
   entry->video_ready = true;

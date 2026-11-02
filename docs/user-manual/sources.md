@@ -95,6 +95,30 @@ The layout is `{bundled}/<type>/<raster>/<file>`, where `<type>` is `exr` or `mk
 | `GREY_5V_STEP.exr`, `GREY_10V_STEP.exr` | Vertical grey staircases |
 | `TARTAN.exr` | Tartan/crosshatch pattern |
 | `TESTCARD-F.exr` | UK Test Card F (PAL raster only) |
+| `PAL_STRESS.exr` | PAL decoder-stress card (PAL raster only), described below |
+| `LUMA_ZONE_PLATE.exr` | Static circular luma zone plate, rising from 0 at the centre to the source Nyquist frequency (0.5 cycles per pixel and per row) at the edges; chroma neutral |
+| `CHROMA_ZONE_PLATE.exr` | Static circular zone plate on B−Y and R−Y in quadrature (amplitude 0.2) at 50 % luma, with the same frequency sweep — shows where a decoder's U/V separation fails |
+
+`PAL_STRESS.exr` is a synthetic decoder-stress card. Its layout follows the Philips PM5544, as published in F. Hendil, "Combined colour/monochrome pattern generator PM 5544" (*Philips Electronic Measuring and Microwave Notes* 1970/2), and the public-domain (CC0) Wikimedia Commons recreation of it. It carries no text or marks.
+
+The card is drawn across the full 52 µs active line, so the 720 source pixels span 4:3 and one pixel is 72.2 ns. The background is 48 % grey. On it are a white crosshatch of 18 vertical lines, each 230 ns wide, and 14 horizontal lines, each two rows deep (one row in each field), every 42/768 of the line. The border carries black/white castellations.
+
+| Element | Source pixels (x) × rows (y) | Content |
+|---------|------------------------------|---------|
+| Left outer strip | 26–63 × 16–559 | +(R−Y) on grey, crossed by the horizontal lines. Made line-alternating (colourless ±(R−Y)) by a `chroma_line_sign` region with `v: follow_switch` |
+| Left tall bar | 66–102 × 58–517 | −(R−Y) above row 288, +(R−Y) below |
+| Left rectangles | 104–141 × 58–139 and 436–517 | G−Y = 0 at 326° (top) and 146° (bottom), for checking the matrix |
+| Right outer strip | 656–693 × 16–559 | +(B−Y). Made line-alternating (colourless ±(B−Y), anti-PAL) by a region with `u: follow_switch` |
+| Right tall bar and rectangles | mirror of the left | −(B−Y) above, +(B−Y) below; the same G−Y = 0 rectangles |
+| Circle | centre (360, 288), 504 rows high | Top to bottom: a black rectangle on white; a black/white step with a 230 ns needle pulse; a 250 kHz square wave at 75 %; 75 % colour bars with the centre cross; the horizontal centre line and crosshatch on black; 0.8/1.8/2.8/3.8/4.8 MHz sinusoidal definition lines; a six-step grey scale (0–100 %); a white/black step with needle pulse; a 75 % red square (about 3 µs) on 75 % yellow, for chroma/luma delay |
+
+Every colour-difference field has the same subcarrier amplitude: 0.233 of the 700 mV range, about 163 mV. That makes R−Y ±0.266 and B−Y ±0.473 in normalised E′ units.
+
+The line alternation comes from the project, not the image; see [PAL decoder-stress regions](video-signal.md#pal-decoder-stress-regions). Seen as a picture, the outer strips show their + field.
+
+The burst-gate check sits in the far left-hand castellation, at pixels 0–23 × rows 100–139. It is +(R−Y) on black, made line-alternating by a third `v: follow_switch` region. A mistimed burst gate passes it to the reference generator, which colours the alternating strips (Hendil 1970). Its G′ is below zero (−0.135). The float EXR carries that, and ingestion keeps the sub-black excursion, so the encoded luma stays at black under ±163 mV of V.
+
+The patterns are rendered by `videosynth-assets/scripts/generate_test_patterns.sh`.
 
 ### Clips (`mkv`)
 

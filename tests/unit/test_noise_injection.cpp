@@ -613,7 +613,7 @@ TEST(NoiseInjectionTest, ValidatorRequiresSharedNoiseSeed) {
 // A CAV lead-in section: valid laserdisc structure, but no picture numbers.
 Project MakeCavSharedNoiseProject(bool with_picture_number) {
   Project project = MakeSharedNoiseProject(44.0);
-  project.line_injections.disc_type = "CAV";
+  project.laserdisc.disc_type = "CAV";
   Section& section = project.sections[0];
   Section::LineInjection laserdisc;
   laserdisc.type = "laserdisc";

@@ -22,6 +22,7 @@
 #include "videosynth/model.h"
 #include "videosynth/picture_chroma.h"
 #include "videosynth/project_validator.h"
+#include "videosynth/replay_channel_filter.h"
 #include "videosynth/sample_clamp.h"
 #include "videosynth/timing_constants.h"
 #include "videosynth/yaml_project_parser.h"
@@ -81,14 +82,16 @@ TEST(ChannelStageTest, ParserRejectsEmptyBlock) {
   ASSERT_FALSE(result.errors.empty());
   EXPECT_EQ(result.errors[0],
             "channel block must set at least one of: timing_offset_samples, "
-            "edge_smear, fm_beat.");
+            "edge_smear.");
 }
 
 TEST(ChannelStageTest, ParserReadsEdgeSmearAndFmBeat) {
   const ParseResult result = ParseWithChannel(
+      "laserdisc:\n"
+      "  channel:\n"
+      "    fm_beat: { carrier_black_hz: 7.08e6, level_db: -20 }\n"
       "channel:\n"
-      "  edge_smear: { fraction: 0.15, tau_samples: 4.0 }\n"
-      "  fm_beat: { carrier_black_hz: 7.08e6, level_db: -20 }\n");
+      "  edge_smear: { fraction: 0.15, tau_samples: 4.0 }\n");
   ASSERT_TRUE(result.ok) << result.errors[0];
   const ChannelParameters& channel = result.project.channel;
   EXPECT_TRUE(channel.enabled);
@@ -96,16 +99,28 @@ TEST(ChannelStageTest, ParserReadsEdgeSmearAndFmBeat) {
   EXPECT_TRUE(channel.edge_smear.enabled);
   EXPECT_DOUBLE_EQ(channel.edge_smear.fraction, 0.15);
   EXPECT_DOUBLE_EQ(channel.edge_smear.tau_samples, 4.0);
-  EXPECT_TRUE(channel.fm_beat.enabled);
-  EXPECT_DOUBLE_EQ(channel.fm_beat.carrier_black_hz, 7.08e6);
-  EXPECT_DOUBLE_EQ(channel.fm_beat.level_db, -20.0);
+  const LaserdiscChannelParameters& replay = result.project.laserdisc.channel;
+  EXPECT_TRUE(replay.enabled);
+  EXPECT_TRUE(replay.fm_beat.enabled);
+  EXPECT_DOUBLE_EQ(replay.fm_beat.carrier_black_hz, 7.08e6);
+  EXPECT_DOUBLE_EQ(replay.fm_beat.level_db, -20.0);
+}
+
+TEST(ChannelStageTest, ParserNamesTheNewHomeOfFmBeat) {
+  const ParseResult result = ParseWithChannel(
+      "channel:\n  fm_beat: { carrier_black_hz: 7.08e6, level_db: -20 }\n");
+  ASSERT_FALSE(result.ok);
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_EQ(result.errors[0],
+            "channel.fm_beat has moved to laserdisc.channel.fm_beat.");
 }
 
 TEST(ChannelStageTest, ParserDefaultsFmBeatCarrier) {
-  const ParseResult result =
-      ParseWithChannel("channel:\n  fm_beat: { level_db: -30 }\n");
+  const ParseResult result = ParseWithChannel(
+      "laserdisc:\n  channel:\n    fm_beat: { level_db: -30 }\n");
   ASSERT_TRUE(result.ok);
-  EXPECT_DOUBLE_EQ(result.project.channel.fm_beat.carrier_black_hz, 7.088e6);
+  EXPECT_DOUBLE_EQ(result.project.laserdisc.channel.fm_beat.carrier_black_hz,
+                   7.088e6);
 }
 
 TEST(ChannelStageTest, ParserRequiresEdgeSmearAndFmBeatFields) {
@@ -117,10 +132,10 @@ TEST(ChannelStageTest, ParserRequiresEdgeSmearAndFmBeatFields) {
        "channel.edge_smear is missing required field: 'tau_samples'."},
       {"channel:\n  edge_smear: { tau_samples: 2 }\n",
        "channel.edge_smear is missing required field: 'fraction'."},
-      {"channel:\n  fm_beat: { carrier_black_hz: 7.1e6 }\n",
-       "channel.fm_beat is missing required field: 'level_db'."},
-      {"channel:\n  fm_beat: { level_db: loud }\n",
-       "channel.fm_beat.level_db must be a number."},
+      {"laserdisc:\n  channel:\n    fm_beat: { carrier_black_hz: 7.1e6 }\n",
+       "laserdisc.channel.fm_beat is missing required field: 'level_db'."},
+      {"laserdisc:\n  channel:\n    fm_beat: { level_db: loud }\n",
+       "laserdisc.channel.fm_beat.level_db must be a number."},
       {"channel:\n  edge_smear: 0.1\n",
        "channel.edge_smear must be a map/object."},
   };
@@ -131,7 +146,8 @@ TEST(ChannelStageTest, ParserRequiresEdgeSmearAndFmBeatFields) {
     EXPECT_EQ(result.errors[0], test_case.error);
   }
   EXPECT_FALSE(
-      ParseWithChannel("channel:\n  fm_beat: { level_db: -20, phase: 1 }\n")
+      ParseWithChannel(
+          "laserdisc:\n  channel:\n    fm_beat: { level_db: -20, phase: 1 }\n")
           .ok);
 }
 
@@ -231,8 +247,9 @@ TEST(ChannelStageTest, ValidatorChecksEdgeSmearRanges) {
 
 TEST(ChannelStageTest, ValidatorChecksFmBeatRangesAndStandard) {
   Project project = MakeChannelProject(0.0);
-  project.channel.fm_beat.enabled = true;
-  project.channel.fm_beat.level_db = -20.0;
+  project.laserdisc.channel.enabled = true;
+  project.laserdisc.channel.fm_beat.enabled = true;
+  project.laserdisc.channel.fm_beat.level_db = -20.0;
   EXPECT_TRUE(ProjectValidator().Validate(project).is_valid);
 
   const struct {
@@ -241,21 +258,25 @@ TEST(ChannelStageTest, ValidatorChecksFmBeatRangesAndStandard) {
     const char* error;
   } cases[] = {
       {6.8e6, -20.0,
-       "Channel validation error: fm_beat.carrier_black_hz must be in the "
+       "Laserdisc channel validation error: fm_beat.carrier_black_hz must be "
+       "in the "
        "range [6900000, 7300000]"},
       {7.35e6, -20.0,
-       "Channel validation error: fm_beat.carrier_black_hz must be in the "
+       "Laserdisc channel validation error: fm_beat.carrier_black_hz must be "
+       "in the "
        "range [6900000, 7300000]"},
       {7.088e6, 1.0,
-       "Channel validation error: fm_beat.level_db must be in the range "
+       "Laserdisc channel validation error: fm_beat.level_db must be in the "
+       "range "
        "[-60.0, 0.0]"},
       {7.088e6, -61.0,
-       "Channel validation error: fm_beat.level_db must be in the range "
+       "Laserdisc channel validation error: fm_beat.level_db must be in the "
+       "range "
        "[-60.0, 0.0]"},
   };
   for (const auto& test_case : cases) {
-    project.channel.fm_beat.carrier_black_hz = test_case.carrier;
-    project.channel.fm_beat.level_db = test_case.level;
+    project.laserdisc.channel.fm_beat.carrier_black_hz = test_case.carrier;
+    project.laserdisc.channel.fm_beat.level_db = test_case.level;
     const ValidationResult result = ProjectValidator().Validate(project);
     ASSERT_FALSE(result.is_valid);
     ASSERT_FALSE(result.errors.empty());
@@ -263,8 +284,8 @@ TEST(ChannelStageTest, ValidatorChecksFmBeatRangesAndStandard) {
         << result.errors[0];
   }
 
-  project.channel.fm_beat.carrier_black_hz = 7.088e6;
-  project.channel.fm_beat.level_db = -20.0;
+  project.laserdisc.channel.fm_beat.carrier_black_hz = 7.088e6;
+  project.laserdisc.channel.fm_beat.level_db = -20.0;
   for (Standard standard :
        {Standard::kNtsc, Standard::kPalM, Standard::kSecam}) {
     project.cvbs_presets.video_standard_preset = standard;
@@ -276,7 +297,8 @@ TEST(ChannelStageTest, ValidatorChecksFmBeatRangesAndStandard) {
     bool found = false;
     for (const std::string& error : result.errors) {
       found = found || error ==
-                           "Channel validation error: fm_beat is supported for "
+                           "Laserdisc channel validation error: fm_beat is "
+                           "supported for "
                            "625-line PAL only; the beat model is fitted to PAL "
                            "LaserDisc pressings.";
     }
@@ -391,8 +413,9 @@ TEST(ChannelStageTest, FmBeatLevelIsRelativeToChromaAt50Ire) {
   constexpr double kChromaMv = 150.0;
   for (double level_db : {-40.0, -20.0, -6.0}) {
     Project project = MakeChannelProject(0.0);
-    project.channel.fm_beat.enabled = true;
-    project.channel.fm_beat.level_db = level_db;
+    project.laserdisc.channel.enabled = true;
+    project.laserdisc.channel.fm_beat.enabled = true;
+    project.laserdisc.channel.fm_beat.level_db = level_db;
     std::vector<SampleFixed> y;
     std::vector<SampleFixed> c;
     FlatColourFrame(kChromaMv, &y, &c);
@@ -440,8 +463,9 @@ TEST(ChannelStageTest, FmBeatLevelIsRelativeToChromaAt50Ire) {
 
 TEST(ChannelStageTest, FmBeatWithoutPictureChromaIsBitIdentical) {
   Project project = MakeChannelProject(0.0);
-  project.channel.fm_beat.enabled = true;
-  project.channel.fm_beat.level_db = 0.0;
+  project.laserdisc.channel.enabled = true;
+  project.laserdisc.channel.fm_beat.enabled = true;
+  project.laserdisc.channel.fm_beat.level_db = 0.0;
   std::vector<SampleFixed> y = PatternFrames(1, 0);
   // Chroma outside the picture windows (a burst, say) carries no beat.
   std::vector<SampleFixed> c(y.size(), 0);
@@ -485,13 +509,17 @@ TEST(ChannelStageTest, EdgeSmearIsIndependentOfFrameOrder) {
             a);
 }
 
-TEST(ChannelStageTest, StepsRunBeatThenSmearThenOffset) {
+TEST(ChannelStageTest, StepsRunBeatThenReplayThenSmearThenOffset) {
   Project project = MakeChannelProject(2.0);
   project.channel.edge_smear.enabled = true;
   project.channel.edge_smear.fraction = 0.2;
   project.channel.edge_smear.tau_samples = 3.0;
-  project.channel.fm_beat.enabled = true;
-  project.channel.fm_beat.level_db = -10.0;
+  project.laserdisc.channel.enabled = true;
+  project.laserdisc.channel.fm_beat.enabled = true;
+  project.laserdisc.channel.fm_beat.level_db = -10.0;
+  project.laserdisc.channel.group_delay.enabled = true;
+  project.laserdisc.channel.group_delay.preset =
+      GroupDelayPreset::kIec60856Nominal;
   std::vector<SampleFixed> y;
   std::vector<SampleFixed> c;
   FlatColourFrame(150.0, &y, &c);
@@ -500,21 +528,108 @@ TEST(ChannelStageTest, StepsRunBeatThenSmearThenOffset) {
 
   ChannelStage().ApplyChannel(project, {}, 0U, 1U, &y, &c);
 
-  // The same three steps, one at a time.
-  Project step = project;
-  step.channel.edge_smear.enabled = false;
-  step.channel.timing_offset_samples = 0.0;
-  ChannelStage().ApplyChannel(step, {}, 0U, 1U, &expected_y, &expected_c);
-  step = project;
-  step.channel.fm_beat.enabled = false;
-  step.channel.timing_offset_samples = 0.0;
-  ChannelStage().ApplyChannel(step, {}, 0U, 1U, &expected_y, &expected_c);
-  step = project;
-  step.channel.fm_beat.enabled = false;
-  step.channel.edge_smear.enabled = false;
-  ChannelStage().ApplyChannel(step, {}, 0U, 1U, &expected_y, &expected_c);
+  // The same four steps, one at a time.
+  const auto only = [&project](bool beat, bool replay, bool smear,
+                               bool offset) {
+    Project step = project;
+    step.laserdisc.channel.fm_beat.enabled = beat;
+    step.laserdisc.channel.group_delay.enabled = replay;
+    step.channel.edge_smear.enabled = smear;
+    step.channel.timing_offset_samples = offset ? 2.0 : 0.0;
+    return step;
+  };
+  for (const Project& step :
+       {only(true, false, false, false), only(false, true, false, false),
+        only(false, false, true, false), only(false, false, false, true)}) {
+    ChannelStage().ApplyChannel(step, {}, 0U, 1U, &expected_y, &expected_c);
+  }
   EXPECT_EQ(y, expected_y);
   EXPECT_EQ(c, expected_c);
+}
+
+TEST(ChannelStageTest, NeutralLaserVisionChannelIsBitIdentical) {
+  Project project = MakeChannelProject(0.0);
+  project.channel.enabled = false;
+  LaserdiscChannelParameters& replay = project.laserdisc.channel;
+  replay.enabled = true;
+  replay.group_delay = {.enabled = true,
+                        .preset = GroupDelayPreset::kIec60856Nominal,
+                        .points_ns = {},
+                        .scale = 0.0};
+  replay.response_db = {{0.0, 0.0}, {5.0, 0.0}};
+  replay.field2_offset = {.enabled = true, .x_samples = 0.0, .y_lines = 0.0};
+  EXPECT_FALSE(ChannelStage::IsActive(project));
+
+  std::vector<SampleFixed> y = PatternFrames(1, 0);
+  y[10] = MillivoltsToSampleFixed(5000.0);
+  std::vector<SampleFixed> c = PatternFrames(1, 3);
+  const std::vector<SampleFixed> y_before = y;
+  const std::vector<SampleFixed> c_before = c;
+  ChannelStage().ApplyChannel(project, {}, 0U, 1U, &y, &c);
+  EXPECT_EQ(y, y_before);
+  EXPECT_EQ(c, c_before);
+}
+
+TEST(ChannelStageTest, ReplayChannelFiltersYAndCWithTheDescribedFilter) {
+  Project project = MakeChannelProject(0.0);
+  project.channel.enabled = false;
+  LaserdiscChannelParameters& replay = project.laserdisc.channel;
+  replay.enabled = true;
+  replay.group_delay = {.enabled = true,
+                        .preset = GroupDelayPreset::kCustom,
+                        .points_ns = {{0.5, 0.0}, {4.43, -100.0}},
+                        .scale = 0.8};
+  replay.response_db = {{0.0, 0.0}, {4.4, -2.0}, {5.5, -20.0}};
+  ASSERT_TRUE(ChannelStage::IsActive(project));
+
+  std::vector<SampleFixed> y = PatternFrames(1, 0);
+  std::vector<SampleFixed> c = PatternFrames(1, 3);
+  std::vector<SampleFixed> expected_y = y;
+  std::vector<SampleFixed> expected_c = c;
+  ChannelStage().ApplyChannel(project, {}, 0U, 1U, &y, &c);
+
+  const ReplayChannelFilter filter(
+      [&replay](double mhz) { return ReplayResponseDb(replay, 1.0, mhz); },
+      [&replay](double mhz) {
+        return 0.8 * InterpolateGroupDelayNs(replay.group_delay.points_ns, mhz);
+      },
+      GetTimingConstants(Standard::kPal).sample_rate_4fsc_hz);
+  filter.Apply(expected_y.data(), expected_y.size());
+  filter.Apply(expected_c.data(), expected_c.size());
+  EXPECT_EQ(y, expected_y);
+  EXPECT_EQ(c, expected_c);
+}
+
+TEST(ChannelStageTest, ResponseByPictureFollowsEachFramesDiscPosition) {
+  Project project = MakeChannelProject(0.0);
+  project.channel.enabled = false;
+  LaserdiscChannelParameters& replay = project.laserdisc.channel;
+  replay.enabled = true;
+  replay.response_by_picture = {{1, {{0.0, 0.0}, {5.0, -4.0}}},
+                                {3, {{0.0, 0.0}, {5.0, -12.0}}}};
+
+  // Without enrichment the disc position is the output position, so the two
+  // frames are pictures 1 and 2.
+  std::vector<SampleFixed> y = PatternFrames(2, 0);
+  std::vector<SampleFixed> c = PatternFrames(2, 3);
+  std::vector<SampleFixed> expected_c = c;
+  ChannelStage().ApplyChannel(project, {}, 0U, 2U, &y, &c);
+
+  const std::size_t spf = PalSamplesPerFrame();
+  for (std::size_t frame = 0; frame < 2U; ++frame) {
+    const double picture = static_cast<double>(frame) + 1.0;
+    const ReplayChannelFilter filter(
+        [&replay, picture](double mhz) {
+          return ReplayResponseDb(replay, picture, mhz);
+        },
+        [](double) { return 0.0; },
+        GetTimingConstants(Standard::kPal).sample_rate_4fsc_hz);
+    filter.Apply(expected_c.data() + (frame * spf), spf);
+  }
+  EXPECT_EQ(c, expected_c);
+  // Picture 2 sits halfway between the entries, so it differs from both.
+  EXPECT_NE(std::vector<SampleFixed>(c.begin(), c.begin() + spf),
+            std::vector<SampleFixed>(c.begin() + spf, c.end()));
 }
 
 }  // namespace

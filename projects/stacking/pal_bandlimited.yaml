@@ -24,16 +24,18 @@ cvbs_presets:
   video_standard_preset: PAL
   sample_encoding_preset: CVBS_U10_4FSC
   signal_state_preset: STANDARD_STABLE_LOCKED
-  pal_laserdisc_pilot_burst: true
 
 output:
   video_path: "{output}/videosynth_pal_bandlimited.cvbs"
 
 line_injections:
-  disc_type: CAV
   vits:
     - vits_type: uk-national
       target_lines: [19]
+
+laserdisc:
+  disc_type: CAV
+  pilot_burst: true
 
 sections:
 
@@ -44,14 +46,13 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x576/MULTIBURST.exr"
     duration_frames: 4
-    section_type: programme_area
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 1
-          - code_type: programme_status
-            programme_status: "0x8DC000"
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 1
+        - code_type: programme_status
+          programme_status: "0x8DC000"
 
   # ---------------------------------------------------------------------------
   # PNs 5–8: multi-burst, 5.0 MHz luma
@@ -60,16 +61,15 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x576/MULTIBURST.exr"
     duration_frames: 4
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 5
+        - code_type: programme_status
+          programme_status: "0x8DC000"
     luma_bandwidth:
       cutoff_mhz: 5.0
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 5
-          - code_type: programme_status
-            programme_status: "0x8DC000"
 
   # ---------------------------------------------------------------------------
   # PNs 9–12: multi-burst, 3.0 MHz luma
@@ -78,17 +78,16 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x576/MULTIBURST.exr"
     duration_frames: 4
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 9
+        - code_type: programme_status
+          programme_status: "0x8DC000"
     luma_bandwidth:
       cutoff_mhz: 3.0
       transition_mhz: 0.8
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 9
-          - code_type: programme_status
-            programme_status: "0x8DC000"
 
   # ---------------------------------------------------------------------------
   # PNs 13–16: testcard-f, 3.0 MHz luma
@@ -97,14 +96,13 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x576/TESTCARD-F.exr"
     duration_frames: 4
-    section_type: programme_area
+    laserdisc:
+      area: programme_area
+      codes:
+        - code_type: picture_number
+          start_value: 13
+        - code_type: programme_status
+          programme_status: "0x8DC000"
     luma_bandwidth:
       cutoff_mhz: 3.0
       transition_mhz: 0.8
-    line_injections:
-      - type: laserdisc
-        codes:
-          - code_type: picture_number
-            start_value: 13
-          - code_type: programme_status
-            programme_status: "0x8DC000"

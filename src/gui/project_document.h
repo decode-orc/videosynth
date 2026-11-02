@@ -24,7 +24,8 @@ namespace videosynth::gui {
 // emit the matching granular signal after applying (or later reverting) it.
 struct DocumentChange {
   enum class Kind {
-    kProjectSettings,  // project info, presets, outputs, channel, chroma
+    kProjectSettings,  // project info, presets, outputs, laserdisc,
+                       // channel, chroma
     kSectionAdded,
     kSectionRemoved,
     kSectionMoved,
@@ -111,6 +112,7 @@ class ProjectDocument : public QObject {
   bool SetCvbsPresets(const CvbsPresets& presets);
   bool SetProjectLineInjections(ProjectLineInjections line_injections);
   bool SetOutputTargets(const OutputTargets& output);
+  bool SetLaserdisc(const LaserdiscParameters& laserdisc);
   bool SetChannel(const ChannelParameters& channel);
   bool SetChromaError(const ChromaErrorParameters& chroma_error);
 

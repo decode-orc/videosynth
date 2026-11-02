@@ -1,12 +1,11 @@
 # `line_injections` (project level)
 
-The project-wide VBI settings: the disc format and the VITS set applied to every frame of every section. Optional — omit it for a non-laserdisc project with no test signals.
+The project-wide VITS set, applied to every frame of every section, and the placement policy it is held to. Optional — omit it for a project with no test signals.
 
-This is a **sibling of `output:` and `sections:`**, not a key inside them. Do not confuse it with the per-section `line_injections:` list, which is a different shape entirely — see [section `line_injections`](section-line-injections.md).
+This is a **sibling of `output:` and `sections:`**, not a key inside them. Do not confuse it with the per-section `line_injections:` list, which only names the (unimplemented) `vitc` injection — see [section `laserdisc`](section-laserdisc.md#vitc-line-injections). The disc format is [`laserdisc.disc_type`](laserdisc.md#disc_type).
 
 ```yaml
 line_injections:
-  disc_type: CAV
   placement: laserdisc
   vits:
     - vits_type: uk-national
@@ -19,22 +18,10 @@ line_injections:
 
 | Key | Type | Required | Values | Default |
 |-----|------|----------|--------|---------|
-| `disc_type` | string | No | `CAV`, `CLV` | absent (not a disc) |
 | `placement` | string | No | `standard`, `laserdisc`, `custom` | `standard` |
 | `vits` | list | No | VITS entries (below) | empty |
 
 No other key is accepted.
-
-## `disc_type`
-
-The laserdisc format for the whole project. A disc is entirely one or the other, which is why this is project-wide and is *not* repeated on each section's `laserdisc` injection.
-
-| Value | Addressing |
-|-------|------------|
-| `CAV` | Picture number — one frame per track |
-| `CLV` | Programme time code plus CLV picture number |
-
-It determines which `code_type` values the validator accepts, and setting it turns on the disc VITS rules below (reserved address-code lines, and VIRS on NTSC/PAL-M) whether or not any section carries codes. It is required as soon as any section carries a `laserdisc` injection. Omit it entirely for projects that are not discs. `SECAM` projects cannot set it.
 
 ## `placement`
 
@@ -46,9 +33,9 @@ How strictly the validator constrains each VITS entry's `target_lines`.
 | `laserdisc` | VITS must sit on the laserdisc VBI lines — PAL 19, 20, 332, 333; NTSC/PAL-M 19, 20, 282, 283. Not available for `SECAM` |
 | `custom` | Any valid VBI line, subject to the overlap and reserved-range rules |
 
-`standard` is also assumed when the key is absent, which preserves the behaviour of projects written before it existed.
+`standard` is used when the key is absent.
 
-Under `custom` the validator still rejects overlapping lines, and when `disc_type` is set it still rejects the reserved address-code ranges.
+Under `custom` the validator still rejects overlapping lines, and when [`laserdisc.disc_type`](laserdisc.md#disc_type) is set it still rejects the reserved address-code ranges.
 
 ## `vits[]`
 
@@ -69,8 +56,8 @@ Valid `vits_type` values depend on the video standard; PAL types are rejected in
 - Every entry needs at least one line, and no line may appear twice, within or between entries.
 - Under `standard` placement, each type must be on its recommended line (`virs` excepted).
 - Under `laserdisc` placement, lines must be from that standard's laserdisc VITS set.
-- When `disc_type` is set, no VITS may target a reserved address-code line (PAL 6–18, 319–331; NTSC/PAL-M 10–18, 273–281).
-- When `disc_type` is set on an NTSC or PAL-M project, a `virs` entry is **required** (IEC 60857 §9.1.3).
+- When [`laserdisc.disc_type`](laserdisc.md#disc_type) is set, no VITS may target a reserved address-code line (PAL 6–18, 319–331; NTSC/PAL-M 10–18, 273–281).
+- When `laserdisc.disc_type` is set on an NTSC or PAL-M project, a `virs` entry is **required** (IEC 60857 §9.1.3).
 
 ## Why VITS are project-wide
 

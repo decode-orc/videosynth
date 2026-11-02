@@ -34,13 +34,15 @@ FmEncoder::FmEncoder(double sample_rate_hz, double bit_cell_duration_us,
                      double transition_duration_ns)
     : ramp_samples_(TransitionTimeToRampSamples(transition_duration_ns * 1.0e-9,
                                                 sample_rate_hz, 0.1, 0.9)),
-      bit_cell_samples_(static_cast<int>(
-          std::round(bit_cell_duration_us * 1.0e-6 * sample_rate_hz))) {
+      bit_cell_exact_(bit_cell_duration_us * 1.0e-6 * sample_rate_hz),
+      bit_cell_samples_(static_cast<int>(std::round(bit_cell_exact_))) {
   if (bit_cell_samples_ <= 0) {
     throw std::invalid_argument(
         "FmEncoder: bit cell duration yields zero or negative samples");
   }
-  if (ramp_samples_ >= bit_cell_samples_ / 2) {
+  // Cells on the exact grid are bit_cell_samples_ ± 1 samples long, so the
+  // ramp must fit the shortest half cell.
+  if (ramp_samples_ >= (bit_cell_samples_ - 1) / 2) {
     throw std::invalid_argument(
         "FmEncoder: transition ramp is too wide to fit within a half bit "
         "cell — check sample rate and timing parameters");
@@ -143,12 +145,19 @@ std::array<bool, 40> FmEncoder::BuildBitPattern(const FmData& data) {
   return bits;
 }
 
+int FmEncoder::BitCellStart(int bit_index) const {
+  return static_cast<int>(std::lround(bit_index * bit_cell_exact_));
+}
+
+int FmEncoder::BitCellCentre(int bit_index) const {
+  return static_cast<int>(std::lround((bit_index + 0.5) * bit_cell_exact_));
+}
+
 std::vector<SampleFixed> FmEncoder::GenerateBitsFM(
     const std::array<bool, 40>& bits, double baseline_level_mv,
     double peak_level_mv) const {
   constexpr int kNumBits = 40;
-  const int total = kNumBits * bit_cell_samples_;
-  const int T1 = bit_cell_samples_ / 2;  // Half-cell for '1'-bit pip
+  const int total = BitCellStart(kNumBits);
 
   // FM encoding rule (IEC 60857 §10.2, Figure 13):
   //   Signal starts HIGH (peak). The decoder initialises lastTransitionX at the
@@ -170,20 +179,22 @@ std::vector<SampleFixed> FmEncoder::GenerateBitsFM(
 
   for (int bit_idx = 0; bit_idx < kNumBits; ++bit_idx) {
     const bool bit = bits[static_cast<std::size_t>(bit_idx)];
-    const int cell_start = bit_idx * bit_cell_samples_;
+    const int cell_start = BitCellStart(bit_idx);
+    const int cell_end = BitCellStart(bit_idx + 1);
+    const int pip_start = BitCellCentre(bit_idx);  // T1: half a cell in
 
     if (!bit) {
-      for (int i = cell_start; i < cell_start + bit_cell_samples_; ++i) {
+      for (int i = cell_start; i < cell_end; ++i) {
         samples[static_cast<std::size_t>(i)] = level;
       }
       level = (level == peak_level_mv) ? baseline_level_mv : peak_level_mv;
     } else {
       const double pip_level =
           (level == peak_level_mv) ? baseline_level_mv : peak_level_mv;
-      for (int i = cell_start; i < cell_start + T1; ++i) {
+      for (int i = cell_start; i < pip_start; ++i) {
         samples[static_cast<std::size_t>(i)] = level;
       }
-      for (int i = cell_start + T1; i < cell_start + bit_cell_samples_; ++i) {
+      for (int i = pip_start; i < cell_end; ++i) {
         samples[static_cast<std::size_t>(i)] = pip_level;
       }
       // level unchanged — two flips cancel
@@ -194,21 +205,21 @@ std::vector<SampleFixed> FmEncoder::GenerateBitsFM(
   level = peak_level_mv;
   for (int bit_idx = 0; bit_idx < kNumBits; ++bit_idx) {
     const bool bit = bits[static_cast<std::size_t>(bit_idx)];
-    const int cell_start = bit_idx * bit_cell_samples_;
+    const int cell_end = BitCellStart(bit_idx + 1);
 
     if (!bit) {
       // One permanent-flip transition at end of cell.
       const bool rising = (level == baseline_level_mv);
-      ApplyStepTransition(samples, cell_start + bit_cell_samples_, rising,
-                          baseline_level_mv, peak_level_mv);
+      ApplyStepTransition(samples, cell_end, rising, baseline_level_mv,
+                          peak_level_mv);
       level = (level == peak_level_mv) ? baseline_level_mv : peak_level_mv;
     } else {
       // Pip start at T1, pip end at T0 (return to original level).
       const bool pip_rising = (level == baseline_level_mv);
-      ApplyStepTransition(samples, cell_start + T1, pip_rising,
+      ApplyStepTransition(samples, BitCellCentre(bit_idx), pip_rising,
                           baseline_level_mv, peak_level_mv);
-      ApplyStepTransition(samples, cell_start + bit_cell_samples_, !pip_rising,
-                          baseline_level_mv, peak_level_mv);
+      ApplyStepTransition(samples, cell_end, !pip_rising, baseline_level_mv,
+                          peak_level_mv);
       // level unchanged
     }
   }

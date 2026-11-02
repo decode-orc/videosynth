@@ -580,7 +580,7 @@ TEST(ProjectFixturesTest, PalPilotBurstFixtureParsesValidatesAndGenerated) {
                              FixtureProjectDir("general/pal_pilot_burst.yaml"));
 
   EXPECT_EQ(project.cvbs_presets.video_standard_preset, Standard::kPal);
-  EXPECT_TRUE(project.cvbs_presets.pal_laserdisc_pilot_burst);
+  EXPECT_TRUE(project.laserdisc.pilot_burst);
   ASSERT_EQ(project.sections.size(), 6U);
 
   const ValidationResult validation = validator.Validate(project);
@@ -636,7 +636,7 @@ TEST(ProjectFixturesTest, NtscVbiBurstFixtureParsesValidatesAndGenerates) {
                              FixtureProjectDir("general/ntsc_vbi_burst.yaml"));
 
   EXPECT_EQ(project.cvbs_presets.video_standard_preset, Standard::kNtsc);
-  EXPECT_TRUE(project.cvbs_presets.ntsc_laserdisc_vbi_burst);
+  EXPECT_TRUE(project.laserdisc.vbi_burst);
   ASSERT_EQ(project.sections.size(), 6U);
 
   const ValidationResult validation = validator.Validate(project);

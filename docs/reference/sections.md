@@ -8,12 +8,11 @@ sections:
     type: progressive
     source: "{bundled}/exr/720x576/100_BARS.exr"
     duration_frames: 250
-    section_type: programme_area
     start_frame: 0
-    line_injections: []
+    laserdisc: {area: programme_area}
+    osd: {}
     noise: {}
     dropouts: {}
-    osd: {}
     audio: {}
 ```
 
@@ -26,15 +25,17 @@ sections:
 | `source` | string | Yes | Path, optionally with an [asset root token](asset-roots.md) | — |
 | `duration_frames` | int or string | No | Positive integer, or `"all"` | `"all"` |
 | `duration_repeat` | int | No | Positive integer | `1` |
-| `section_type` | string | No | `lead_in`, `programme_area`, `lead_out` | absent |
 | `start_frame` | int | No | ≥ 0, inside the video source | `0` |
 | `end_frame` | int | No | ≥ `start_frame`, inside the video source | last source frame |
 | `cadence` | map | No | [field cadence](#cadence) | video cadence |
-| `line_injections` | list | No | [section line injections](section-line-injections.md) | absent |
+| `laserdisc` | map | No | [section `laserdisc`](section-laserdisc.md) — disc area and biphase codes (LaserDisc projects only) | absent |
+| `line_injections` | list | No | `vitc` only, not implemented — see [section `laserdisc`](section-laserdisc.md#vitc-line-injections) | absent |
+| `horizontal_resample` | string | No | `nearest`, `bandlimited` ([horizontal mapping](#horizontal_resample)) | `nearest` |
+| `chroma_line_sign` | list | No | [chroma line sign regions](#chroma_line_sign) (PAL and PAL-M) | absent |
 | `luma_bandwidth` | map | No | [luma bandwidth limit](#luma_bandwidth) | absent |
+| `osd` | map | No | [osd](section-osd.md) | absent |
 | `noise` | map | No | [noise](section-noise.md) | absent |
 | `dropouts` | map | No | [dropouts](section-dropouts.md) | absent |
-| `osd` | map | No | [osd](section-osd.md) | absent |
 | `audio` | map | No | [audio](section-audio.md) | absent |
 
 No other key is accepted.
@@ -71,38 +72,7 @@ Omitting `duration_frames` means `"all"`. The emitter always writes the key out,
 
 With `duration_frames: "all"`, plays the selected range this many times. Total output frames = range length × `duration_repeat`; each replay restarts at `start_frame`.
 
-Ignored with a fixed integer `duration_frames`, and a warning is emitted if you set it there. The emitter writes it only alongside `duration_frames: all`, so a saved project drops an ignored `duration_repeat`.
-
-## `section_type`
-
-Marks the section as part of a laserdisc structure.
-
-| Value | Meaning | Recommended minimum (CAV) |
-|-------|---------|---------------------------|
-| `lead_in` | Before the programme content | 938 frames |
-| `programme_area` | The content itself | — |
-| `lead_out` | After the programme content | 1250 frames |
-
-Omitting it means the section is not part of a disc structure. A section that carries a `laserdisc` [line injection](section-line-injections.md) must set it.
-
-The minimums are checked as **warnings**, only on a CAV disc, only for a section that carries a `laserdisc` injection, and only when `duration_frames` is an integer:
-
-```text
-Laserdisc injection warning: CAV lead_in section has 500 frames; IEC 1.5 mm
-minimum at 1.6 um track pitch requires 938.
-```
-
-### Ordering rules
-
-Once any section is a `lead_in` or a `lead_out`, the whole sequence is checked (a project that uses only `programme_area` is not):
-
-- At most one `lead_in`, and no section may precede it.
-- At most one `lead_out`, and no section may follow it.
-- Every section between them must be `programme_area`. With only a lead-in this applies to every section after it, and with only a lead-out to every section before it.
-
-Violations are errors, not warnings: out-of-order sections would break monotonic picture-number and time-code generation (IEC 60856/60857).
-
-`section_type` also drives the [EFM](../user-manual/audio.md#laserdisc-efm-digital-audio) disc-area mapping — a lead-in carries the table of contents, each programme-area section is one EFM track, and the lead-out carries lead-out subcode. That mapping works whether or not the section carries biphase codes, which is why an EFM-only project can have a short lead-in without the 938-frame warning a biphase CAV lead-in would get.
+Ignored with a fixed integer `duration_frames`, and a warning is emitted if you set it to anything other than `1` there. The emitter writes it only alongside `duration_frames: all`, so a saved project drops an ignored `duration_repeat`.
 
 ## `start_frame`
 
@@ -156,6 +126,72 @@ A [video soundtrack](section-audio.md#video_audio) plays in real time from the r
 
 Validation: `"2:3"` on PAL or SECAM, or on an EXR still, is an error; so is a source frame rate other than 24000/1001 under `"2:3"`, or 24000/1001 under `video`, and `continue` on the first section or after a section that is not `"2:3"`. `phase` together with `continue`, and `phase` or `continuity` under `video`, are ignored with a warning. An unknown value or key is a parse error. The emitter writes the block only when it differs from the video default.
 
+## `laserdisc`
+
+Where the section sits on a LaserDisc — `lead_in`, `programme_area` or `lead_out` — and the biphase codes it carries. Only a project with a top-level [`laserdisc`](laserdisc.md) block may use it; omit it for a section that is not part of a disc. A section-level `section_type` key is a parse error that points to `laserdisc.area`, and a [`line_injections`](section-laserdisc.md#vitc-line-injections) entry with `type: laserdisc` is a parse error that points to `laserdisc.codes`.
+
+The keys, the CAV minimum durations, the [ordering rules](section-laserdisc.md#ordering-rules) and the EFM disc-area mapping are on the [section `laserdisc`](section-laserdisc.md) page.
+
+## `horizontal_resample`
+
+How the source raster's 720 active pixels are mapped onto the 4fsc active window (922 samples for PAL and SECAM, 52 µs). Optional.
+
+```yaml
+- name: Photo
+  type: progressive
+  source: "{project}/media/photo.exr"
+  duration_frames: 8
+  horizontal_resample: bandlimited
+```
+
+| Value | Mapping |
+|-------|---------|
+| `nearest` (default) | Each sample takes the source pixel at or to the left of its position (`x · 720 / N`): a zero-order hold. |
+| `bandlimited` | Each sample interpolates the source row with a polyphase Kaiser-windowed sinc. |
+
+- The zero-order hold leaves images of the source spectrum up to the 4fsc Nyquist frequency. A source component at *f* reappears at 13.5 MHz − *f*, which the 4fsc sampling folds down again: a 0.25 MHz detail in a PAL picture leaves an image near 4.5 MHz, beside the colour subcarrier, where a decoder reads it as cross-colour. The hold also droops the in-band response.
+- The `bandlimited` kernel has its −6 dB point at the source Nyquist frequency (0.5 cycles per pixel, 6.75 MHz for a 13.5 MHz raster) with a 0.1 cycle-per-pixel transition and a 70 dB stopband. Every passband frequency's image lands in the stopband; only content within the transition band, right at the source Nyquist frequency, leaves an image (at most −6 dB).
+- Sample *x* reads the source at pixel position *x* · 720 / N − 0.5, so a pixel's value is centred on the span of samples the nearest mapping holds it for, and edges land on the same samples under both mappings.
+- Each phase of the kernel has unit DC gain, so flat areas are bit-identical to `nearest`. Taps that fall outside the raster repeat the edge pixel.
+- The luma, both colour-difference components and the [`chroma_line_sign`](#chroma_line_sign) regions are resampled together; any [`luma_bandwidth`](#luma_bandwidth) limit and the chroma low-pass follow.
+- `nearest` keeps existing projects bit-exact.
+
+Validation: any other value is a parse error. The emitter writes the key only for `bandlimited`.
+
+## `chroma_line_sign`
+
+Rectangles of the source picture whose U or V is multiplied by each line's PAL V-switch sign before modulation. PAL and PAL-M only. This builds the PAL decoder-stress elements of test cards such as the Philips PM5544: a bar of line-alternating ±(R−Y), and the "anti-PAL" fields whose U alternates instead.
+
+```yaml
+- name: PalStress
+  type: progressive
+  source: "{bundled}/exr/720x576/PAL_STRESS.exr"
+  duration_frames: 8
+  chroma_line_sign:
+    - region: {x: 26, y: 16, width: 38, height: 544}
+      v: follow_switch
+    - region: {x: 656, y: 16, width: 38, height: 544}
+      u: follow_switch
+    - region: {x: 0, y: 100, width: 24, height: 40}
+      v: follow_switch
+```
+
+| Key | Type | Required | Values | Description |
+|-----|------|----------|--------|-------------|
+| `region.x`, `region.y` | int | Yes | ≥ 0 | Top-left corner, in source pixels and rows |
+| `region.width`, `region.height` | int | Yes | ≥ 1, inside the raster | Size, in source pixels and rows |
+| `u` | string | No (default `normal`) | `normal`, `follow_switch` | How U is carried |
+| `v` | string | No (default `normal`) | `normal`, `follow_switch` | How V is carried |
+
+- The V-switch sign is +1 on lines whose V axis is transmitted as is and −1 on lines where it is inverted (ITU-R BT.1700 Annex 1 Part B Table 1 item 10f). It belongs to the line, and a given frame line's switch flips every frame (625 and 525 are odd), so a still image alone cannot express it.
+- `v: follow_switch` cancels the switch: the transmitted V carrier is unswitched. A PAL decoder, which removes the switch, sees V alternate line by line. A correct delay-line decoder averages it to grey; delay-line amplitude errors show as "Venetian blinds" and a non-orthogonal demodulator colours it. Because the unswitched V lands where U would be in the vertical spectrum, a 2D or Transform PAL decoder cannot tell it from U by position.
+- `u: follow_switch` makes U alternate with the switch (the "+V/±U anti-PAL" field).
+- Regions are tested against source pixels, before the [horizontal mapping](#horizontal_resample). Overlapping regions each apply their sign, so two `follow_switch` regions on one component cancel.
+- Lines outside every region, and every line with a +1 switch sign, are bit-identical to a section without the block.
+- The [picture truth](output.md#truth) includes the alternation.
+
+Validation: the block on an NTSC or SECAM project is an error, as is a region with a zero or negative size, one that leaves the 720×576 (PAL) or 720×486 (PAL-M) raster, or one with neither `u` nor `v` set to `follow_switch`. A missing `region` or coordinate, a non-integer coordinate, an unknown value or key is a parse error. The emitter omits components left `normal`.
+
 ## `luma_bandwidth`
 
 A low-pass on the section's picture luma, as from a player or transfer with a limited luma frequency response. Optional — omit it for the full 4fsc bandwidth.
@@ -178,7 +214,7 @@ A low-pass on the section's picture luma, as from a player or transfer with a li
 2 f_sc is half the 4fsc sampling rate: 8.867 MHz for PAL and SECAM, 7.159 MHz for NTSC and 7.151 MHz for PAL-M.
 
 - The filter is a Kaiser-windowed-sinc low-pass. The passband runs to `cutoff_mhz` − `transition_mhz` / 2 with a ripple below 0.003 dB; above `cutoff_mhz` + `transition_mhz` / 2 the stopband is at least 70 dB down (designed for 70 dB; the limit promises 60 dB).
-- It filters the luma of each active picture line across the active window, after the source pixels are mapped to 4fsc samples. It therefore also removes the images that the nearest-pixel column mapping leaves at high frequencies.
+- It filters the luma of each active picture line across the active window, after the source pixels are mapped to 4fsc samples. It therefore also removes the images that the nearest-pixel column mapping leaves above the cutoff (the [band-limited mapping](#horizontal_resample) avoids them at any frequency, for chroma too).
 - Each line is filtered on its own. Beyond the ends of the active window the line's first and last samples are repeated, so a flat line passes unchanged and the window edges do not ring.
 - Sync, blanking, the VBI, the [VITS](vits-types.md) lines and the chroma are not filtered and are bit-identical to an unlimited section.
 - [OSD](section-osd.md) text is drawn after the filter, so it stays sharp.
@@ -192,10 +228,10 @@ Each has its own reference page:
 
 | Block | Purpose |
 |-------|---------|
-| [`line_injections`](section-line-injections.md) | Laserdisc biphase codes |
+| [`laserdisc`](section-laserdisc.md) | Disc area and laserdisc biphase codes |
+| [`osd`](section-osd.md) | On-screen display overlays |
 | [`noise`](section-noise.md) | Gaussian noise injection |
 | [`dropouts`](section-dropouts.md) | Random and scratch dropouts |
-| [`osd`](section-osd.md) | On-screen display overlays |
 | [`audio`](section-audio.md) | Audio channel pairs |
 
 All are optional, and only blocks that are explicitly set are written back out by the emitter.
@@ -207,8 +243,8 @@ All are optional, and only blocks that are explicitly set are written back out b
 - `duration_frames` must be a positive integer or `"all"`.
 - `start_frame` ≥ 0 and `end_frame` ≥ `start_frame`, both inside the video source; `end_frame` never with an integer `duration_frames`.
 - An EXR still takes neither `start_frame` nor `end_frame`, and needs an integer `duration_frames`.
-- The disc-structure ordering rules above.
-- A section with a `laserdisc` injection must set `section_type`.
+- A `laserdisc` block needs the project's top-level `laserdisc` block. Disc areas follow the [ordering rules](section-laserdisc.md#ordering-rules), and a section with `codes` must set `area`.
 - `cadence` rules (above).
+- `chroma_line_sign` only on PAL and PAL-M, with every region inside the raster and following the switch on at least one component.
 - `luma_bandwidth` within its ranges (above).
-- CAV lead-in and lead-out minimum durations (warnings).
+- CAV lead-in and lead-out minimum durations (warnings; see [section `laserdisc`](section-laserdisc.md#area)).

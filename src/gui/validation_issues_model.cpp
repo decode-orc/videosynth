@@ -45,11 +45,17 @@ IssueField ClassifyIssueField(const std::string& message) {
   if (StartsWith(message, "Channel validation error")) {
     return IssueField::kChannel;
   }
+  if (StartsWith(message, "Laserdisc channel validation error")) {
+    return IssueField::kLaserdiscChannel;
+  }
   if (StartsWith(message, "Chroma error validation error")) {
     return IssueField::kChromaError;
   }
   if (StartsWith(message, "Luma bandwidth validation error")) {
     return IssueField::kLumaBandwidth;
+  }
+  if (StartsWith(message, "Picture validation error")) {
+    return IssueField::kPicture;
   }
   // Keys follow the quoted section name; looking only past it keeps a section
   // name such as 'shared.intro' from steering the classification.

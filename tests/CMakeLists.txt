@@ -49,6 +49,13 @@ if(Python3_Interpreter_FOUND)
                 "${CMAKE_CURRENT_SOURCE_DIR}/unit/test_generate_test_projects.py")
     set_tests_properties(GenerateTestProjects.SelfTest
         PROPERTIES LABELS unit)
+
+    # In-memory self-test of the LaserDisc key migration script.
+    add_test(NAME MigrateLaserdiscKeys.SelfTest
+        COMMAND "${Python3_EXECUTABLE}" -I
+                "${CMAKE_CURRENT_SOURCE_DIR}/unit/test_migrate_laserdisc_keys.py")
+    set_tests_properties(MigrateLaserdiscKeys.SelfTest
+        PROPERTIES LABELS unit)
 else()
     message(STATUS
         "Python3 not found — derived project fixtures will not be generated")

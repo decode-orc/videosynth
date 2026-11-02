@@ -97,7 +97,7 @@ Section::LineInjectionCode MakeUsersCode(const std::string& hex) {
 // Build a minimal valid PAL CAV project with lead-in, programme, lead-out.
 Project MakeMinimalPalCavProject() {
   Project p = MakeBaseProject(Standard::kPal);
-  p.line_injections.disc_type = "CAV";
+  p.laserdisc.disc_type = "CAV";
 
   Section lead_in = MakeSection("Lead-in", SectionType::kLeadIn, 938);
   auto li_inj = MakeLaserdiscInjection("CAV");
@@ -123,7 +123,7 @@ Project MakeMinimalPalCavProject() {
 // Build a minimal valid PAL CLV project.
 Project MakeMinimalPalClvProject() {
   Project p = MakeBaseProject(Standard::kPal);
-  p.line_injections.disc_type = "CLV";
+  p.laserdisc.disc_type = "CLV";
 
   Section lead_in = MakeSection("Lead-in", SectionType::kLeadIn, 938);
   auto li_inj = MakeLaserdiscInjection("CLV");
@@ -151,7 +151,7 @@ Project MakeMinimalPalClvProject() {
 // Build a minimal valid NTSC CAV project with VIRS.
 Project MakeMinimalNtscCavProject() {
   Project p = MakeBaseProject(Standard::kNtsc);
-  p.line_injections.disc_type = "CAV";
+  p.laserdisc.disc_type = "CAV";
   p.line_injections.vits.push_back(MakeVirsInjection());
 
   Section lead_in = MakeSection("Lead-in", SectionType::kLeadIn, 938);
@@ -282,7 +282,7 @@ TEST(BiphaseFinalTest, AcceptsNtscCavProjectWithMaxPictureNumber) {
 
 TEST(BiphaseFinalTest, AcceptsMinimalNtscClvProject) {
   Project p = MakeBaseProject(Standard::kNtsc);
-  p.line_injections.disc_type = "CLV";
+  p.laserdisc.disc_type = "CLV";
   p.line_injections.vits.push_back(MakeVirsInjection());
 
   Section lead_in = MakeSection("Lead-in", SectionType::kLeadIn, 938);
@@ -329,7 +329,7 @@ TEST(BiphaseFinalTest, AcceptsPalCavProjectWithSingleChapter) {
 
 TEST(BiphaseFinalTest, AcceptsPalCavProjectWithThreeChapters) {
   Project p = MakeBaseProject(Standard::kPal);
-  p.line_injections.disc_type = "CAV";
+  p.laserdisc.disc_type = "CAV";
 
   Section lead_in = MakeSection("Lead-in", SectionType::kLeadIn, 938);
   auto li_inj = MakeLaserdiscInjection("CAV");
@@ -566,7 +566,7 @@ TEST(BiphaseFinalTest, RejectsUsersCodeWithX1Above7) {
 TEST(BiphaseFinalTest, RejectsNtscProjectMissingVirs) {
   // NTSC projects with laserdisc injection require virs on 19/282.
   Project p = MakeBaseProject(Standard::kNtsc);
-  p.line_injections.disc_type = "CAV";
+  p.laserdisc.disc_type = "CAV";
   // Intentionally no virs injection at the project level.
 
   Section prog = MakeSection("Programme", SectionType::kProgrammeArea, 500);
@@ -593,7 +593,7 @@ TEST(BiphaseFinalTest, ClvLeadInHasNoDurationConstraint) {
   // CLV discs have variable track density; the validator must not enforce a
   // frame-count minimum on CLV lead-in sections.
   Project p = MakeBaseProject(Standard::kPal);
-  p.line_injections.disc_type = "CLV";
+  p.laserdisc.disc_type = "CLV";
 
   Section lead_in = MakeSection("Lead-in", SectionType::kLeadIn, 100);
   auto li_inj = MakeLaserdiscInjection("CLV");
@@ -643,6 +643,7 @@ TEST(BiphaseFinalTest, SectionWithNoLaserdiscInjectionIsNotValidated) {
   // A section without a laserdisc injection must pass without biphase checks.
   Project p = MakeBaseProject(Standard::kPal);
 
+  p.laserdisc.enabled = true;
   Section s = MakeSection("Plain", SectionType::kProgrammeArea, 100);
   // No line_injections — plain video section.
   p.sections.push_back(s);

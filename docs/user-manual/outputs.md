@@ -12,10 +12,12 @@ Every artefact a run produces is colocated with `output.video_path`. The project
 | `<name>.meta` | Always | SQLite metadata sidecar |
 | `<name>.dropouts.meta` | Any section has dropouts | SQLite dropout sidecar |
 | `<name>_audio_<pair>.wav` | Any section declares that pair | 48 kHz/24-bit stereo audio |
-| `<name>.efm` | `output.efm_audio` is present | Laserdisc EFM channel stream |
+| `<name>.efm` | [`laserdisc.efm_audio`](../reference/laserdisc.md#efm_audio) is present | Laserdisc EFM channel stream |
 | `<name>.efm.meta` | With the above | SQLite frame index for the EFM stream |
+| `<name>.truth` | `output.truth: true` | Picture truth: planar `float32` Y/U/V at 4fsc |
+| `<name>.truth.meta` | With the above | SQLite sidecar: layout and conventions of the truth file |
 
-`<name>` for the audio and EFM files is `output.video_path` with its trailing `.cvbs` or `.cvbsy` removed. The `.meta` path is derived from the video path by replacing that suffix — it is never specified in the project.
+`<name>` for the audio, EFM and truth files is `output.video_path` with its trailing `.cvbs` or `.cvbsy` removed. The `.meta` path is derived from the video path by replacing that suffix — it is never specified in the project.
 
 Parent directories are created automatically, so an output path can point anywhere writable.
 
@@ -61,11 +63,15 @@ Recording the git commit in the sidecar is deliberate: a generated file always s
 
 Audio tracks are stereo, 24-bit signed little-endian PCM (RIFF/WAVE) at 48 000 Hz, one file per declared channel pair, each spanning the whole output. EFM output is the two-file pair defined by the EFM extension format — the channel stream and its own frame-index sidecar. See [Audio](audio.md).
 
+## Picture truth
+
+With [`output.truth: true`](../reference/output.md#truth), `<name>.truth` holds the component picture that went into the modulator: for every frame, a Y, a U and a V plane, each one row per active line (in progressive order) by one sample per 4fsc sample of the active window, as little-endian `float32` millivolts. U and V are the filtered colour-difference components exactly as modulated, with the PAL V-switch removed. The SQLite sidecar `<name>.truth.meta` gives the dimensions, the first sample and line of each field, the levels and the conventions. The truth is taken before every impairment, so a capture variant with channel effects, noise or dropouts shares its truth with the clean run.
+
 ## Determinism
 
 The same project produces byte-identical files on every run, on any machine, at any thread count, with or without the frame template cache. Where randomness is involved — noise and dropouts — a fixed seed makes it reproducible too.
 
-This is a testable property, not just an intention: the repository ships `scripts/output-hashes.sh`, which records SHA-256 manifests of every artefact (using SQLite's canonical `.dump` for the databases) and fails if a later build differs from a recorded baseline.
+This is a testable property, not just an intention: the repository ships `scripts/output-hashes.sh`, which records SHA-256 manifests of the sample, audio, picture-truth and `.meta` files (using SQLite's canonical `.dump` for the databases; the `.efm` stream is not included) and fails if a later build differs from a recorded baseline.
 
 ```bash
 # On a known-good build
@@ -77,4 +83,4 @@ scripts/output-hashes.sh
 
 ## Cancellation
 
-A cancelled run aborts every artefact it was writing — video, chroma, metadata, WAV tracks, dropout sidecar and EFM stream — so it leaves no partially written files behind. A cancelled run is reported as cancelled, not as a failure.
+A cancelled run aborts every artefact it was writing — video, chroma, metadata, WAV tracks, dropout sidecar, EFM stream and picture truth — so it leaves no partially written files behind. A cancelled run is reported as cancelled, not as a failure.

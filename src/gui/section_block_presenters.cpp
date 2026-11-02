@@ -2,7 +2,8 @@
  * File:        section_block_presenters.cpp
  * Module:      gui
  * Purpose:     Widget-free mapping layer for the optional per-section YAML
- *              blocks (audio, noise, dropouts, luma bandwidth, OSD)
+ *              blocks (audio, noise, dropouts, luma bandwidth, OSD,
+ *              laserdisc)
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -14,6 +15,7 @@
 #include <cmath>
 #include <cstdint>
 
+#include "line_injection_presenter.h"
 #include "videosynth/film_cadence.h"
 #include "videosynth/progressive_frame_source.h"
 #include "videosynth/source_frame_range.h"
@@ -160,6 +162,47 @@ void RemoveNoiseSpectrumPoint(std::vector<NoiseSpectrumPoint>* spectrum,
     return;
   }
   spectrum->erase(spectrum->begin() + row);
+}
+
+int SourceRasterHeight(Standard standard) {
+  return Is625LineStandard(standard) ? 576 : 486;
+}
+
+bool SupportsChromaLineSign(Standard standard) {
+  return standard == Standard::kPal || standard == Standard::kPalM;
+}
+
+void AddChromaLineSignRegion(std::vector<ChromaLineSignRegion>* regions,
+                             int raster_height) {
+  constexpr int kRasterWidth = 720;
+  constexpr int kDefaultRegionSize = 48;
+  if (regions->empty()) {
+    regions->push_back(ChromaLineSignRegion{
+        .x = 0,
+        .y = 0,
+        .width = kDefaultRegionSize,
+        .height = std::min(kDefaultRegionSize, raster_height),
+        .v = ChromaLineSignMode::kFollowSwitch});
+    return;
+  }
+  ChromaLineSignRegion next = regions->back();
+  next.x += next.width;
+  if (next.x + next.width > kRasterWidth) {
+    next.x = 0;
+    next.y += next.height;
+  }
+  if (next.y + next.height > raster_height) {
+    return;
+  }
+  regions->push_back(next);
+}
+
+void RemoveChromaLineSignRegion(std::vector<ChromaLineSignRegion>* regions,
+                                int row) {
+  if (row < 0 || row >= static_cast<int>(regions->size())) {
+    return;
+  }
+  regions->erase(regions->begin() + row);
 }
 
 void AddNoiseLevelPoint(std::vector<NoiseLevelPoint>* curve) {
@@ -597,6 +640,12 @@ Section ApplySectionEditDelta(const Section& before, const Section& after,
   if (!(after.luma_bandwidth == before.luma_bandwidth)) {
     target.luma_bandwidth = after.luma_bandwidth;
   }
+  if (after.horizontal_resample != before.horizontal_resample) {
+    target.horizontal_resample = after.horizontal_resample;
+  }
+  if (!(after.chroma_line_sign == before.chroma_line_sign)) {
+    target.chroma_line_sign = after.chroma_line_sign;
+  }
   // Random and scratch dropouts are independent blocks in the editor; diff
   // them separately so toggling one never overwrites the other on targets.
   if (!(after.dropouts.random == before.dropouts.random)) {
@@ -705,6 +754,63 @@ std::vector<OsdTokenHelp> OsdTokenCatalogue() {
       {"{cadence}",
        "2:3 pulldown letter and field, e.g. B2 (\"-\" for video cadence)"},
   };
+}
+
+bool SectionLaserdiscGroupVisible(const Project& project) {
+  return project.laserdisc.enabled;
+}
+
+bool SectionHasLaserdiscBlock(const Section& section) {
+  if (section.section_type != SectionType::kUnknown) {
+    return true;
+  }
+  return std::any_of(section.line_injections.begin(),
+                     section.line_injections.end(),
+                     [](const Section::LineInjection& injection) {
+                       return injection.type == "laserdisc";
+                     });
+}
+
+bool ClearSectionLaserdiscBlock(Section* section) {
+  if (!SectionHasLaserdiscBlock(*section)) {
+    return false;
+  }
+  section->section_type = SectionType::kUnknown;
+  auto& injections = section->line_injections;
+  injections.erase(std::remove_if(injections.begin(), injections.end(),
+                                  [](const Section::LineInjection& injection) {
+                                    return injection.type == "laserdisc";
+                                  }),
+                   injections.end());
+  return true;
+}
+
+void SetSectionLaserdiscEnabled(Section* section, bool enabled,
+                                Standard standard, DiscType disc_type) {
+  if (!enabled) {
+    ClearSectionLaserdiscBlock(section);
+    return;
+  }
+  if (section->section_type == SectionType::kUnknown) {
+    section->section_type = SectionType::kProgrammeArea;
+  }
+  const bool has_codes = std::any_of(
+      section->line_injections.begin(), section->line_injections.end(),
+      [](const Section::LineInjection& injection) {
+        return injection.type == "laserdisc";
+      });
+  if (has_codes) {
+    return;
+  }
+  Section::LineInjection injection;
+  injection.type = "laserdisc";
+  for (const std::string& code_type : RecommendedLaserdiscCodeTypes(
+           disc_type, section->section_type, standard)) {
+    Section::LineInjectionCode code;
+    code.code_type = code_type;
+    injection.codes.push_back(std::move(code));
+  }
+  section->line_injections.push_back(std::move(injection));
 }
 
 }  // namespace videosynth::gui

@@ -533,27 +533,33 @@ Every chapter code contains a **stop-bit** that controls player search behaviour
 
 The stop-bit follows these rules per IEC 60856/60857 §10.1.5:
 
-| Track | Stop-bit | Exception |
-|-------|---------|-----------|
-| 0–399 | 0 | First chapter after lead-in: always 1 |
-| 400+ | 1 | — |
-| Any track on short chapter (< 800 tracks) | 1 | — |
+| Track | Stop-bit |
+|-------|---------|
+| 0–399 | 0 |
+| 400+ | 1 |
 
-**The first chapter after lead-in must always have stop-bit = 1.** This is enforced automatically.
+Two exceptions make the stop-bit 1 on every track of a chapter:
+
+- the first chapter after the lead-in (the chapter starting in the section directly after a `lead_in` section);
+- every chapter of a CAV disc on which any chapter is shorter than 800 tracks. Real discs with short chapters (the Apple Visual Almanac, for example) carry stop-bit 1 throughout every chapter, including chapters of several thousand tracks.
+
+`ResolveChapterStopBitOne` decides both from the frame schedule before generation starts, and `BiphaseInjectionManager` passes the result to each `ChapterNumberGenerator` it creates. A CAV track is one frame. On CLV the track counter counts frames, so the 400-track change comes early there and the short-chapter exception is not applied.
 
 ### Encoding Formula
 
-The stop-bit is encoded in the MSB of X₁ in the chapter code `8X₁X₂DDD`:
+The chapter number is two BCD digits (hence the maximum of 79), and the stop-bit is the MSB of X₁ in the chapter code `8X₁X₂DDD`:
 
 ```
-X₁ = (stop_bit << 3) | (chapter_number / 16)
-X₂ = chapter_number % 16
+X₁ = (stop_bit << 3) | (chapter_number / 10)
+X₂ = chapter_number % 10
 ```
 
 For example, chapter 5 with stop-bit = 1:
 - `X₁ = (1<<3) | 0 = 0x8`
 - `X₂ = 5`
 - Code = `0x885DDD`
+
+Chapter 42 with stop-bit = 0 is `0x842DDD`.
 
 The encoder manages this automatically — you only need to specify the chapter number.
 
@@ -664,6 +670,8 @@ Both systems must be configured simultaneously on NTSC discs. They differ in bot
 | Bit cell duration | 2.0 µs ± 0.01 µs | 1.0 µs ± 0.01 µs (IEC 60857 §10.2 — half the biphase cell) |
 | Transition time (10 %–90 %) | 225 ns ± 25 ns | 135 ns ± 15 ns |
 | Modulation | Biphase mark (transition at cell centre) | Pulse-spacing FM (see below) |
+
+Neither cell is a whole number of 4fsc samples (2.0 µs is 35.47 samples on PAL and 28.64 on NTSC). The encoders lay the cells out on the exact time grid and round each cell boundary and centre to the nearest sample (`BitCellStart`/`BitCellCentre`), so every transition is within half a sample of its nominal time and the code does not drift along the line. Individual cells are one sample longer or shorter than the rounded cell length.
 
 ### 40-bit FM Bit Layout
 
@@ -922,7 +930,7 @@ sections:
 
 ### Example 4: Multi-Chapter CAV Disc with Picture Stops
 
-A CAV disc with 4 chapters, each 500 frames long. Chapter 0 is the first chapter after lead-in (stop-bit always 1 by IEC rule); chapters 1–3 follow normal stop-bit behaviour.
+A CAV disc with 4 chapters, each 500 frames long. Every chapter is shorter than 800 tracks, so every chapter code carries stop-bit 1 throughout (IEC rule); chapter 0, the first chapter after lead-in, would do so anyway.
 
 ```yaml
 # Project-wide disc type — applies to every section.
@@ -940,7 +948,7 @@ sections:
         codes:
           - code_type: lead_in
 
-  # Chapter 0: pictures 1–500 (stop-bit = 1 always, per IEC)
+  # Chapter 0: pictures 1–500 (stop-bit = 1 throughout: first after lead-in)
   - name: Ch0
     type: progressive
     source: assets/ch0.mkv
@@ -957,7 +965,7 @@ sections:
           - code_type: programme_status
             programme_status: "0x8DC000"
 
-  # Chapter 1: pictures 501–1000 (stop-bit starts 0, transitions to 1 at track 400)
+  # Chapter 1: pictures 501–1000 (stop-bit = 1 throughout: the disc has chapters < 800 tracks)
   - name: Ch1
     type: progressive
     source: assets/ch1.mkv

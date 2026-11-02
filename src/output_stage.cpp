@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -104,6 +105,16 @@ bool IsNonstandardMappedCode(int mapped_code,
          mapped_code > (profile.maximum_legal_code + 1);
 }
 
+// CVBS_U16_4FSC stores the 10-bit code shifted left 6 bits as an unsigned
+// 16-bit word. Sample buffers are int16_t, so the word's bit pattern is
+// carried in one.
+std::int16_t EncodeU16Word(int code_10bit) {
+  const std::uint16_t word = static_cast<std::uint16_t>(code_10bit << 6);
+  std::int16_t stored = 0;
+  std::memcpy(&stored, &word, sizeof(stored));
+  return stored;
+}
+
 // Encodes one composite (or luma) sample. The composite code mapping also
 // decides whether the sample is outside the legal code range, so the caller
 // passes has_nonstandard here rather than mapping the sample a second time.
@@ -126,6 +137,9 @@ std::int16_t EncodeCompositeSample(OutputSampleEncoding encoding,
     *has_nonstandard = true;
   }
   const int quantized_code = ClampToLegalCodeRange(mapped, profile);
+  if (encoding == OutputSampleEncoding::kCvbsU16) {
+    return EncodeU16Word(quantized_code);
+  }
   if (encoding == OutputSampleEncoding::kCvbsTpg21) {
     const int tpg21_encoded = (quantized_code - 508) * 64;
     return static_cast<std::int16_t>(tpg21_encoded);
@@ -161,6 +175,9 @@ std::int16_t EncodeChromaSample(OutputSampleEncoding encoding,
   const int chroma_code = MapChromaFixedToCode(chroma_mv_fixed, profile);
   const int quantized_code = ClampToLegalCodeRange(chroma_code, profile);
 
+  if (encoding == OutputSampleEncoding::kCvbsU16) {
+    return EncodeU16Word(quantized_code);
+  }
   if (encoding == OutputSampleEncoding::kCvbsTpg21) {
     const int tpg21_encoded = (quantized_code - 508) * 64;
     return static_cast<std::int16_t>(tpg21_encoded);

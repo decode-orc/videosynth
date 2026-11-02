@@ -73,7 +73,8 @@ VideoSynthPipeline::VideoSynthPipeline(IProjectParser* parser,
       dropout_injection_(dropout_injection),
       output_(output),
       logger_(logger),
-      audio_generator_(audio_generator) {}
+      audio_generator_(audio_generator),
+      truth_writer_(logger) {}
 
 bool VideoSynthPipeline::Run(const RunOptions& options,
                              IPipelineObserver* observer,
@@ -183,9 +184,41 @@ bool VideoSynthPipeline::RunProject(const Project& project,
     }
   }
 
+  // The picture truth, when the project asks for it. A failed run removes the
+  // partial truth rather than leave a sidecar describing frames never written.
+  const bool truth_enabled = project.output.truth;
+  if (truth_enabled) {
+    std::vector<std::string> truth_errors;
+    if (!truth_writer_.Begin(project, &truth_errors)) {
+      for (const std::string& error : truth_errors) {
+        logger_->Error(error);
+      }
+      std::vector<std::string> cleanup_errors;
+      output_->FinalizeWrite(&cleanup_errors);
+      return FinishRun(PipelineRunStatus::kFailed);
+    }
+  }
+
   auto CloseOutputSessionOnFailure = [&]() {
     std::vector<std::string> cleanup_errors;
     output_->FinalizeWrite(&cleanup_errors);
+    truth_writer_.Abort();
+  };
+
+  // Writes the truth of the frames just generated, in output order. Returns
+  // false and logs on failure.
+  auto AppendTruthFrames = [&](const std::vector<PictureTruthFrame>& frames,
+                               std::size_t frame_count) -> bool {
+    std::vector<std::string> truth_errors;
+    for (std::size_t i = 0; i < frame_count; ++i) {
+      if (!truth_writer_.AppendFrame(frames[i], &truth_errors)) {
+        for (const std::string& error : truth_errors) {
+          logger_->Error(error);
+        }
+        return false;
+      }
+    }
+    return true;
   };
 
   // -------------------------------------------------------------------
@@ -222,6 +255,7 @@ bool VideoSynthPipeline::RunProject(const Project& project,
   // dropout sidecar. Each abort is a no-op when its session is not open.
   auto CancelRun = [&]() {
     output_->AbortWrite();
+    truth_writer_.Abort();
     if (audio_enabled) {
       audio_generator_->Abort();
     }
@@ -301,9 +335,15 @@ bool VideoSynthPipeline::RunProject(const Project& project,
     auto SynthesizeFrameJob = [&](std::size_t disc_frame,
                                   SynthesizedFrame* out_frame) {
       std::vector<std::string> job_errors;
-      if (!generation_->GenerateFrameBatch(project, schedule, disc_frame, 1U,
-                                           &out_frame->y_mv, &out_frame->c_mv,
-                                           &job_errors)) {
+      const bool generated =
+          truth_enabled
+              ? generation_->GenerateFrameBatchWithTruth(
+                    project, schedule, disc_frame, 1U, &out_frame->y_mv,
+                    &out_frame->c_mv, &out_frame->truth, &job_errors)
+              : generation_->GenerateFrameBatch(project, schedule, disc_frame,
+                                                1U, &out_frame->y_mv,
+                                                &out_frame->c_mv, &job_errors);
+      if (!generated) {
         out_frame->ok = false;
         out_frame->errors = job_errors;
         return;
@@ -317,7 +357,7 @@ bool VideoSynthPipeline::RunProject(const Project& project,
       channel_.ApplyChannel(project, schedule, disc_frame, 1U, &out_frame->y_mv,
                             &out_frame->c_mv);
       chroma_error_.ApplyChromaError(project, schedule, disc_frame, 1U,
-                                     &out_frame->c_mv);
+                                     &out_frame->y_mv, &out_frame->c_mv);
       if (noise_injection_ != nullptr) {
         noise_injection_->InjectNoise(
             project, schedule, disc_frame, 1U,
@@ -348,6 +388,11 @@ bool VideoSynthPipeline::RunProject(const Project& project,
         for (const std::string& error : output_errors) {
           logger_->Error(error);
         }
+        consumer_failed = true;
+        return false;
+      }
+
+      if (truth_enabled && !AppendTruthFrames(frame.truth, 1U)) {
         consumer_failed = true;
         return false;
       }
@@ -399,6 +444,8 @@ bool VideoSynthPipeline::RunProject(const Project& project,
     std::vector<SampleFixed> c_mv;
     // Y before the channel stage, kept only for the shared noise level term.
     std::vector<SampleFixed> pressing_y_mv;
+    // The batch's picture truth, when output.truth is set.
+    std::vector<PictureTruthFrame> truth_frames;
 
     while (processed_frames < total_disc_frames) {
       if (IsCancelled()) {
@@ -409,9 +456,15 @@ bool VideoSynthPipeline::RunProject(const Project& project,
           std::min(batch_frame_count, total_disc_frames - processed_frames);
 
       generation_errors.clear();
-      if (!generation_->GenerateFrameBatch(project, schedule, processed_frames,
-                                           frames_this_batch, &y_mv, &c_mv,
-                                           &generation_errors)) {
+      const bool generated =
+          truth_enabled
+              ? generation_->GenerateFrameBatchWithTruth(
+                    project, schedule, processed_frames, frames_this_batch,
+                    &y_mv, &c_mv, &truth_frames, &generation_errors)
+              : generation_->GenerateFrameBatch(
+                    project, schedule, processed_frames, frames_this_batch,
+                    &y_mv, &c_mv, &generation_errors);
+      if (!generated) {
         CloseOutputSessionOnFailure();
         for (const std::string& error : generation_errors) {
           logger_->Error(error);
@@ -425,7 +478,7 @@ bool VideoSynthPipeline::RunProject(const Project& project,
       channel_.ApplyChannel(project, schedule, processed_frames,
                             frames_this_batch, &y_mv, &c_mv);
       chroma_error_.ApplyChromaError(project, schedule, processed_frames,
-                                     frames_this_batch, &c_mv);
+                                     frames_this_batch, &y_mv, &c_mv);
 
       if (noise_injection_ != nullptr) {
         noise_injection_->InjectNoise(
@@ -444,6 +497,12 @@ bool VideoSynthPipeline::RunProject(const Project& project,
         for (const std::string& error : output_errors) {
           logger_->Error(error);
         }
+        return FinishRun(PipelineRunStatus::kFailed);
+      }
+
+      if (truth_enabled &&
+          !AppendTruthFrames(truth_frames, frames_this_batch)) {
+        CloseOutputSessionOnFailure();
         return FinishRun(PipelineRunStatus::kFailed);
       }
 
@@ -475,6 +534,16 @@ bool VideoSynthPipeline::RunProject(const Project& project,
       logger_->Error(error);
     }
     return FinishRun(PipelineRunStatus::kFailed);
+  }
+
+  if (truth_enabled) {
+    std::vector<std::string> truth_errors;
+    if (!truth_writer_.Finalize(&truth_errors)) {
+      for (const std::string& error : truth_errors) {
+        logger_->Error(error);
+      }
+      return FinishRun(PipelineRunStatus::kFailed);
+    }
   }
 
   if (audio_enabled) {

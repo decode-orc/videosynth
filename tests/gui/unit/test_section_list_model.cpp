@@ -400,6 +400,7 @@ TEST(SectionListModelTest, SectionTemplatesValidateStructurally) {
     project.cvbs_presets.video_standard_preset = standard;
     project.output.video_path = "out/video.cvbs";
     project.output.metadata_path = "out/video.meta";
+    project.laserdisc = MakeLaserdiscParameters();
     project.line_injections = MakeLaserdiscLineInjections(standard);
     project.sections.push_back(MakeLaserdiscLeadInSectionTemplate(standard));
     project.sections.push_back(MakeLaserdiscProgrammeSectionTemplate(standard));

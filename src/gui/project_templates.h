@@ -59,16 +59,21 @@ std::string FilmBundledSource();
 // the default name ("Film <ordinal>"); `standard` must be NTSC or PAL-M.
 Section MakeFilmSectionTemplate(int ordinal, Standard standard);
 
-// Project-wide line_injections for a laserdisc project: the CAV disc format
-// and, for NTSC/PAL-M, the mandatory virs VITS colour reference
-// (IEC 60857 §9.1.3). Pair this with the laserdisc section templates below,
-// whose sections carry only their per-section biphase codes.
+// The project-wide laserdisc block of a new laserdisc project: enabled, with
+// the CAV disc format. Pair it with MakeLaserdiscLineInjections and the
+// laserdisc section templates below, whose sections carry only their disc
+// area and per-section biphase codes.
+LaserdiscParameters MakeLaserdiscParameters();
+
+// Project-wide line_injections for a laserdisc project: for NTSC/PAL-M, the
+// mandatory virs VITS colour reference (IEC 60857 §9.1.3); empty for PAL.
 ProjectLineInjections MakeLaserdiscLineInjections(Standard standard);
 
 // Laserdisc section templates modelled on the projects/ fixtures. Each carries
-// laserdisc code injection IEC 60856/60857 expects for its section type; NTSC
-// and PAL-M additionally get the mandatory FM white flag. The disc format and
-// VITS set are project-wide (see MakeLaserdiscLineInjections). Durations
+// the disc area and the laserdisc code injection IEC 60856/60857 expects for
+// it; NTSC and PAL-M additionally get the mandatory FM white flag. The disc
+// format and VITS set are project-wide (see MakeLaserdiscParameters and
+// MakeLaserdiscLineInjections). Durations
 // default to the IEC track-pitch minimums the validator checks (lead-in 938,
 // lead-out 1250).
 Section MakeLaserdiscLeadInSectionTemplate(Standard standard);

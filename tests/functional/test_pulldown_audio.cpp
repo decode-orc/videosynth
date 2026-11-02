@@ -137,8 +137,8 @@ TEST(PulldownAudioTest, FilmSoundtrackPlaysUnbrokenAtBothSampleRates) {
   project.cvbs_presets.sample_encoding_preset = "CVBS_U10_4FSC";
   project.cvbs_presets.signal_state_preset = "STANDARD_STABLE_LOCKED";
   project.output.video_path = (ScratchDirectory() / "film.cvbs").string();
-  project.output.efm_audio.enabled = true;
-  project.output.efm_audio.pair = 0;
+  project.laserdisc.efm_audio.enabled = true;
+  project.laserdisc.efm_audio.pair = 0;
 
   Section section;
   section.name = "Film";

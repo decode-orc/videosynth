@@ -264,6 +264,13 @@ void BiphaseInjectionManager::Reset() {
   previous_field_started_picture_ = false;
   last_picture_number_ = 0;
   fm_shown_value_ = -1;
+  chapter_stop_bit_one_.clear();
+  chapters_started_ = 0;
+}
+
+void BiphaseInjectionManager::SetChapterStopBitOne(
+    std::vector<bool> chapter_stop_bit_one) {
+  chapter_stop_bit_one_ = std::move(chapter_stop_bit_one);
 }
 
 void BiphaseInjectionManager::SetInitialFrameCount(int initial_count) {
@@ -644,14 +651,16 @@ bool BiphaseInjectionManager::InitializeSection(
         // resetting the IEC 60856/60857 §10.1.5 stop-bit track counter for
         // the new chapter, overriding any continued chapter.
         generators_["chapter_number"] =
-            std::make_unique<ChapterNumberGenerator>(code.chapter);
+            std::make_unique<ChapterNumberGenerator>(code.chapter,
+                                                     NextChapterStopBitOne());
       } else if (generators_.find("chapter_number") == generators_.end()) {
         // No chapter carried over from an earlier section (this is the first
         // section to carry a chapter): begin at 0. When a chapter was
         // preserved above, leave it running so the chapter number and its
         // stop-bit state continue across the boundary.
         generators_["chapter_number"] =
-            std::make_unique<ChapterNumberGenerator>(0);
+            std::make_unique<ChapterNumberGenerator>(0,
+                                                     NextChapterStopBitOne());
       }
 
     } else if (code.code_type == "programme_status") {
@@ -715,6 +724,11 @@ bool BiphaseInjectionManager::InitializeSection(
   return true;
 }
 
+bool BiphaseInjectionManager::NextChapterStopBitOne() {
+  const std::size_t index = chapters_started_++;
+  return index < chapter_stop_bit_one_.size() && chapter_stop_bit_one_[index];
+}
+
 void BiphaseInjectionManager::AdvanceGenerators(bool pictures_advanced) {
   for (auto& [code_type, gen] : generators_) {
     if (pictures_advanced && code_type == "picture_number") {
@@ -725,6 +739,55 @@ void BiphaseInjectionManager::AdvanceGenerators(bool pictures_advanced) {
   if (fm_programme_time_generator_) {
     fm_programme_time_generator_->Advance(section_type_);
   }
+}
+
+std::vector<bool> ResolveChapterStopBitOne(
+    const std::vector<ScheduledSectionSpan>& spans, DiscType disc_type) {
+  struct Chapter {
+    bool after_lead_in = false;
+    int frames = 0;
+  };
+  std::vector<Chapter> chapters;
+  bool previous_was_lead_in = false;
+  for (const ScheduledSectionSpan& span : spans) {
+    if (span.section == nullptr) {
+      continue;
+    }
+    const Section::LineInjectionCode* chapter_code = nullptr;
+    for (const Section::LineInjection& injection :
+         span.section->line_injections) {
+      if (Lowercase(injection.type) != "laserdisc") {
+        continue;
+      }
+      for (const Section::LineInjectionCode& code : injection.codes) {
+        if (code.code_type == "chapter_number") {
+          chapter_code = &code;
+        }
+      }
+    }
+    if (chapter_code != nullptr) {
+      if (chapters.empty() || chapter_code->chapter_specified) {
+        chapters.push_back({.after_lead_in = previous_was_lead_in});
+      }
+      chapters.back().frames += span.frames;
+    }
+    previous_was_lead_in = span.section->section_type == SectionType::kLeadIn;
+  }
+
+  bool short_chapter = false;
+  if (disc_type == DiscType::kCAV) {
+    for (const Chapter& chapter : chapters) {
+      short_chapter =
+          short_chapter ||
+          chapter.frames < ChapterNumberGenerator::kShortChapterTracks;
+    }
+  }
+  std::vector<bool> stop_bit_one;
+  stop_bit_one.reserve(chapters.size());
+  for (const Chapter& chapter : chapters) {
+    stop_bit_one.push_back(short_chapter || chapter.after_lead_in);
+  }
+  return stop_bit_one;
 }
 
 CodeGenerator* BiphaseInjectionManager::GetGenerator(

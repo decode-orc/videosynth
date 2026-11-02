@@ -1,0 +1,27 @@
+project:
+  name: NTSCZonePlatesFixture
+  version: "1.0"
+  description: >-
+    Static NTSC luma and chroma zone plates, band-limited and written with
+    their picture truth
+
+cvbs_presets:
+  video_standard_preset: NTSC
+  sample_encoding_preset: CVBS_TPG21_4FSC
+  signal_state_preset: STANDARD_STABLE_LOCKED
+
+output:
+  video_path: "{output}/videosynth_ntsc_zone_plates.cvbs"
+  truth: true
+
+sections:
+  - name: NtscLumaZonePlate
+    type: progressive
+    source: "{bundled}/exr/720x486/LUMA_ZONE_PLATE.exr"
+    duration_frames: 4
+    horizontal_resample: bandlimited
+  - name: NtscChromaZonePlate
+    type: progressive
+    source: "{bundled}/exr/720x486/CHROMA_ZONE_PLATE.exr"
+    duration_frames: 4
+    horizontal_resample: bandlimited

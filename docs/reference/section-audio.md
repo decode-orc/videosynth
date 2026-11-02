@@ -117,7 +117,7 @@ Every track is stereo, 24-bit signed little-endian PCM (RIFF/WAVE, format tag `0
 
 Sample counts follow the **output** frame stream whatever a pair carries, so alignment holds regardless of what the sections do. Each contiguous run of frames sharing one section starts afresh: tone oscillators restart at phase 0, and an audio file plays from its start. A video soundtrack is placed by source frame instead (see [`video_audio`](#video_audio)).
 
-When the pair is also encoded as [EFM digital audio](output.md#efm_audio), file and video audio are read a second time at 44.1 kHz for that stream.
+When the pair is also encoded as [EFM digital audio](laserdisc.md#efm_audio), file and video audio are read a second time at 44.1 kHz for that stream.
 
 ## Output
 
@@ -129,7 +129,7 @@ where `<basename>` is `output.video_path` with its trailing `.cvbs` or `.cvbsy` 
 
 When at least one pair is declared, one `audio_channel_pair` row per pair — with its `description` — is written to the `.meta` sidecar.
 
-To additionally encode one pair as laserdisc EFM digital audio, see [`output.efm_audio`](output.md#efm_audio).
+To additionally encode one pair as laserdisc EFM digital audio, see [`laserdisc.efm_audio`](laserdisc.md#efm_audio).
 
 ## Example
 

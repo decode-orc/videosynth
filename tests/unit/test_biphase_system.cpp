@@ -112,24 +112,29 @@ TEST(BiphaseSystemTest, NtscBitCellIs29Samples) {
 }
 
 TEST(BiphaseSystemTest, PalBitCellDurationIsWithinIecTolerance) {
-  // IEC 60856: bit cell = 2.0 µs ± 0.01 µs (spec target).
-  // At PAL 4fsc (17734475 Hz), sample spacing = 0.056 µs, so the rounded
-  // sample count deviates by at most half a sample (≈ 0.028 µs).
-  // Use half-sample tolerance as the best achievable at this rate.
+  // IEC 60856: bit cell = 2.0 µs ± 0.01 µs. Cells are laid out on the exact
+  // grid, so the mean cell over a code is 2.0 µs to within half a sample
+  // spread over 24 cells, and no cell boundary is more than half a sample
+  // from its nominal time.
   const BiphaseEncoder enc(kPalSampleRate);
-  const double cell_us =
-      static_cast<double>(enc.bit_cell_samples()) / kPalSampleRate * 1.0e6;
-  constexpr double kHalfSampleUs = 1.0e6 / (2.0 * kPalSampleRate);
-  EXPECT_NEAR(cell_us, 2.0, kHalfSampleUs);
+  const double mean_cell_us =
+      static_cast<double>(enc.BitCellStart(24)) / 24.0 / kPalSampleRate * 1.0e6;
+  EXPECT_NEAR(mean_cell_us, 2.0, 0.01);
+  for (int k = 0; k <= 24; ++k) {
+    EXPECT_LE(std::abs(enc.BitCellStart(k) - k * 2.0e-6 * kPalSampleRate), 0.5)
+        << "Boundary " << k;
+  }
 }
 
 TEST(BiphaseSystemTest, NtscBitCellDurationIsWithinIecTolerance) {
-  // At NTSC 4fsc (14318180 Hz), sample spacing = 0.070 µs.
   const BiphaseEncoder enc(kNtscSampleRate);
-  const double cell_us =
-      static_cast<double>(enc.bit_cell_samples()) / kNtscSampleRate * 1.0e6;
-  constexpr double kHalfSampleUs = 1.0e6 / (2.0 * kNtscSampleRate);
-  EXPECT_NEAR(cell_us, 2.0, kHalfSampleUs);
+  const double mean_cell_us = static_cast<double>(enc.BitCellStart(24)) / 24.0 /
+                              kNtscSampleRate * 1.0e6;
+  EXPECT_NEAR(mean_cell_us, 2.0, 0.01);
+  for (int k = 0; k <= 24; ++k) {
+    EXPECT_LE(std::abs(enc.BitCellStart(k) - k * 2.0e-6 * kNtscSampleRate), 0.5)
+        << "Boundary " << k;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -286,7 +291,7 @@ TEST(BiphaseSystemTest, FmWaveformIs40BitCells) {
   const FmData data{false, 0, 0, 0, 0, 0};
   const auto samples =
       enc.Generate40BitWaveform(data, kNtscBaseline, kNtscPeak);
-  EXPECT_EQ(static_cast<int>(samples.size()), 40 * enc.bit_cell_samples());
+  EXPECT_EQ(static_cast<int>(samples.size()), enc.BitCellStart(40));
 }
 
 TEST(BiphaseSystemTest, FmLineBufferHasCorrectLength) {
@@ -328,7 +333,7 @@ TEST(BiphaseSystemTest, PalLeadInLineContainsCode88FFFFAtStart) {
       enc.GenerateLine("88FFFF", Standard::kPal, kPalBaseline, kPalPeak);
   const auto code = enc.Generate24BitCode(0x88FFFFu, kPalBaseline, kPalPeak);
 
-  // The first 24 * bit_cell_samples samples must match the code waveform.
+  // The first BitCellStart(24) samples must match the code waveform.
   for (std::size_t i = 0; i < code.size(); ++i) {
     EXPECT_EQ(line[i], code[i])
         << "Mismatch at sample " << i << " in PAL lead-in line";
@@ -340,8 +345,7 @@ TEST(BiphaseSystemTest, PalLeadInLineTailIsAtBaseline) {
   const auto line =
       enc.GenerateLine("88FFFF", Standard::kPal, kPalBaseline, kPalPeak);
 
-  const std::size_t code_end =
-      std::size_t{24} * static_cast<std::size_t>(enc.bit_cell_samples());
+  const std::size_t code_end = static_cast<std::size_t>(enc.BitCellStart(24));
   for (std::size_t i = code_end; i < line.size(); ++i) {
     EXPECT_NEAR(SampleFixedToMillivolts(line[i]), kPalBaseline, 0.01)
         << "PAL lead-in tail sample " << i << " should be at baseline";
@@ -367,16 +371,18 @@ TEST(BiphaseSystemTest, NtscLeadOutLineContainsCode80EEEEAtStart) {
 TEST(BiphaseSystemTest, Pal24BitCodeHas24BitCells) {
   const BiphaseEncoder enc(kPalSampleRate);
   const auto samples = enc.Generate24BitCode(0x88FFFFu, kPalBaseline, kPalPeak);
-  EXPECT_EQ(static_cast<int>(samples.size()), 24 * enc.bit_cell_samples());
-  EXPECT_EQ(static_cast<int>(samples.size()), 24 * 35);  // = 840 samples
+  EXPECT_EQ(static_cast<int>(samples.size()), enc.BitCellStart(24));
+  // 24 × 35.469 = 851.27 samples, rounded.
+  EXPECT_EQ(static_cast<int>(samples.size()), 851);
 }
 
 TEST(BiphaseSystemTest, Ntsc24BitCodeHas24BitCells) {
   const BiphaseEncoder enc(kNtscSampleRate);
   const auto samples =
       enc.Generate24BitCode(0x80EEEEu, kNtscBaseline, kNtscPeak);
-  EXPECT_EQ(static_cast<int>(samples.size()), 24 * enc.bit_cell_samples());
-  EXPECT_EQ(static_cast<int>(samples.size()), 24 * 29);  // = 696 samples
+  EXPECT_EQ(static_cast<int>(samples.size()), enc.BitCellStart(24));
+  // 24 × 28.636 = 687.27 samples, rounded.
+  EXPECT_EQ(static_cast<int>(samples.size()), 687);
 }
 
 // ---------------------------------------------------------------------------

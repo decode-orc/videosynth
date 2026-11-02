@@ -85,7 +85,8 @@ Project MakeFixedSeedProject(const std::filesystem::path& output_dir,
       (output_dir / ("gui_parity_" + run_tag + ".cvbs")).string();
   project.output.metadata_path =
       (output_dir / ("gui_parity_" + run_tag + ".meta")).string();
-  project.line_injections.disc_type = "CAV";
+  project.laserdisc.enabled = true;
+  project.laserdisc.disc_type = "CAV";
 
   Section programme;
   programme.name = "Programme";

@@ -14,6 +14,8 @@
 #include <vector>
 
 #include "project_settings_presenter.h"
+#include "project_templates.h"
+#include "section_block_presenters.h"
 #include "videosynth/model.h"
 #include "videosynth/project_validator.h"
 #include "videosynth/yaml_project_emitter.h"
@@ -94,12 +96,10 @@ TEST(ProjectSettingsPresenterTest, NormalizeAppliesSecamSignalStateAndFlags) {
   CvbsPresets presets;
   presets.video_standard_preset = Standard::kSecam;
   presets.signal_state_preset = "STANDARD_STABLE_LOCKED";
-  presets.pal_laserdisc_pilot_burst = true;
   presets.secam_field_identification = false;
 
   const CvbsPresets secam = NormalizeCvbsPresetsForStandard(presets);
   EXPECT_EQ(secam.signal_state_preset, "STANDARD_STABLE_UNLOCKED");
-  EXPECT_FALSE(secam.pal_laserdisc_pilot_burst);
   EXPECT_FALSE(secam.secam_field_identification);
 
   presets.video_standard_preset = Standard::kPal;
@@ -132,20 +132,14 @@ TEST(ProjectSettingsPresenterTest, SampleEncodingOptionsMirrorSupportedSet) {
 TEST(ProjectSettingsPresenterTest, NormalizeClearsFlagsForeignToStandard) {
   CvbsPresets presets;
   presets.video_standard_preset = Standard::kNtsc;
-  presets.pal_laserdisc_pilot_burst = true;  // PAL-only flag.
-  presets.ntsc_laserdisc_vbi_burst = true;
   presets.ntsc_black_setup_ire = 0.0;
   presets.ntsc_black_setup_ire_specified = true;
 
   const CvbsPresets ntsc = NormalizeCvbsPresetsForStandard(presets);
-  EXPECT_FALSE(ntsc.pal_laserdisc_pilot_burst);
-  EXPECT_TRUE(ntsc.ntsc_laserdisc_vbi_burst);
   EXPECT_TRUE(ntsc.ntsc_black_setup_ire_specified);
 
   presets.video_standard_preset = Standard::kPal;
   const CvbsPresets pal = NormalizeCvbsPresetsForStandard(presets);
-  EXPECT_TRUE(pal.pal_laserdisc_pilot_burst);
-  EXPECT_FALSE(pal.ntsc_laserdisc_vbi_burst);
   EXPECT_FALSE(pal.ntsc_black_setup_ire_specified);
   EXPECT_EQ(pal.ntsc_black_setup_ire, 7.5);
 }
@@ -159,7 +153,6 @@ TEST(ProjectSettingsPresenterTest, NormalizedPresetsPassValidatorFlagRules) {
     CvbsPresets presets = project.cvbs_presets;
     presets.signal_state_preset = "NOT_A_STATE";
     presets.secam_field_identification = false;
-    presets.pal_laserdisc_pilot_burst = true;
     presets.ntsc_black_setup_ire_specified = true;
     presets.ntsc_black_setup_ire = 7.5;
     project.cvbs_presets = NormalizeCvbsPresetsForStandard(presets);
@@ -167,8 +160,6 @@ TEST(ProjectSettingsPresenterTest, NormalizedPresetsPassValidatorFlagRules) {
     ProjectValidator validator;
     const ValidationResult result = validator.Validate(project);
     for (const std::string& error : result.errors) {
-      EXPECT_EQ(error.find("pal_laserdisc_pilot_burst"), std::string::npos)
-          << error;
       EXPECT_EQ(error.find("ntsc_black_setup_ire"), std::string::npos) << error;
       EXPECT_EQ(error.find("signal_state_preset"), std::string::npos) << error;
     }
@@ -248,8 +239,9 @@ TEST(ProjectSettingsPresenterTest, EfmPairOptionsCoverEveryChannelPair) {
 
 TEST(ProjectSettingsPresenterTest, EfmStatusActiveWhenPairDeclared) {
   Project project = MakeProjectWithAudioPair(Standard::kNtsc, 3);
-  project.output.efm_audio.enabled = true;
-  project.output.efm_audio.pair = 3;
+  project.laserdisc.enabled = true;
+  project.laserdisc.efm_audio.enabled = true;
+  project.laserdisc.efm_audio.pair = 3;
 
   const ProjectSettingsFormState state = BuildProjectSettingsFormState(project);
   EXPECT_TRUE(state.efm_pair_editable);
@@ -260,8 +252,9 @@ TEST(ProjectSettingsPresenterTest, EfmStatusActiveWhenPairDeclared) {
 
 TEST(ProjectSettingsPresenterTest, EfmStatusReportsUndeclaredPair) {
   Project project = MakeProjectWithAudioPair(Standard::kPal, 0);
-  project.output.efm_audio.enabled = true;
-  project.output.efm_audio.pair = 4;
+  project.laserdisc.enabled = true;
+  project.laserdisc.efm_audio.enabled = true;
+  project.laserdisc.efm_audio.pair = 4;
 
   EXPECT_EQ(BuildProjectSettingsFormState(project).efm_status,
             EfmOutputStatus::kPairNotDeclared);
@@ -270,8 +263,9 @@ TEST(ProjectSettingsPresenterTest, EfmStatusReportsUndeclaredPair) {
 
 TEST(ProjectSettingsPresenterTest, EfmStatusReportsPairOutOfRange) {
   Project project = MakeProjectWithAudioPair(Standard::kPal, 0);
-  project.output.efm_audio.enabled = true;
-  project.output.efm_audio.pair = kMaxAudioChannelPairs;
+  project.laserdisc.enabled = true;
+  project.laserdisc.efm_audio.enabled = true;
+  project.laserdisc.efm_audio.pair = kMaxAudioChannelPairs;
 
   EXPECT_EQ(BuildProjectSettingsFormState(project).efm_status,
             EfmOutputStatus::kPairOutOfRange);
@@ -284,7 +278,8 @@ TEST(ProjectSettingsPresenterTest, EfmAvailableForPalM) {
   Project project = MakeProjectWithAudioPair(Standard::kPalM, 0);
   EXPECT_TRUE(BuildProjectSettingsFormState(project).efm_output_editable);
 
-  project.output.efm_audio.enabled = true;
+  project.laserdisc.enabled = true;
+  project.laserdisc.efm_audio.enabled = true;
   EXPECT_EQ(BuildProjectSettingsFormState(project).efm_status,
             EfmOutputStatus::kActive);
 }
@@ -293,29 +288,48 @@ TEST(ProjectSettingsPresenterTest, EfmUnavailableForSecam) {
   Project project = MakeProjectWithAudioPair(Standard::kSecam, 0);
   EXPECT_FALSE(BuildProjectSettingsFormState(project).efm_output_editable);
 
-  project.output.efm_audio.enabled = true;
+  project.laserdisc.enabled = true;
+  project.laserdisc.efm_audio.enabled = true;
   const ProjectSettingsFormState state = BuildProjectSettingsFormState(project);
   EXPECT_FALSE(state.efm_pair_editable);
   EXPECT_EQ(state.efm_status, EfmOutputStatus::kUnsupportedStandard);
 }
 
-TEST(ProjectSettingsPresenterTest, NormalizeOutputClearsEfmForeignToStandard) {
-  OutputTargets output;
-  output.efm_audio.enabled = true;
-  output.efm_audio.pair = 2;
+TEST(ProjectSettingsPresenterTest, NormalizeLaserdiscClearsEfmForeignToStd) {
+  LaserdiscParameters laserdisc;
+  laserdisc.enabled = true;
+  laserdisc.efm_audio.enabled = true;
+  laserdisc.efm_audio.pair = 2;
 
   for (const Standard standard :
        {Standard::kPal, Standard::kNtsc, Standard::kPalM}) {
-    const OutputTargets kept =
-        NormalizeOutputTargetsForStandard(output, standard);
+    const LaserdiscParameters kept =
+        NormalizeLaserdiscForStandard(laserdisc, standard);
     EXPECT_TRUE(kept.efm_audio.enabled);
     EXPECT_EQ(kept.efm_audio.pair, 2);
   }
 
-  const OutputTargets cleared =
-      NormalizeOutputTargetsForStandard(output, Standard::kSecam);
+  const LaserdiscParameters cleared =
+      NormalizeLaserdiscForStandard(laserdisc, Standard::kSecam);
   EXPECT_FALSE(cleared.efm_audio.enabled);
   EXPECT_EQ(cleared.efm_audio.pair, 0);
+}
+
+TEST(ProjectSettingsPresenterTest, TruthIsOfferedForQuadratureStandardsOnly) {
+  OutputTargets output;
+  output.truth = true;
+  for (const Standard standard :
+       {Standard::kPal, Standard::kNtsc, Standard::kPalM}) {
+    EXPECT_TRUE(NormalizeOutputTargetsForStandard(output, standard).truth);
+    Project project;
+    project.cvbs_presets.video_standard_preset = standard;
+    EXPECT_TRUE(BuildProjectSettingsFormState(project).truth_editable);
+  }
+  EXPECT_FALSE(
+      NormalizeOutputTargetsForStandard(output, Standard::kSecam).truth);
+  Project secam;
+  secam.cvbs_presets.video_standard_preset = Standard::kSecam;
+  EXPECT_FALSE(BuildProjectSettingsFormState(secam).truth_editable);
 }
 
 // Normalized output targets must never trip the validator's standard rule for
@@ -324,14 +338,15 @@ TEST(ProjectSettingsPresenterTest, NormalizedOutputPassesValidatorEfmRule) {
   for (const Standard standard :
        {Standard::kPal, Standard::kNtsc, Standard::kPalM, Standard::kSecam}) {
     Project project = MakeProjectWithAudioPair(standard, 0);
-    project.output.efm_audio.enabled = true;
-    project.output =
-        NormalizeOutputTargetsForStandard(project.output, standard);
+    project.laserdisc.enabled = true;
+    project.laserdisc.efm_audio.enabled = true;
+    project.laserdisc =
+        NormalizeLaserdiscForStandard(project.laserdisc, standard);
 
     ProjectValidator validator;
     const ValidationResult result = validator.Validate(project);
     for (const std::string& error : result.errors) {
-      EXPECT_EQ(error.find("output.efm_audio"), std::string::npos) << error;
+      EXPECT_EQ(error.find("laserdisc"), std::string::npos) << error;
     }
   }
 }
@@ -378,16 +393,13 @@ TEST(ProjectSettingsPresenterTest, ChannelEnableHelpersSeedValidBlocks) {
   EXPECT_EQ(RoundTrip(project), project);
 
   SetEdgeSmearEnabled(&project.channel, true);
-  SetFmBeatEnabled(&project.channel, true);
   project.channel.timing_offset_samples = -0.3;
   EXPECT_TRUE(project.channel.edge_smear.enabled);
-  EXPECT_TRUE(project.channel.fm_beat.enabled);
   EXPECT_TRUE(IsValid(project));
   EXPECT_EQ(RoundTrip(project), project);
 
-  SetFmBeatEnabled(&project.channel, false);
-  EXPECT_EQ(project.channel.fm_beat, FmBeatParameters{});
-  EXPECT_TRUE(project.channel.edge_smear.enabled);
+  SetEdgeSmearEnabled(&project.channel, false);
+  EXPECT_EQ(project.channel.edge_smear, EdgeSmearParameters{});
   SetChannelEnabled(&project.channel, false);
   EXPECT_EQ(project.channel, ChannelParameters{});
   EXPECT_EQ(YamlProjectEmitter().EmitString(project).find("channel:"),
@@ -398,10 +410,29 @@ TEST(ProjectSettingsPresenterTest, ChannelSubBlockEnablesTheChannel) {
   ChannelParameters channel;
   SetEdgeSmearEnabled(&channel, true);
   EXPECT_TRUE(channel.enabled);
-  channel = ChannelParameters{};
-  SetFmBeatEnabled(&channel, true);
-  EXPECT_TRUE(channel.enabled);
-  EXPECT_EQ(channel.fm_beat.carrier_black_hz, kFmBeatCarrierBlackDefaultHz);
+}
+
+TEST(ProjectSettingsPresenterTest, LaserdiscSubBlockEnablesItsParents) {
+  LaserdiscParameters laserdisc;
+  SetFmBeatEnabled(&laserdisc, true);
+  EXPECT_TRUE(laserdisc.enabled);
+  EXPECT_TRUE(laserdisc.channel.enabled);
+  EXPECT_EQ(laserdisc.channel.fm_beat.carrier_black_hz,
+            kFmBeatCarrierBlackDefaultHz);
+
+  for (const auto enable :
+       {+[](LaserdiscParameters* l) {
+          SetGroupDelayEnabled(l, true, Standard::kPal);
+        },
+        +[](LaserdiscParameters* l) { SetField2OffsetEnabled(l, true); },
+        +[](LaserdiscParameters* l) {
+          SetReplayResponseMode(l, ReplayResponseMode::kFixed);
+        }}) {
+    LaserdiscParameters fresh;
+    enable(&fresh);
+    EXPECT_TRUE(fresh.enabled);
+    EXPECT_TRUE(fresh.channel.enabled);
+  }
 }
 
 TEST(ProjectSettingsPresenterTest, ReEnablingKeepsEditedValues) {
@@ -440,29 +471,51 @@ TEST(ProjectSettingsPresenterTest, ChromaErrorEnableHelpersSeedValidBlocks) {
   }
 }
 
-TEST(ProjectSettingsPresenterTest, NormalizeClearsFmBeatOutsidePal) {
-  ChannelParameters channel;
-  SetEdgeSmearEnabled(&channel, true);
-  SetFmBeatEnabled(&channel, true);
-  EXPECT_EQ(NormalizeChannelForStandard(channel, Standard::kPal), channel);
-  for (const Standard standard :
-       {Standard::kNtsc, Standard::kPalM, Standard::kSecam}) {
-    const ChannelParameters normalized =
-        NormalizeChannelForStandard(channel, standard);
-    EXPECT_FALSE(normalized.fm_beat.enabled);
-    EXPECT_TRUE(normalized.edge_smear.enabled);
+TEST(ProjectSettingsPresenterTest, NormalizeLaserdiscClearsForeignFeatures) {
+  LaserdiscParameters laserdisc = MakeLaserdiscParameters();
+  laserdisc.pilot_burst = true;
+  laserdisc.vbi_burst = true;
+  SetFmBeatEnabled(&laserdisc, true);
+  SetGroupDelayEnabled(&laserdisc, true, Standard::kPal);
+  SetField2OffsetEnabled(&laserdisc, true);
+
+  const LaserdiscParameters pal =
+      NormalizeLaserdiscForStandard(laserdisc, Standard::kPal);
+  EXPECT_TRUE(pal.pilot_burst);
+  EXPECT_FALSE(pal.vbi_burst);
+  EXPECT_TRUE(pal.channel.fm_beat.enabled);
+  EXPECT_EQ(pal.channel.group_delay.preset, GroupDelayPreset::kIec60856Nominal);
+
+  for (const Standard standard : {Standard::kNtsc, Standard::kPalM}) {
+    SCOPED_TRACE(StandardToString(standard));
+    const LaserdiscParameters normalized =
+        NormalizeLaserdiscForStandard(laserdisc, standard);
     EXPECT_TRUE(normalized.enabled);
+    EXPECT_FALSE(normalized.pilot_burst);
+    EXPECT_EQ(normalized.vbi_burst, standard == Standard::kNtsc);
+    EXPECT_FALSE(normalized.channel.fm_beat.enabled);
+    // The nominal preset is PAL-only; its curve carries over as a custom one.
+    EXPECT_TRUE(normalized.channel.group_delay.enabled);
+    EXPECT_EQ(normalized.channel.group_delay.preset, GroupDelayPreset::kCustom);
+    EXPECT_EQ(normalized.channel.group_delay.points_ns,
+              Iec60856NominalGroupDelay());
+    EXPECT_TRUE(normalized.channel.field2_offset.enabled);
     Project project = MakeProject(standard);
-    project.cvbs_presets =
-        NormalizeCvbsPresetsForStandard(project.cvbs_presets);
-    project.channel = normalized;
-    EXPECT_TRUE(IsValid(project)) << StandardToString(standard);
+    project.laserdisc = normalized;
+    project.line_injections = MakeLaserdiscLineInjections(standard);
+    const ValidationResult result = ProjectValidator().Validate(project);
+    EXPECT_TRUE(result.is_valid)
+        << (result.errors.empty() ? "" : result.errors.front());
   }
+
+  EXPECT_EQ(NormalizeLaserdiscForStandard(laserdisc, Standard::kSecam),
+            LaserdiscParameters{});
 }
 
 TEST(ProjectSettingsPresenterTest, NormalizeClearsChromaErrorForSecam) {
   ChromaErrorParameters chroma_error;
   SetChromaErrorEnabled(&chroma_error, true);
+  SetCrosstalkEnabled(&chroma_error, true);
   EXPECT_EQ(NormalizeChromaErrorForStandard(chroma_error, Standard::kNtsc),
             chroma_error);
   EXPECT_EQ(NormalizeChromaErrorForStandard(chroma_error, Standard::kSecam),
@@ -473,7 +526,6 @@ TEST(ProjectSettingsPresenterTest, ChannelLimitsMirrorValidator) {
   namespace limits = project_editor_limits;
   Project project = MakeProject(Standard::kPal);
   SetEdgeSmearEnabled(&project.channel, true);
-  SetFmBeatEnabled(&project.channel, true);
   ChannelParameters& channel = project.channel;
   const auto check = [&](double* field, double low, double high,
                          bool low_inclusive) {
@@ -496,11 +548,6 @@ TEST(ProjectSettingsPresenterTest, ChannelLimitsMirrorValidator) {
         false);
   channel.edge_smear.tau_samples = limits::kEdgeSmearTauMinSamples;
   EXPECT_TRUE(IsValid(project));
-  channel.edge_smear.tau_samples = 3.0;
-  check(&channel.fm_beat.carrier_black_hz, limits::kFmBeatCarrierMinHz,
-        limits::kFmBeatCarrierMaxHz, true);
-  check(&channel.fm_beat.level_db, limits::kFmBeatLevelMinDb,
-        limits::kFmBeatLevelMaxDb, true);
 }
 
 TEST(ProjectSettingsPresenterTest, ChromaErrorLimitsMirrorValidator) {
@@ -526,6 +573,319 @@ TEST(ProjectSettingsPresenterTest, ChromaErrorLimitsMirrorValidator) {
   check(&chroma_error.line_jitter.phase_deg, 0.0,
         limits::kChromaJitterPhaseMaxDeg);
   check(&chroma_error.line_jitter.gain, 0.0, limits::kChromaJitterGainMax);
+}
+
+TEST(ProjectSettingsPresenterTest, LaserdiscIsNotOfferedForSecam) {
+  for (const Standard standard :
+       {Standard::kPal, Standard::kNtsc, Standard::kPalM}) {
+    EXPECT_TRUE(
+        BuildProjectSettingsFormState(MakeProject(standard)).laserdisc_editable)
+        << StandardToString(standard);
+  }
+  EXPECT_FALSE(BuildProjectSettingsFormState(MakeProject(Standard::kSecam))
+                   .laserdisc_editable);
+}
+
+TEST(ProjectSettingsPresenterTest, NominalGroupDelayIsOfferedForPalOnly) {
+  EXPECT_TRUE(BuildProjectSettingsFormState(MakeProject(Standard::kPal))
+                  .group_delay_nominal_editable);
+  for (const Standard standard :
+       {Standard::kNtsc, Standard::kPalM, Standard::kSecam}) {
+    EXPECT_FALSE(BuildProjectSettingsFormState(MakeProject(standard))
+                     .group_delay_nominal_editable)
+        << StandardToString(standard);
+  }
+}
+
+TEST(ProjectSettingsPresenterTest, CrosstalkAlternationFollowsPalSwitch) {
+  for (const Standard standard : {Standard::kPal, Standard::kPalM}) {
+    EXPECT_TRUE(BuildProjectSettingsFormState(MakeProject(standard))
+                    .crosstalk_alternate_editable)
+        << StandardToString(standard);
+  }
+  EXPECT_FALSE(BuildProjectSettingsFormState(MakeProject(Standard::kNtsc))
+                   .crosstalk_alternate_editable);
+
+  ChromaErrorParameters chroma_error;
+  SetCrosstalkEnabled(&chroma_error, true);
+  chroma_error.crosstalk.alternate_with_switch = true;
+  EXPECT_TRUE(NormalizeChromaErrorForStandard(chroma_error, Standard::kPalM)
+                  .crosstalk.alternate_with_switch);
+  const ChromaErrorParameters ntsc =
+      NormalizeChromaErrorForStandard(chroma_error, Standard::kNtsc);
+  EXPECT_FALSE(ntsc.crosstalk.alternate_with_switch);
+  EXPECT_TRUE(ntsc.crosstalk.enabled);
+  Project project = MakeProject(Standard::kNtsc);
+  project.chroma_error = ntsc;
+  EXPECT_TRUE(IsValid(project));
+}
+
+TEST(ProjectSettingsPresenterTest, LaserdiscEnableHelpersSeedValidBlocks) {
+  Project project = MakeProject(Standard::kPal);
+  SetLaserdiscEnabled(&project.laserdisc, true);
+  EXPECT_TRUE(project.laserdisc.enabled);
+  EXPECT_TRUE(IsValid(project));
+  EXPECT_EQ(RoundTrip(project), project);
+
+  SetLaserdiscChannelEnabled(&project.laserdisc, true);
+  SetFmBeatEnabled(&project.laserdisc, true);
+  SetGroupDelayEnabled(&project.laserdisc, true, Standard::kPal);
+  SetField2OffsetEnabled(&project.laserdisc, true);
+  SetReplayResponseMode(&project.laserdisc, ReplayResponseMode::kFixed);
+  EXPECT_EQ(project.laserdisc.channel.group_delay.preset,
+            GroupDelayPreset::kIec60856Nominal);
+  EXPECT_TRUE(IsValid(project));
+  EXPECT_EQ(RoundTrip(project), project);
+
+  SetReplayResponseMode(&project.laserdisc, ReplayResponseMode::kByPicture);
+  EXPECT_TRUE(IsValid(project));
+  EXPECT_EQ(RoundTrip(project), project);
+
+  SetGroupDelayPreset(&project.laserdisc, GroupDelayPreset::kCustom);
+  EXPECT_EQ(project.laserdisc.channel.group_delay.points_ns,
+            Iec60856NominalGroupDelay());
+  EXPECT_TRUE(IsValid(project));
+  EXPECT_EQ(RoundTrip(project), project);
+
+  SetLaserdiscChannelEnabled(&project.laserdisc, false);
+  EXPECT_EQ(project.laserdisc.channel, LaserdiscChannelParameters{});
+  EXPECT_TRUE(project.laserdisc.enabled);
+  SetLaserdiscEnabled(&project.laserdisc, false);
+  EXPECT_EQ(project.laserdisc, LaserdiscParameters{});
+  EXPECT_EQ(YamlProjectEmitter().EmitString(project).find("laserdisc:"),
+            std::string::npos);
+}
+
+TEST(ProjectSettingsPresenterTest, GroupDelayOutsidePalStartsAsCustomCurve) {
+  for (const Standard standard : {Standard::kNtsc, Standard::kPalM}) {
+    SCOPED_TRACE(StandardToString(standard));
+    Project project = MakeProject(standard);
+    SetGroupDelayEnabled(&project.laserdisc, true, standard);
+    const GroupDelayParameters& group_delay =
+        project.laserdisc.channel.group_delay;
+    EXPECT_EQ(group_delay.preset, GroupDelayPreset::kCustom);
+    EXPECT_EQ(group_delay.points_ns, Iec60856NominalGroupDelay());
+    EXPECT_EQ(group_delay.scale, 1.0);
+    EXPECT_TRUE(IsValid(project));
+    EXPECT_EQ(RoundTrip(project), project);
+  }
+}
+
+TEST(ProjectSettingsPresenterTest, GroupDelayPresetSwitchKeepsOneCurve) {
+  LaserdiscParameters laserdisc;
+  SetGroupDelayEnabled(&laserdisc, true, Standard::kNtsc);
+  laserdisc.channel.group_delay.points_ns = {{0.5, 0.0}, {3.0, -40.0}};
+  // Back to the preset drops the custom curve (it would not emit)...
+  SetGroupDelayPreset(&laserdisc, GroupDelayPreset::kIec60856Nominal);
+  EXPECT_TRUE(laserdisc.channel.group_delay.points_ns.empty());
+  // ...and a fresh custom curve starts from the nominal one.
+  SetGroupDelayPreset(&laserdisc, GroupDelayPreset::kCustom);
+  EXPECT_EQ(laserdisc.channel.group_delay.points_ns,
+            Iec60856NominalGroupDelay());
+}
+
+TEST(ProjectSettingsPresenterTest, ReplayResponseModesNeverCoexist) {
+  LaserdiscParameters laserdisc;
+  EXPECT_EQ(ReplayResponseModeOf(laserdisc.channel), ReplayResponseMode::kNone);
+
+  SetReplayResponseMode(&laserdisc, ReplayResponseMode::kFixed);
+  EXPECT_EQ(ReplayResponseModeOf(laserdisc.channel),
+            ReplayResponseMode::kFixed);
+  ASSERT_FALSE(laserdisc.channel.response_db.empty());
+  laserdisc.channel.response_db = {{1.0, -2.0}, {4.0, -6.0}};
+
+  // By picture carries the fixed response to both seeded positions.
+  SetReplayResponseMode(&laserdisc, ReplayResponseMode::kByPicture);
+  EXPECT_EQ(ReplayResponseModeOf(laserdisc.channel),
+            ReplayResponseMode::kByPicture);
+  EXPECT_TRUE(laserdisc.channel.response_db.empty());
+  ASSERT_EQ(laserdisc.channel.response_by_picture.size(), 2U);
+  EXPECT_LT(laserdisc.channel.response_by_picture[0].picture,
+            laserdisc.channel.response_by_picture[1].picture);
+  for (const ResponseByPictureEntry& entry :
+       laserdisc.channel.response_by_picture) {
+    EXPECT_EQ(entry.response_db,
+              (std::vector<NoiseSpectrumPoint>{{1.0, -2.0}, {4.0, -6.0}}));
+  }
+
+  // Back to fixed takes the first position's response.
+  laserdisc.channel.response_by_picture[0].response_db = {{2.0, -1.0}};
+  SetReplayResponseMode(&laserdisc, ReplayResponseMode::kFixed);
+  EXPECT_TRUE(laserdisc.channel.response_by_picture.empty());
+  EXPECT_EQ(laserdisc.channel.response_db,
+            (std::vector<NoiseSpectrumPoint>{{2.0, -1.0}}));
+
+  SetReplayResponseMode(&laserdisc, ReplayResponseMode::kNone);
+  EXPECT_TRUE(laserdisc.channel.response_db.empty());
+  EXPECT_TRUE(laserdisc.channel.response_by_picture.empty());
+}
+
+TEST(ProjectSettingsPresenterTest, ResponseByPictureEntriesAscend) {
+  namespace limits = project_editor_limits;
+  std::vector<ResponseByPictureEntry> entries;
+  AddResponseByPictureEntry(&entries);
+  ASSERT_EQ(entries.size(), 1U);
+  EXPECT_EQ(entries[0].picture, limits::kResponsePictureMin);
+  EXPECT_FALSE(entries[0].response_db.empty());
+  entries[0].response_db = {{1.0, -4.0}};
+
+  AddResponseByPictureEntry(&entries);
+  ASSERT_EQ(entries.size(), 2U);
+  EXPECT_GT(entries[1].picture, entries[0].picture);
+  EXPECT_EQ(entries[1].response_db, entries[0].response_db);
+
+  // Near the editor's limit the new entry lands on it, then stops.
+  entries[1].picture = limits::kResponsePictureMax - 1;
+  AddResponseByPictureEntry(&entries);
+  ASSERT_EQ(entries.size(), 3U);
+  EXPECT_EQ(entries[2].picture, limits::kResponsePictureMax);
+  AddResponseByPictureEntry(&entries);
+  EXPECT_EQ(entries.size(), 3U);
+
+  RemoveResponseByPictureEntry(&entries, 5);
+  EXPECT_EQ(entries.size(), 3U);
+  RemoveResponseByPictureEntry(&entries, 0);
+  ASSERT_EQ(entries.size(), 2U);
+  EXPECT_EQ(entries[0].picture, limits::kResponsePictureMax - 1);
+}
+
+TEST(ProjectSettingsPresenterTest, CurvePointsAppendAboveTheLast) {
+  std::vector<CurvePoint> points;
+  AddCurvePoint(&points, 1.0, 5.0, CurvePoint{0.5, 0.0});
+  ASSERT_EQ(points.size(), 1U);
+  EXPECT_EQ(points[0], (CurvePoint{0.5, 0.0}));
+  points[0].y = -3.0;
+  AddCurvePoint(&points, 1.0, 5.0, CurvePoint{0.5, 0.0});
+  ASSERT_EQ(points.size(), 2U);
+  EXPECT_EQ(points[1], (CurvePoint{1.5, -3.0}));
+  // Closer to the maximum than a step: halfway there.
+  points[1].x = 4.5;
+  AddCurvePoint(&points, 1.0, 5.0, CurvePoint{0.5, 0.0});
+  ASSERT_EQ(points.size(), 3U);
+  EXPECT_DOUBLE_EQ(points[2].x, 4.75);
+  points[2].x = 5.0;
+  AddCurvePoint(&points, 1.0, 5.0, CurvePoint{0.5, 0.0});
+  EXPECT_EQ(points.size(), 3U);
+
+  RemoveCurvePoint(&points, -1);
+  EXPECT_EQ(points.size(), 3U);
+  RemoveCurvePoint(&points, 1);
+  ASSERT_EQ(points.size(), 2U);
+  EXPECT_EQ(points[1].x, 5.0);
+}
+
+TEST(ProjectSettingsPresenterTest, CurvePointConversionsRoundTrip) {
+  const std::vector<NoiseSpectrumPoint> response = {{0.5, 0.0}, {4.0, -6.0}};
+  EXPECT_EQ(ToResponsePoints(ToCurvePoints(response)), response);
+  const std::vector<GroupDelayPoint> delay = Iec60856NominalGroupDelay();
+  EXPECT_EQ(ToGroupDelayPoints(ToCurvePoints(delay)), delay);
+  const std::vector<LevelCurvePoint> level = {{0.0, 1.0}, {100.0, 0.9}};
+  EXPECT_EQ(ToLevelCurvePoints(ToCurvePoints(level)), level);
+  EXPECT_EQ(ToCurvePoints(level)[1], (CurvePoint{100.0, 0.9}));
+}
+
+TEST(ProjectSettingsPresenterTest, DifferentialAndCrosstalkSeedValidBlocks) {
+  for (const Standard standard :
+       {Standard::kPal, Standard::kNtsc, Standard::kPalM}) {
+    SCOPED_TRACE(StandardToString(standard));
+    Project project = MakeProject(standard);
+    SetDifferentialEnabled(&project.chroma_error, true);
+    SetCrosstalkEnabled(&project.chroma_error, true);
+    EXPECT_TRUE(project.chroma_error.enabled);
+    EXPECT_FALSE(project.chroma_error.differential.gain.empty());
+    EXPECT_FALSE(project.chroma_error.differential.phase_deg.empty());
+    EXPECT_NE(project.chroma_error.crosstalk.v_to_u, 0.0);
+    EXPECT_TRUE(IsValid(project));
+    EXPECT_EQ(RoundTrip(project), project);
+
+    // Re-enabling keeps edited values; disabling resets the sub-block only.
+    project.chroma_error.crosstalk.u_to_v = 0.2;
+    SetCrosstalkEnabled(&project.chroma_error, true);
+    EXPECT_EQ(project.chroma_error.crosstalk.u_to_v, 0.2);
+    SetDifferentialEnabled(&project.chroma_error, false);
+    EXPECT_EQ(project.chroma_error.differential, DifferentialParameters{});
+    EXPECT_TRUE(project.chroma_error.crosstalk.enabled);
+  }
+}
+
+TEST(ProjectSettingsPresenterTest, DifferentialAndCrosstalkLimitsMirrorValid) {
+  namespace limits = project_editor_limits;
+  Project project = MakeProject(Standard::kPal);
+  SetDifferentialEnabled(&project.chroma_error, true);
+  SetCrosstalkEnabled(&project.chroma_error, true);
+  ASSERT_TRUE(IsValid(project));
+  const auto check = [&](double* field, double low, double high) {
+    const double saved = *field;
+    for (const double value : {low, high}) {
+      *field = value;
+      EXPECT_TRUE(IsValid(project)) << value;
+    }
+    *field = high + 0.001;
+    EXPECT_FALSE(IsValid(project)) << high;
+    *field = low - 0.001;
+    EXPECT_FALSE(IsValid(project)) << low;
+    *field = saved;
+  };
+  DifferentialParameters& differential = project.chroma_error.differential;
+  differential.gain = {{0.0, 1.0}};
+  differential.phase_deg = {{0.0, 0.0}};
+  check(&differential.gain[0].level_ire, limits::kDifferentialLevelMinIre,
+        limits::kDifferentialLevelMaxIre);
+  check(&differential.gain[0].value, limits::kDifferentialGainMin,
+        limits::kDifferentialGainMax);
+  check(&differential.phase_deg[0].value, -limits::kDifferentialPhaseMaxDeg,
+        limits::kDifferentialPhaseMaxDeg);
+  check(&project.chroma_error.crosstalk.v_to_u, -limits::kCrosstalkMax,
+        limits::kCrosstalkMax);
+  check(&project.chroma_error.crosstalk.u_to_v, -limits::kCrosstalkMax,
+        limits::kCrosstalkMax);
+}
+
+TEST(ProjectSettingsPresenterTest, LaserdiscChannelLimitsMirrorValidator) {
+  namespace limits = project_editor_limits;
+  Project project = MakeProject(Standard::kPal);
+  SetFmBeatEnabled(&project.laserdisc, true);
+  SetGroupDelayEnabled(&project.laserdisc, true, Standard::kPal);
+  SetGroupDelayPreset(&project.laserdisc, GroupDelayPreset::kCustom);
+  SetField2OffsetEnabled(&project.laserdisc, true);
+  SetReplayResponseMode(&project.laserdisc, ReplayResponseMode::kFixed);
+  LaserdiscChannelParameters& channel = project.laserdisc.channel;
+  channel.group_delay.points_ns = {{0.5, 0.0}};
+  channel.response_db = {{0.5, 0.0}};
+  ASSERT_TRUE(IsValid(project));
+  const auto check = [&](double* field, double low, double high) {
+    const double saved = *field;
+    for (const double value : {low, high}) {
+      *field = value;
+      EXPECT_TRUE(IsValid(project)) << value;
+    }
+    *field = high + 0.001;
+    EXPECT_FALSE(IsValid(project)) << high;
+    *field = low - 0.001;
+    EXPECT_FALSE(IsValid(project)) << low;
+    *field = saved;
+  };
+  check(&channel.fm_beat.carrier_black_hz, limits::kFmBeatCarrierMinHz,
+        limits::kFmBeatCarrierMaxHz);
+  check(&channel.fm_beat.level_db, limits::kFmBeatLevelMinDb,
+        limits::kFmBeatLevelMaxDb);
+  check(&channel.group_delay.scale, -limits::kGroupDelayScaleMax,
+        limits::kGroupDelayScaleMax);
+  check(&channel.group_delay.points_ns[0].delay_ns, -limits::kGroupDelayMaxNs,
+        limits::kGroupDelayMaxNs);
+  check(&channel.group_delay.points_ns[0].frequency_mhz, 0.0,
+        NoiseSpectrumMaxFrequencyMhz(Standard::kPal));
+  check(&channel.response_db[0].relative_db, limits::kReplayResponseMinDb,
+        limits::kReplayResponseMaxDb);
+  check(&channel.field2_offset.x_samples, -limits::kField2OffsetMaxSamples,
+        limits::kField2OffsetMaxSamples);
+  check(&channel.field2_offset.y_lines, -limits::kField2OffsetMaxLines,
+        limits::kField2OffsetMaxLines);
+
+  SetReplayResponseMode(&project.laserdisc, ReplayResponseMode::kByPicture);
+  ASSERT_TRUE(IsValid(project));
+  channel.response_by_picture[0].picture = limits::kResponsePictureMin - 1;
+  EXPECT_FALSE(IsValid(project));
 }
 
 }  // namespace

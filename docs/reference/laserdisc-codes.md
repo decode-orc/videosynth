@@ -1,22 +1,22 @@
 # Laserdisc code types
 
-Every `code_type` accepted in a section's [`line_injections[].codes`](section-line-injections.md), with its hex format, where it is legal and what it needs.
+Every `code_type` accepted in a section's [`laserdisc.codes`](section-laserdisc.md#codes) list, with its hex format, where it is legal and what it needs.
 
-`disc_type` (CAV/CLV) is project-wide; `section_type` is per section. Together they decide which code types are accepted. A section that carries a `laserdisc` injection must set `section_type`.
+[`laserdisc.disc_type`](laserdisc.md#disc_type) (CAV/CLV) is project-wide; the disc [`area`](section-laserdisc.md#area) is per section. Together they decide which code types are accepted. A section that carries codes must set `area`.
 
-There is no SECAM LaserVision format, so a `SECAM` project rejects every laserdisc code, `disc_type` and `placement: laserdisc`:
+There is no SECAM LaserVision format, so a `SECAM` project rejects the `laserdisc:` blocks, and with them every laserdisc code, and `placement: laserdisc`:
 
 ```text
-Project configuration error: laserdisc line injections,
-line_injections.disc_type and laserdisc VITS placement are not available for
-SECAM projects.
+Project configuration error: there is no SECAM LaserVision format, so the
+laserdisc block, section laserdisc blocks and laserdisc VITS placement are not
+available for SECAM projects.
 ```
 
 "All" in the table below therefore means PAL, NTSC and PAL-M.
 
 ## At a glance
 
-| `code_type` | Disc | Standard | Section | Auto-increments | Field |
+| `code_type` | Disc | Standard | Disc area | Auto-increments | Field |
 |-------------|------|----------|---------|-----------------|-------|
 | `lead_in` | CAV/CLV | All | `lead_in` | — | — |
 | `lead_out` | CAV/CLV | All | `lead_out` | — | — |
@@ -64,7 +64,7 @@ Field 2 lines are 313 higher than field 1 on PAL (16/17/18 → 329/330/331) and 
 | Property | Value |
 |----------|-------|
 | Hex format | `88FFFF` |
-| Section | `lead_in` only |
+| Disc area | `lead_in` only |
 | Lines (PAL) | 17, 18, 330, 331 |
 | Lines (NTSC) | 17, 18, 280, 281 |
 
@@ -79,7 +79,7 @@ Fixed code marking the lead-in area. No parameters.
 | Property | Value |
 |----------|-------|
 | Hex format | `80EEEE` |
-| Section | `lead_out` only |
+| Disc area | `lead_out` only |
 | Lines (PAL) | 17, 18, 330, 331 |
 | Lines (NTSC) | 17, 18, 280, 281 |
 
@@ -96,7 +96,7 @@ Fixed code marking the lead-out area. No parameters.
 | Property | Value |
 |----------|-------|
 | Hex format | `FX₁X₂X₃X₄X₅` |
-| Section | `programme_area` |
+| Disc area | `programme_area` |
 | Lines (PAL) | 17, 18 (field 1) |
 | Lines (NTSC) | 17, 18 (field 1) |
 | Range | 0–99 999 (PAL) / 0–79 999 (NTSC, PAL-M) |
@@ -123,7 +123,7 @@ Past the maximum the number holds at it. Validation warns when a section would r
 | Property | Value |
 |----------|-------|
 | Hex format | `82CFFF` |
-| Section | `programme_area` |
+| Disc area | `programme_area` |
 | Lines (PAL) | 329, 330 (field 2) |
 | Lines (NTSC) | 279, 280 (field 2) |
 
@@ -138,7 +138,7 @@ Tells the player to freeze on this frame. Written in field 2, after the picture-
 | Property | Value |
 |----------|-------|
 | Hex format | `8X₁X₂DDD` |
-| Section | `programme_area` |
+| Disc area | `programme_area` |
 | Range | 0–79 |
 | Minimum length | 30 tracks (checked on CAV, warning) |
 | Lines (CAV PAL) | 331 (field 2); also 330 when there is no `picture_stop` |
@@ -165,28 +165,35 @@ lasts 25 frames; IEC 60856/60857 requires at least 30.
 
 ### The stop-bit
 
-Encoded in the MSB of X₁, and computed for you:
+Encoded in the MSB of X₁, and computed for you. By default:
 
 | Position within the chapter | Stop-bit |
 |-----------------------------|----------|
 | Tracks 0–399 | 0 — the player's search passes through |
 | Track 400 onwards | 1 — search may stop here |
-| Any track of a chapter shorter than 800 tracks | 1 |
-| The first chapter after the lead-in | Always 1 |
+
+Two IEC 60856/60857 §10.1.5 exceptions set the stop-bit to 1 on every track of a chapter:
+
+- **The first chapter after the lead-in** — the chapter that starts in the section directly after a `lead_in` section.
+- **Every chapter of a disc with a short chapter** — when any chapter on a CAV disc is shorter than 800 tracks, all of its chapters are 1 throughout. Real discs with short chapters do this.
+
+A CAV track is one frame, and chapter lengths follow the same definition as the 30-frame check above. On CLV the counter counts frames rather than tracks, so the 400-track change comes early and the short-chapter exception is not applied.
+
+The chapter number is two BCD digits, as the picture number is:
 
 ```text
-X₁ = (stop_bit << 3) | (chapter / 16)
-X₂ = chapter % 16
+X₁ = (stop_bit << 3) | (chapter / 10)
+X₂ = chapter % 10
 ```
 
-Chapter 5 with stop-bit 1 encodes as `885DDD`.
+Chapter 5 with stop-bit 1 encodes as `885DDD`; chapter 42 with stop-bit 0 as `842DDD`.
 
 ## `programme_status` (CAV and CLV)
 
 | Property | Value |
 |----------|-------|
 | Hex format | `8DC/BA X₃X₄X₅` |
-| Section | `programme_area` |
+| Disc area | `programme_area` |
 | Lines (CAV) | 16 (field 1) and 329/279 (field 2, unless `picture_stop`) |
 | Lines (CLV) | 329/279 (field 2) |
 | Horizontal start | 0.172H into the active line |
@@ -198,7 +205,7 @@ Audio/video mode and copy permission, with a SECDED Hamming check digit.
 | Nibbles 1–2 | `DC` = CX noise reduction on, `BA` = off |
 | X₃ | Disc size, disc side, teletext presence, copy permission |
 | X₄ | Audio/video mode — 0–3 standard, 8 = mono dump |
-| X₅ | Hamming check, computed automatically |
+| X₅ | Hamming check on X₄. Written as given in the hex value; the GUI dialog below computes it |
 
 ```yaml
 - code_type: programme_status
@@ -214,7 +221,7 @@ The GUI's **Programme Status Code** dialog composes this word from readable fiel
 | Property | Value |
 |----------|-------|
 | Hex format | `8X₁DX₃X₄X₅` |
-| Section | `lead_in` or `lead_out` only |
+| Disc area | `lead_in` or `lead_out` only |
 | X₁ | 0–7 only |
 | Third nibble | Must be `D` |
 | Lines (PAL) | 16, 329 |
@@ -241,7 +248,7 @@ Laserdisc injection validation error: users_code X1 nibble must be 0-7;
 | Property | Value |
 |----------|-------|
 | Hex format | `FX₁DDX₂X₃` |
-| Section | `programme_area` |
+| Disc area | `programme_area` |
 | Lines (PAL) | 17, 18 (field 1) |
 | Lines (NTSC) | 17, 18 (field 1) |
 | X₁ | 0–F (hours 0–15) |
@@ -259,7 +266,7 @@ Elapsed programme time in hours and minutes. Starts at `0:00` and advances autom
 | Property | Value |
 |----------|-------|
 | Hex format | `87FFFF` |
-| Section | `programme_area` |
+| Disc area | `programme_area` |
 | Lines (PAL) | 330 (field 2) |
 | Lines (NTSC) | 280 (field 2) |
 | Horizontal start | 0.172H into the active line (NTSC and PAL-M only) |
@@ -275,7 +282,7 @@ A fixed marker identifying the disc as CLV, written in field 2. Without a `progr
 | Property | Value |
 |----------|-------|
 | Hex format | `8X₁EX₃X₄X₅` |
-| Section | `programme_area` |
+| Disc area | `programme_area` |
 | Lines (PAL) | 16 (field 1) |
 | Lines (NTSC) | 16 (field 1) |
 | X₁ | A–F |
@@ -302,7 +309,7 @@ These are NTSC and PAL-M only, and are mandatory on a compliant NTSC disc alongs
 | Property | Value |
 |----------|-------|
 | Signal | 40-bit FM |
-| Section | `programme_area` |
+| Disc area | `programme_area` |
 | Lines | 10, 273 |
 | Range | 0–79 999 |
 | Update | Second field of each new picture |
@@ -320,10 +327,10 @@ Carries the CAV picture number in the 40-bit FM format, advancing with the 24-bi
 | Property | Value |
 |----------|-------|
 | Signal | 40-bit FM |
-| Section | `programme_area` |
+| Disc area | `programme_area` |
 | Lines | 10, 273 |
 
-Carries CLV programme time in the 40-bit FM format. The X₅ mode indicator distinguishes the disc area: A = lead-in, B = end of lead-in, D = programme, C = lead-out.
+Carries CLV programme time (minutes and seconds) in the 40-bit FM format. The code is legal only in the programme area, so its X₅ mode indicator is always D (programme).
 
 ```yaml
 - code_type: fm_programme_time
@@ -334,7 +341,7 @@ Carries CLV programme time in the 40-bit FM format. The X₅ mode indicator dist
 | Property | Value |
 |----------|-------|
 | Signal | 100 IRE constant level, 0.790H long, starting 0.160H from sync |
-| Section | `lead_in`, `programme_area`, `lead_out` |
+| Disc area | `lead_in`, `programme_area`, `lead_out` |
 | Lines (lead-in) | 11 |
 | Lines (programme) | 11 (`"2:3"`: 11 or 274) |
 | Lines (lead-out) | 11 and 274 |
