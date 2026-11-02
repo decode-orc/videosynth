@@ -22,7 +22,11 @@ namespace videosynth {
 // Encodes 24-bit biphase (Manchester) signals for LaserDisc VBI injection.
 //
 // Encoding rules (IEC 60856/60857):
-//   - Bit cell duration: 2.0 µs ± 0.01 µs
+//   - Bit cell duration: 2.0 µs ± 0.01 µs. The 2.0 µs cell is not a whole
+//     number of 4fsc samples, so cell boundaries and centres sit on the exact
+//     grid rounded to the nearest sample (BitCellStart): each transition is
+//     within half a sample of its nominal time and the code length does not
+//     drift.
 //   - Positive (rising) transition at center of bit cell = logic '1'
 //   - Negative (falling) transition at center of bit cell = logic '0'
 //   - Inter-bit transitions occur between consecutive identical bits
@@ -72,7 +76,7 @@ class BiphaseEncoder {
 
   // Returns samples for the 24-bit biphase waveform.
   //
-  // The returned vector length is 24 * bit_cell_samples().
+  // The returned vector length is BitCellStart(24).
   // Bits are transmitted MSB first; the first bit corresponds to bit 23
   // of code_value.
   //
@@ -98,8 +102,20 @@ class BiphaseEncoder {
   std::vector<SampleFixed> GenerateBit(bool bit_value, double baseline_level_mv,
                                        double peak_level_mv) const;
 
-  // Number of samples per bit cell at the configured sample rate.
+  // Bit cell length rounded to whole samples; the length of GenerateBit's
+  // single cell. Cells inside a code are this length ± 1 (see BitCellStart).
   int bit_cell_samples() const { return bit_cell_samples_; }
+
+  // Exact bit cell length in samples (may be fractional).
+  double bit_cell_exact() const { return bit_cell_exact_; }
+
+  // First sample of bit cell bit_index within a code: bit_index × the exact
+  // cell length, rounded to the nearest sample. BitCellStart(24) is the code
+  // length.
+  int BitCellStart(int bit_index) const;
+
+  // Sample of bit cell bit_index's centre transition, rounded the same way.
+  int BitCellCentre(int bit_index) const;
 
   // Number of samples spanning the full 0%-100% S-curve transition.
   // The 10%-90% measured transition time equals transition_duration_ns.
@@ -107,6 +123,7 @@ class BiphaseEncoder {
 
  private:
   int ramp_samples_;
+  double bit_cell_exact_;
   int bit_cell_samples_;
 
   // Applies a single shaped step transition centred at center_sample.

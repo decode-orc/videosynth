@@ -671,6 +671,8 @@ Both systems must be configured simultaneously on NTSC discs. They differ in bot
 | Transition time (10 %–90 %) | 225 ns ± 25 ns | 135 ns ± 15 ns |
 | Modulation | Biphase mark (transition at cell centre) | Pulse-spacing FM (see below) |
 
+Neither cell is a whole number of 4fsc samples (2.0 µs is 35.47 samples on PAL and 28.64 on NTSC). The encoders lay the cells out on the exact time grid and round each cell boundary and centre to the nearest sample (`BitCellStart`/`BitCellCentre`), so every transition is within half a sample of its nominal time and the code does not drift along the line. Individual cells are one sample longer or shorter than the rounded cell length.
+
 ### 40-bit FM Bit Layout
 
 The 40-bit code is structured as follows (MSB = bit 1):

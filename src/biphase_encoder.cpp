@@ -34,13 +34,15 @@ BiphaseEncoder::BiphaseEncoder(double sample_rate_hz,
                                double transition_duration_ns)
     : ramp_samples_(TransitionTimeToRampSamples(transition_duration_ns * 1.0e-9,
                                                 sample_rate_hz, 0.1, 0.9)),
-      bit_cell_samples_(static_cast<int>(
-          std::round(bit_cell_duration_us * 1.0e-6 * sample_rate_hz))) {
+      bit_cell_exact_(bit_cell_duration_us * 1.0e-6 * sample_rate_hz),
+      bit_cell_samples_(static_cast<int>(std::round(bit_cell_exact_))) {
   if (bit_cell_samples_ <= 0) {
     throw std::invalid_argument(
         "BiphaseEncoder: bit cell duration yields zero or negative samples");
   }
-  if (ramp_samples_ >= bit_cell_samples_ / 2) {
+  // Cells on the exact grid are bit_cell_samples_ ± 1 samples long, so the
+  // ramp must fit the shortest half cell.
+  if (ramp_samples_ >= (bit_cell_samples_ - 1) / 2) {
     throw std::invalid_argument(
         "BiphaseEncoder: transition ramp is too wide to fit within a half bit "
         "cell — check sample rate and timing parameters");
@@ -103,12 +105,19 @@ std::vector<SampleFixed> BiphaseEncoder::GenerateBit(
   return result;
 }
 
+int BiphaseEncoder::BitCellStart(int bit_index) const {
+  return static_cast<int>(std::lround(bit_index * bit_cell_exact_));
+}
+
+int BiphaseEncoder::BitCellCentre(int bit_index) const {
+  return static_cast<int>(std::lround((bit_index + 0.5) * bit_cell_exact_));
+}
+
 std::vector<SampleFixed> BiphaseEncoder::Generate24BitCode(
     uint32_t code_value, double baseline_level_mv, double peak_level_mv) const {
-  const int total = 24 * bit_cell_samples_;
+  const int total = BitCellStart(24);
   std::vector<double> samples(static_cast<std::size_t>(total));
 
-  const int half_cell = bit_cell_samples_ / 2;
   const int ramp_half = ramp_samples_ / 2;
 
   // --- Pass 1: fill each bit cell with constant regions and center
@@ -116,8 +125,9 @@ std::vector<SampleFixed> BiphaseEncoder::Generate24BitCode(
   for (int bit_idx = 0; bit_idx < 24; ++bit_idx) {
     // Bits are transmitted MSB first (bit 23 is transmitted first).
     const bool bit = ((code_value >> (23 - bit_idx)) & 1u) != 0u;
-    const int bit_start = bit_idx * bit_cell_samples_;
-    const int center = bit_start + half_cell;
+    const int bit_start = BitCellStart(bit_idx);
+    const int bit_end = BitCellStart(bit_idx + 1);
+    const int center = BitCellCentre(bit_idx);
     const int post_start = center + (ramp_samples_ - ramp_half);
 
     const double start_level = bit ? baseline_level_mv : peak_level_mv;
@@ -128,7 +138,7 @@ std::vector<SampleFixed> BiphaseEncoder::Generate24BitCode(
       samples[static_cast<std::size_t>(i)] = start_level;
     }
     // Constant region after the centre transition.
-    for (int i = post_start; i < bit_start + bit_cell_samples_; ++i) {
+    for (int i = post_start; i < bit_end; ++i) {
       samples[static_cast<std::size_t>(i)] = end_level;
     }
 
@@ -150,7 +160,7 @@ std::vector<SampleFixed> BiphaseEncoder::Generate24BitCode(
     const bool curr_bit = ((code_value >> (23 - bit_idx)) & 1u) != 0u;
 
     if (prev_bit == curr_bit) {
-      const int boundary = bit_idx * bit_cell_samples_;
+      const int boundary = BitCellStart(bit_idx);
       // prev '0'→'0': prev ends at baseline, curr starts at peak → rising.
       // prev '1'→'1': prev ends at peak,     curr starts at baseline → falling.
       const bool rising = !prev_bit;
