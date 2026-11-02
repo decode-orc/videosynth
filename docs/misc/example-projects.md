@@ -71,7 +71,7 @@ The `<standard>_discsim_A`–`_D` projects are four captures of one 40-frame CAV
 
 ### Decoder stress and zone plates
 
-`pal_decoder_stress.yaml` plays the [`PAL_STRESS.exr`](../user-manual/sources.md#stills-exr) card for 8 frames (two full PAL colour sequences) with its three [`chroma_line_sign`](../reference/sections.md#chroma_line_sign) regions — line-alternating V on the left outer strip and the burst-gate check, anti-PAL U on the right outer strip — then the static luma and chroma zone plates for 4 frames each. `ntsc_zone_plates.yaml` plays the two zone plates on NTSC. Every section uses the [band-limited mapping](../reference/sections.md#horizontal_resample), and both projects write the [picture truth](../reference/output.md#truth), so a decoder's output can be scored against the component picture that was encoded.
+`pal_decoder_stress.yaml` plays the [`PAL_STRESS.exr`](../user-manual/sources.md#stills-exr) card for 8 frames (two full PAL colour sequences) with its three [`chroma_line_sign`](../reference/sections.md#chroma_line_sign) regions — line-alternating V on the left outer strip and the burst-gate check, anti-PAL U on the right outer strip — then the static luma and chroma zone plates for 4 frames each. `ntsc_zone_plates.yaml` plays the two zone plates on NTSC. `pal_decoder_stills.yaml` plays the Domesday-like stills — the two OpenStreetMap maps, the coloured text card, the green/magenta edges and the two photographs — one frame each. Every section uses the [band-limited mapping](../reference/sections.md#horizontal_resample), and all three projects write the [picture truth](../reference/output.md#truth), so a decoder's output can be scored against the component picture that was encoded.
 
 ## Running a suite
 

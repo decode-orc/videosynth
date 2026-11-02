@@ -1,0 +1,48 @@
+project:
+  name: PALDecoderStillsFixture
+  version: "1.0"
+  description: >-
+    Domesday-like decoder stills: OSM maps at two scales, coloured overlay
+    text, green/magenta row-to-row edges and two photographs, each a single
+    band-limited frame written with its picture truth
+
+cvbs_presets:
+  video_standard_preset: PAL
+  sample_encoding_preset: CVBS_TPG21_4FSC
+  signal_state_preset: STANDARD_STABLE_LOCKED
+
+output:
+  video_path: "{output}/videosynth_pal_decoder_stills.cvbs"
+  truth: true
+
+sections:
+  - name: OsmTown
+    type: progressive
+    source: "{bundled}/exr/720x576/OSM_TOWN.exr"
+    duration_frames: 1
+    horizontal_resample: bandlimited
+  - name: OsmRural
+    type: progressive
+    source: "{bundled}/exr/720x576/OSM_RURAL.exr"
+    duration_frames: 1
+    horizontal_resample: bandlimited
+  - name: TextCard
+    type: progressive
+    source: "{bundled}/exr/720x576/TEXT_CARD.exr"
+    duration_frames: 1
+    horizontal_resample: bandlimited
+  - name: GreenMagentaEdges
+    type: progressive
+    source: "{bundled}/exr/720x576/GREEN_MAGENTA_EDGES.exr"
+    duration_frames: 1
+    horizontal_resample: bandlimited
+  - name: PhotoButterfly
+    type: progressive
+    source: "{bundled}/exr/720x576/PHOTO_BUTTERFLY.exr"
+    duration_frames: 1
+    horizontal_resample: bandlimited
+  - name: PhotoGaltstroms
+    type: progressive
+    source: "{bundled}/exr/720x576/PHOTO_GALTSTROMS.exr"
+    duration_frames: 1
+    horizontal_resample: bandlimited
