@@ -30,9 +30,9 @@ sections:
 
 A section `laserdisc:` block needs the project-level block. SECAM projects cannot have either: there is no SECAM LaserVision format.
 
-In the GUI these are the checkable **LaserDisc** group at the bottom of the project settings and the **LaserDisc** group in the section editor, which appears only once the project's group is ticked — see [The GUI](gui.md#laserdisc).
+In the GUI these are the checkable **LaserDisc** group in the project settings and the **LaserDisc** group in the section editor, which appears only once the project's group is ticked — see [The GUI](gui.md#laserdisc).
 
-Older project files put these settings in `cvbs_presets`, `output`, `line_injections`, `channel` and each section's `section_type` and `line_injections`. Those keys are now parse errors naming the new place; the full table is in the [`laserdisc` reference](../reference/laserdisc.md#where-these-settings-used-to-live).
+These settings are not accepted anywhere else: a LaserDisc key in `cvbs_presets`, `output`, `line_injections` or `channel`, or a section's `section_type` or `type: laserdisc` line injection, is a parse error naming its place in the `laserdisc:` blocks; the full table is in the [`laserdisc` reference](../reference/laserdisc.md#laserdisc-keys-in-other-blocks).
 
 ## What the codes do
 
@@ -122,8 +122,8 @@ Only certain code types are legal in each disc area. These matrices are what the
 | `chapter_number` | ❌ | ✅ | ❌ |
 | `programme_status` | ❌ | ✅ | ❌ |
 | `users_code` | ✅ | ❌ | ✅ |
-| `fm_picture_number` (NTSC) | ❌ | ✅ | ❌ |
-| `fm_white_flag` (NTSC) | ✅ | ✅ | ✅ |
+| `fm_picture_number` (NTSC, PAL-M) | ❌ | ✅ | ❌ |
+| `fm_white_flag` (NTSC, PAL-M) | ✅ | ✅ | ✅ |
 
 ### CLV
 
@@ -137,8 +137,8 @@ Only certain code types are legal in each disc area. These matrices are what the
 | `chapter_number` | ❌ | ✅ | ❌ |
 | `programme_status` | ❌ | ✅ | ❌ |
 | `users_code` | ✅ | ❌ | ✅ |
-| `fm_programme_time` (NTSC) | ❌ | ✅ | ❌ |
-| `fm_white_flag` (NTSC) | ✅ | ✅ | ✅ |
+| `fm_programme_time` (NTSC, PAL-M) | ❌ | ✅ | ❌ |
+| `fm_white_flag` (NTSC, PAL-M) | ✅ | ✅ | ✅ |
 
 ## Timecode continuity
 
@@ -204,10 +204,11 @@ Every chapter code carries a **stop-bit** telling the player whether it may stop
 |-----------------------------|----------|
 | Tracks 0–399 | 0 — search passes through |
 | Track 400 onwards | 1 — search may stop |
-| Any track of a chapter shorter than 800 tracks | 1 |
-| The first chapter after the lead-in | Always 1 |
 
 videosynth computes and encodes this for you from the chapter number and the track position; you only ever supply the chapter number.
+
+!!! note
+    IEC 60856/60857 §10.1.5 also sets the stop-bit to 1 throughout a chapter shorter than 800 tracks and throughout the first chapter after the lead-in. videosynth does not apply these exceptions: every chapter starts with 400 tracks of stop-bit 0.
 
 ## Programme status
 
@@ -223,7 +224,7 @@ The value encodes:
 - **Nibbles 1–2** — `DC` for CX noise reduction on, `BA` for off.
 - **X₃** — disc size, disc side, teletext presence and copy permission bits.
 - **X₄** — audio/video mode (0–3 standard, 8 = mono dump).
-- **X₅** — Hamming check, computed automatically.
+- **X₅** — Hamming check on X₄. A project file carries it as written; the GUI's **Programme Status Code** dialog computes it.
 
 The GUI has a **Programme Status Code** dialog that composes the word from readable fields and shows the resulting hex, which is considerably easier than assembling it by hand.
 
@@ -306,7 +307,7 @@ The colour field sequence follows the disc's video frames throughout, so it stay
 
 ## What else a disc needs
 
-- **VITS on the laserdisc lines.** The broadcast VITS lines collide with the reserved code ranges, so use `placement: laserdisc`. NTSC discs *must* carry `virs` — see [VITS](vits.md).
+- **VITS on the laserdisc lines.** The broadcast VITS lines collide with the reserved code ranges, so use `placement: laserdisc`. NTSC and PAL-M discs *must* carry `virs` — see [VITS](vits.md).
 - **The pilot burst.** PAL discs carry a 3.75 MHz burst on every sync pulse ([`laserdisc.pilot_burst: true`](../reference/laserdisc.md#pilot_burst)), which needs a signed or raw [sample encoding](video-signal.md#sample-encodings) to avoid clipping.
 - **The VBI burst.** NTSC discs keep the colour burst on the equalising and broad sync lines of the vertical interval ([`laserdisc.vbi_burst: true`](../reference/laserdisc.md#vbi_burst)); the burst on the broad pulses dips below sync tip, so it too needs a signed or raw [sample encoding](video-signal.md#sample-encodings) to avoid clipping.
 - **No VITC.** Laserdisc uses the IEC biphase system as its sole timecode mechanism, and a `vitc` injection in a section that carries laserdisc codes is a validation error. (VITC is not implemented at all in the current runtime, so the question does not arise in practice.)

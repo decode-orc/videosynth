@@ -43,23 +43,23 @@ In the **CVBS Presets** group:
 !!! warning "The video standard is fixed at creation time"
     You can change the standard freely in this dialog, but once the project is created the control is disabled. Too much of the signal geometry, VBI line allocation and code validity depends on it. If you pick the wrong one, create a new project.
 
-In the **VITS** group:
-
-- **Placement**: **Laserdisc (IEC 60856/60857)**. This tells the validator that VITS live on the laserdisc VBI lines (19, 20, 332, 333 for PAL) rather than on their broadcast lines, which on a disc are occupied by the address codes. Selecting it seeds the spec-required PAL set for you.
-- In the VITS list, confirm **uk-national** and **vits20** are ticked. Under laserdisc placement their lines are set to 19/332 and 20/333.
-
-Leave **Channel (pressing)** and **Chroma error (capture)** unticked; this disc is ideal.
-
 In the **Output** group:
 
 - **Video path**: `{output}/quickstart_pal_cav.cvbs`. The `{output}` token means "wherever this run is told to put its media" — by default, the project's own directory.
 - Leave **Signal type** as `composite`.
 
-Tick the **LaserDisc** group at the bottom. Everything specific to LaserDisc is in it, and a project that is not a disc leaves it unticked:
+In the **VITS** group:
+
+- **Placement**: **Laserdisc (IEC 60856/60857)**. This tells the validator that VITS live on the laserdisc VBI lines (19, 20, 332, 333 for PAL) rather than on their broadcast lines, which on a disc are occupied by the address codes. Selecting it seeds the spec-required PAL set for you.
+- In the VITS list, confirm **uk-national** and **vits20** are ticked. Under laserdisc placement their lines are set to 19/332 and 20/333.
+
+Tick the **LaserDisc** group. Everything specific to LaserDisc is in it, and a project that is not a disc leaves it unticked:
 
 - **Disc format**: `CAV`.
 - Tick **PAL pilot burst (IEC 60856 §9.1.2)**. It is only enabled for PAL projects. The **NTSC VBI burst** option below it is the NTSC equivalent and is enabled only for NTSC projects.
 - Leave **Digital audio** and **LaserVision channel (pressing)** unticked.
+
+Leave **Channel (pressing)** and **Chroma error (capture)** unticked; this disc is ideal.
 
 Click **Create**. You are asked where to save the project file. Choose a directory and save it — the project is written to disk as part of creation, so `{project}`-relative paths and the preview always have something to anchor to.
 
@@ -81,15 +81,12 @@ Select the middle section in the sections list.
 **Section**
 
 - **Name**: `Programme`.
-
-**Section Source**
-
-- Leave **Built-in asset** selected and choose `100_BARS.exr` from the file dropdown. The raster (`720x576`) is derived from the project standard and is never a field you set. The **Source Profile** box reports whether the file passes the profile checks.
+- Leave **Source** on **Built-in asset** and **Still image (EXR)**, and choose `100_BARS.exr` from the file dropdown. The raster (`720x576`) is derived from the project standard and is never a field you set. The **Source Profile** box reports whether the file passes the profile checks.
 - Set **Duration** to `250` frames. The editor shows the equivalent time beside it — 10 seconds at 25 fps.
 
 **LaserDisc**
 
-This group sits at the bottom of the section editor, and appears because the project's **LaserDisc** group is ticked. Tick it, and set **Disc area** to `programme_area`. The disc area is what brings the code checklist to life: it now knows which code types IEC 60856 permits here, and pre-ticks the ones a CAV programme section normally carries.
+This group appears in the section editor because the project's **LaserDisc** group is ticked. Tick it, and set **Disc area** to `programme_area`. The disc area is what brings the code checklist to life: it now knows which code types IEC 60856 permits here, and pre-ticks the ones a CAV programme section normally carries.
 
 **Codes** is a checklist, not an add/remove list: you tick the codes this section carries, and only codes the validator accepts for this disc format, disc area and standard are offered. Each has a one-line explanation of what it does at generation time. Tick:
 
@@ -103,7 +100,7 @@ There is no line selection anywhere in this editor. Laserdisc VBI line placement
 
 Add an overlay so you can see the picture number burnt into the picture:
 
-- Click **Add overlay**.
+- Tick the **On-screen display** group, which adds a first overlay row (**Add overlay** adds more).
 - **Text**: `PN:{picture_number}  {section_name}`
 - **x**: `16`, **y**: `32`, **Scale**: `2`
 - **Fg luma**: `White`, **Bg luma**: `Black`
@@ -117,7 +114,7 @@ Select the first section:
 - **Name**: `LeadIn`; tick **LaserDisc** and set **Disc area** to `lead_in`.
 - **Duration**: `938` frames — the IEC 60856 minimum (1.5 mm of track at the 1.6 µm pitch). A shorter lead-in produces a validation warning.
 - Source: `PLUGE.exr`, so the lead-in is visually distinct.
-- In the **Codes** checklist, leave the `lead_in` code ticked. The only other code offered is `users_code`, which this disc does not need.
+- In the **Codes** checklist, tick the `lead_in` code. The only other code offered is `users_code`, which this disc does not need.
 
 Then the last section:
 

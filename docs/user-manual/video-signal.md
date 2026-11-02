@@ -151,7 +151,7 @@ Each active line takes one row of the source picture. The upper field (field 1 o
 
 ### Horizontal mapping
 
-By default each 4fsc sample takes the nearest source pixel at or to its left — a zero-order hold, which keeps existing projects bit-exact. The hold leaves images of the source spectrum across the band. A source component at *f* reappears at 13.5 MHz − *f*, folded back by the 4fsc sampling: low-frequency picture detail in a PAL picture leaves energy around 4.4 MHz, which a chroma decoder rightly reads as cross-colour.
+By default each 4fsc sample takes the nearest source pixel at or to its left — a zero-order hold. The hold leaves images of the source spectrum across the band. A source component at *f* reappears at 13.5 MHz − *f*, folded back by the 4fsc sampling: low-frequency picture detail in a PAL picture leaves energy around 4.4 MHz, which a chroma decoder rightly reads as cross-colour.
 
 [`horizontal_resample: bandlimited`](../reference/sections.md#horizontal_resample) replaces the hold with a polyphase Kaiser-windowed sinc at the source Nyquist frequency. It removes those images and the hold's in-band droop, for luma and chroma alike, and leaves flat areas and edge positions where the hold puts them. Use it for still-image decoder testing, where the cross-colour a decoder produces should come from the picture and not from the mapping.
 

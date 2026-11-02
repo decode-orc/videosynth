@@ -129,16 +129,19 @@ void SectionEditor::BuildUi() {
   multi_edit_hint_->setVisible(false);
   layout->addWidget(multi_edit_hint_);
 
+  // Groups follow the project file's section key order, which is the signal
+  // flow: source, cadence, disc codes, picture processing, OSD burn-in,
+  // impairments, then audio.
   layout->addWidget(BuildGeneralGroup());
-  layout->addWidget(BuildCadenceGroup());
   layout->addWidget(BuildProbeGroup());
-  layout->addWidget(BuildAudioGroup());
-  layout->addWidget(BuildLumaBandwidthGroup());
+  layout->addWidget(BuildCadenceGroup());
+  layout->addWidget(BuildLaserdiscGroup());
   layout->addWidget(BuildPictureGroup());
+  layout->addWidget(BuildLumaBandwidthGroup());
+  layout->addWidget(BuildOsdGroup());
   layout->addWidget(BuildNoiseGroup());
   layout->addWidget(BuildDropoutsGroup());
-  layout->addWidget(BuildOsdGroup());
-  layout->addWidget(BuildLaserdiscGroup());
+  layout->addWidget(BuildAudioGroup());
   layout->addStretch();
 
   scroll->setWidget(content_);

@@ -78,8 +78,9 @@ Command-line options take precedence over the environment. The GUI also looks fo
 
 | Code | Meaning |
 |------|---------|
-| `0` | Success — validated cleanly, or generated successfully |
-| non-zero | Validation errors, or a generation failure |
+| `0` | Success — validated cleanly, or generated successfully (also after `--version`) |
+| `1` | Parse or validation errors, or a generation failure |
+| `2` | Invalid command line — unknown option, missing `--project`, a missing or malformed option value, or an unsupported `--log-level`; the usage text is printed |
 
 ## The GUI's options
 

@@ -151,7 +151,7 @@ Setting `start_value: 1` on every chapter would restart the numbering at each bo
 
 ## `vitc` line injections
 
-A section's separate `line_injections:` list now carries only `vitc`, which is **not implemented** — using it is a validation error:
+A section's separate `line_injections:` list carries only `vitc`, which is **not implemented** — using it is a validation error:
 
 ```text
 Project configuration error: line injection type 'vitc' is not implemented in

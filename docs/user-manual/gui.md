@@ -67,17 +67,17 @@ Every dock can be hidden, floated or rearranged; **View → Panels** toggles the
 
 - **Project** — name, version, description.
 - **CVBS Presets** — video standard, sample encoding, signal state, and the standard-specific options (NTSC black setup override, SECAM field identification). The signal state follows the standard: `STANDARD_STABLE_UNLOCKED` for [SECAM](video-signal.md#secam-chroma), `STANDARD_STABLE_LOCKED` otherwise. Options that do not apply to the selected standard are disabled rather than hidden.
+- **Output** — video path and signal type, and **Picture truth**, which writes the [component picture](../reference/output.md#truth) beside the video (not offered for SECAM).
 - **VITS** — the VITS **Placement** policy (*Standard (broadcast lines)*, *Laserdisc (IEC 60856/60857)* or *Custom (choose lines)*) and the VITS checklist. SECAM has no laserdisc placement. See [VITS](vits.md).
+- **LaserDisc** — the [LaserDisc settings](#laserdisc), for disc projects only.
 - **Channel (pressing)** — the [`channel:` block](../reference/channel.md): a sub-sample **timing offset**, plus optional **Edge smear** (fraction and time constant). These describe the pressing, so every project of one pressing should use the same values.
 - **Chroma error (capture)** — the [`chroma_error:` block](../reference/chroma-error.md): chroma **gain** and **phase**, **Include burst**, plus optional **Per-line jitter** (phase and gain deviations, with an optional fixed seed), **Differential gain and phase** (gain and phase curves against luma level, in IRE) and **Crosstalk** (V into U, U into V, and **Alternate with PAL V-switch**, which NTSC cannot carry). It is not available for SECAM.
-- **Output** — video path and signal type, and **Picture truth**, which writes the [component picture](../reference/output.md#truth) beside the video (not offered for SECAM).
-- **LaserDisc** — the [LaserDisc settings](#laserdisc), for disc projects only.
 
 Ticking a group that was off fills in typical values, which you can then edit. Changing the standard in the New Project dialog clears the settings the new standard cannot carry: the picture truth and chroma error on SECAM, and the LaserDisc settings described below.
 
 ### LaserDisc
 
-Everything specific to LaserDisc is in one checkable **LaserDisc** group at the bottom of the project settings — the project's [`laserdisc:` block](../reference/laserdisc.md). Leave it unticked for a project that is not a disc: its contents stay hidden, and sections show no LaserDisc group either. SECAM has no LaserVision format, so the group is disabled for SECAM projects. Ticked, it holds:
+Everything specific to LaserDisc is in one checkable **LaserDisc** group in the project settings, after **VITS** — the project's [`laserdisc:` block](../reference/laserdisc.md). Leave it unticked for a project that is not a disc: its contents stay hidden, and sections show no LaserDisc group either. SECAM has no LaserVision format, so the group is disabled for SECAM projects. Ticked, it holds:
 
 - **Disc format** — *(none)*, *CAV* or *CLV*. Sections need a disc format before they can carry laserdisc codes.
 - **PAL pilot burst (IEC 60856 §9.1.2)** and **NTSC VBI burst (IEC 60857 §9.1.2)** — each enabled only on its own standard. See [LaserDisc signal options](video-signal.md#laserdisc-signal-options).
@@ -111,15 +111,22 @@ Selecting a section moves the preview to that section's first output frame. Scru
 
 ## The section editor
 
-The centre pane is a set of collapsible groups covering everything a section holds.
+The centre pane is a column of groups covering everything a section holds, in the same order as the section's keys in the [project file](../reference/overview.md#canonical-key-order). Optional groups are checkable: unticked, a group's block is absent from the project.
 
-**Section** — name, source frames, duration and frame range.
+**Section** — name, source, source frames, duration and frame range.
 
 - **Source frames** selects the run of a video's frames the section plays: a start frame, and an end frame or **To end of source**. The fields are enabled for video sources only, and the probed frame count caps them. Moving the start past a set end moves the end with it.
 - **Duration** is shown in frames with the equivalent time at the project's frame rate beside it. **All source frames** plays the selected range, with a **repeat** count and a summary such as *10 frames x 3 = 30 total*. A fixed duration longer than the range loops it, and the summary says so.
 - In a 2:3 pulldown section the summary counts film frames and the output frames they fill from where the cadence starts, such as *48 film frames x 1 = 48 → 60 frames (2:3 from A1)*. A fixed duration shows the film frames it plays. For a section that continues the previous cadence after a section of unknown length, the summary says the output frames depend on where that cadence ends. A still has no length of its own, so **All source frames** is unavailable for it.
 - Choosing a different video sets the duration to **All source frames** and resets the range to the whole clip. Choosing a still clears the range and replaces an **All source frames** duration with a frame count. Opening a project never rewrites a duration.
-- **Frame range** is the section's span in the output, counted across the preceding sections.
+- **Frame range** is the section's span in the output, counted across the preceding sections. In a disc project the row below it gives the section's **CAV picture numbers** or **CLV timecode**.
+
+The **Source** is a two-way choice:
+
+- **Built-in asset** — pick an asset type (*Still image (EXR)* or *Video*) and a file name from a dropdown of the shipped assets. The raster is derived from the project standard and is not a field you set, so changing the standard self-heals the path.
+- **Local file** — a browsed `.mkv`, `.mp4` or `.exr` file, stored relative to the project when **Relative to project** is ticked, absolute otherwise.
+
+**Source Profile** — the result of probing the chosen file: whether it matches a supported profile, its raster, rate (a 24000/1001 source shows as *Film 24000/1001*), codec, pixel format and frame count, the colour conversion a video will receive (or that it is used unconverted), and any warnings such as an opposite field order. The frame rate is checked against the section's cadence: a film source fits only a 2:3 pulldown section, and changing the pattern probes the source again. Probing runs in the background; the editor shows *Probing source…* until it completes.
 
 **Cadence** — how the section's frames map onto output fields (see [`cadence`](../reference/sections.md#cadence)):
 
@@ -129,16 +136,18 @@ The centre pane is a set of collapsible groups covering everything a section hol
 
 Choosing *Video* removes the `cadence` block from the project file. Choosing an EXR still returns the pattern to *Video*, since a still has no film frames.
 
-**Section Source** — a two-way choice:
+**LaserDisc** — shown only when the project's [LaserDisc group](#laserdisc) is ticked. Ticking it for a section makes the section part of the disc — its [`laserdisc:` block](../reference/section-laserdisc.md) — and seeds a disc area with its recommended codes:
 
-- **Built-in asset** — pick an asset type (*Still image (EXR)* or *Video*) and a file name from a dropdown of the shipped assets. The raster is derived from the project standard and is not a field you set, so changing the standard self-heals the path.
-- **Local file** — a browsed `.mkv`, `.mp4` or `.exr` file, stored relative to the project when **Relative to project** is ticked, absolute otherwise.
+- **Disc area** — *(none)*, `lead_in`, `programme_area` or `lead_out`. It decides which codes the section may carry.
+- **Codes** — the laserdisc code checklist, filtered by the project's disc format and the section's disc area. The **…** button beside a programme status code opens the **Programme Status Code** dialog.
 
-**Source Profile** — the result of probing the chosen file: whether it matches a supported profile, its raster, rate (a 24000/1001 source shows as *Film 24000/1001*), codec, pixel format and frame count, the colour conversion a video will receive (or that it is used unconverted), and any warnings such as an opposite field order. The frame rate is checked against the section's cadence: a film source fits only a 2:3 pulldown section, and changing the pattern probes the source again. Probing runs in the background; the editor shows *Probing source…* until it completes.
+Unticking it clears the section's disc area and codes. See [Laserdisc discs](laserdisc.md).
+
+**Picture mapping** — **Horizontal resampling** chooses between **Nearest pixel** (the default zero-order hold) and **Band-limited** [interpolation](video-signal.md#horizontal-mapping). The **Chroma line sign** table lists the [decoder-stress regions](video-signal.md#pal-decoder-stress-regions): each row is a source rectangle (X, Y, Width, Height in pixels and rows) and how its **U** and **V** are carried (**Normal** or **Follow switch**). **Add region** places a 48×48 block after the last one; **Remove region** removes the selected row. The table is available for PAL and PAL-M projects; on other standards it stays enabled only while it holds regions, so they can be removed.
 
 **Luma bandwidth limit** — a low-pass on the picture luma, set by its **cutoff** (the −6 dB point) and **transition width**. The cutoff's upper limit follows the standard and the transition width. See [Luma bandwidth](impairments.md#luma-bandwidth).
 
-**Picture mapping** — **Horizontal resampling** chooses between **Nearest pixel** (the default zero-order hold) and **Band-limited** [interpolation](video-signal.md#horizontal-mapping). The **Chroma line sign** table lists the [decoder-stress regions](video-signal.md#pal-decoder-stress-regions): each row is a source rectangle (X, Y, Width, Height in pixels and rows) and how its **U** and **V** are carried (**Normal** or **Follow switch**). **Add region** places a 48×48 block after the last one; **Remove region** removes the selected row. The table is available for PAL and PAL-M projects; on other standards it stays enabled only while it holds regions, so they can be removed.
+**On-screen display** — the overlay list, with text, position, scale and foreground/background luma per overlay. The available substitution tokens are listed beneath the text field.
 
 **Noise injection** — two independent layers. See [Impairments](impairments.md).
 
@@ -156,8 +165,6 @@ Each **Spectrum** table lists breakpoints as frequency (MHz) and level (dB). **A
 
 See [Pressing defects](impairments.md#pressing-defects-unflagged-and-disc-anchored-dropouts).
 
-**On-screen display** — the overlay list, with text, position, scale and foreground/background luma per overlay. The available substitution tokens are listed beneath the text field.
-
 **Audio channel pairs** — one entry per stereo pair, with a description and a *Content* choice:
 
 - *Test tones* — either one tone for both channels or independent left/right tones, each optionally a frequency ramp.
@@ -165,13 +172,6 @@ See [Pressing defects](impairments.md#pressing-defects-unflagged-and-disc-anchor
 - *Video soundtrack* — one of the section video's audio streams, listed (codec, channels, sample rate) once the source has been probed. The choice is unavailable for EXR stills and for videos without audio.
 
 Switching the content replaces the pair's settings with the new kind's defaults; undo restores them.
-
-**LaserDisc** — shown only when the project's [LaserDisc group](#laserdisc) is ticked. Ticking it for a section makes the section part of the disc — its [`laserdisc:` block](../reference/section-laserdisc.md) — and seeds a disc area with its recommended codes:
-
-- **Disc area** — *(none)*, `lead_in`, `programme_area` or `lead_out`. It decides which codes the section may carry.
-- **Codes** — the laserdisc code checklist, filtered by the project's disc format and the section's disc area. The **…** button beside a programme status code opens the **Programme Status Code** dialog.
-
-Unticking it clears the section's disc area and codes. See [Laserdisc discs](laserdisc.md).
 
 Every editor is a view onto the project document, so every change is undoable and every change marks the project dirty.
 
@@ -205,7 +205,7 @@ Frames are cached, so scrubbing back and forth is cheap. When a project edit inv
 
 Validation runs continuously in the background, debounced so typing does not trigger a run per keystroke. The Issues dock lists every error and warning; the status bar summarises as *Project valid* or *n error(s), m warning(s)*.
 
-Double-clicking an issue selects the section it relates to and scrolls to the group the issue names: cadence, luma bandwidth, picture mapping, the capture or shared noise layer, or random or scratch dropouts. For a project-level issue it opens **Edit Project…**, scrolled to the **Channel** or **Chroma error** group when the issue is about one of them.
+Double-clicking an issue selects the section it relates to and scrolls to the group the issue names: cadence, luma bandwidth, picture mapping, the capture or shared noise layer, or random or scratch dropouts. For a project-level issue it opens **Edit Project…**, scrolled to the **Channel**, **Chroma error** or **LaserVision channel** group when the issue is about one of them.
 
 Errors block generation. Warnings do not — they flag things that are legal but probably not what you meant, such as a scratch whose lifespan is longer than the section it lives in.
 

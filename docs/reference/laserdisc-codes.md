@@ -171,8 +171,9 @@ Encoded in the MSB of X₁, and computed for you:
 |-----------------------------|----------|
 | Tracks 0–399 | 0 — the player's search passes through |
 | Track 400 onwards | 1 — search may stop here |
-| Any track of a chapter shorter than 800 tracks | 1 |
-| The first chapter after the lead-in | Always 1 |
+
+!!! note
+    IEC 60856/60857 §10.1.5 also sets the stop-bit to 1 throughout a chapter shorter than 800 tracks and throughout the first chapter after the lead-in. videosynth does not apply these exceptions: every chapter starts with 400 tracks of stop-bit 0.
 
 ```text
 X₁ = (stop_bit << 3) | (chapter / 16)
@@ -198,7 +199,7 @@ Audio/video mode and copy permission, with a SECDED Hamming check digit.
 | Nibbles 1–2 | `DC` = CX noise reduction on, `BA` = off |
 | X₃ | Disc size, disc side, teletext presence, copy permission |
 | X₄ | Audio/video mode — 0–3 standard, 8 = mono dump |
-| X₅ | Hamming check, computed automatically |
+| X₅ | Hamming check on X₄. Written as given in the hex value; the GUI dialog below computes it |
 
 ```yaml
 - code_type: programme_status
@@ -323,7 +324,7 @@ Carries the CAV picture number in the 40-bit FM format, advancing with the 24-bi
 | Disc area | `programme_area` |
 | Lines | 10, 273 |
 
-Carries CLV programme time in the 40-bit FM format. The X₅ mode indicator distinguishes the disc area: A = lead-in, B = end of lead-in, D = programme, C = lead-out.
+Carries CLV programme time (minutes and seconds) in the 40-bit FM format. The code is legal only in the programme area, so its X₅ mode indicator is always D (programme).
 
 ```yaml
 - code_type: fm_programme_time

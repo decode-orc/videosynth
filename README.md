@@ -286,7 +286,7 @@ Hand-authored projects live in [projects/](projects/):
 
 | Directory | Contents |
 |-----------|----------|
-| [projects/general/](projects/general/) | Feature examples — audio, EFM audio, VITS, progressive EXR/MKV sources, PAL pilot burst, NTSC 2:3 pulldown film (composite) |
+| [projects/general/](projects/general/) | Feature examples — audio, EFM audio, VITS, progressive EXR/MKV sources (including SECAM), PAL pilot burst, NTSC VBI burst, PAL LaserVision channel, NTSC 2:3 pulldown film, PAL decoder-stress card and zone plates with picture truth (composite) |
 | [projects/general-yc/](projects/general-yc/) | PAL and NTSC audio examples with Y/C output |
 | [projects/stacking/](projects/stacking/) | Laserdisc disc simulation and multi-source stacking sets for PAL, PAL-M and NTSC |
 | [projects/long-form/](projects/long-form/) | Three-hour capture-sized PAL and NTSC examples (VITS, analogue stereo audio) for testing against realistic file sizes |
@@ -299,7 +299,8 @@ excluded from the suites below; run them by hand with `--output-root` pointing
 at storage that can hold the result.
 
 Derived variants (the `stacking-captures` set, the impairment-free
-`stacking-clean` set and the Y/C `stacking-yc` set) are generated into `build/generated-projects/` at build time
+`stacking-clean` set, the Y/C `stacking-yc` set and the `film-clv` and
+`film-pal-m` film sets) are generated into `build/generated-projects/` at build time
 by [scripts/generate_test_projects.py](scripts/generate_test_projects.py) and
 are not committed. Add a variant by editing `variants.json`, not by copying
 YAML.
@@ -378,11 +379,14 @@ scripts/output-hashes.sh
 | Script | Purpose |
 |--------|---------|
 | [scripts/generate_test_projects.py](scripts/generate_test_projects.py) | Derive variant projects from `projects/` (run automatically by the build) |
+| [scripts/migrate_laserdisc_keys.py](scripts/migrate_laserdisc_keys.py) | Rewrite project files that carry LaserDisc keys outside the `laserdisc:` blocks |
+| [scripts/generate_fm_beat_reference.py](scripts/generate_fm_beat_reference.py) | Rewrite the FM-beat golden vectors from the reference beat model (needs numpy and scipy; not part of the build) |
 | [scripts/compare_frames.py](scripts/compare_frames.py) | Bit-exact comparison of a picture number across stacking sources |
 | [scripts/compare_frames_detail.py](scripts/compare_frames_detail.py) | As above, split by VBI vs active video |
 | [scripts/convert_progressive_raw_to_exr.py](scripts/convert_progressive_raw_to_exr.py) | Convert raw yuv422p10le stills to OpenEXR fixtures |
 | [scripts/run_stage1_raw_to_exr_conversion.sh](scripts/run_stage1_raw_to_exr_conversion.sh) | Run the EXR conversion in an ad-hoc Nix shell |
 | [scripts/render-icons.sh](scripts/render-icons.sh) | Render the application icon PNG set from the logo SVG |
+| [scripts/prepare-flatpak-manifest.py](scripts/prepare-flatpak-manifest.py) | Write a copy of the Flatpak manifest with the release version and date filled in |
 
 ---
 

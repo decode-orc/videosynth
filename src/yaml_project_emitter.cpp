@@ -682,12 +682,12 @@ void EmitSection(YAML::Emitter& out, const Section& section) {
   EmitCadence(out, section.cadence);
   EmitSectionLaserdisc(out, section);
   EmitLineInjections(out, section);
-  EmitLumaBandwidth(out, section.luma_bandwidth);
   EmitHorizontalResample(out, section.horizontal_resample);
   EmitChromaLineSign(out, section.chroma_line_sign);
+  EmitLumaBandwidth(out, section.luma_bandwidth);
+  EmitOsd(out, section.osd);
   EmitNoise(out, section.noise);
   EmitDropouts(out, section.dropouts);
-  EmitOsd(out, section.osd);
   EmitAudio(out, section);
   out << YAML::EndMap;
 }

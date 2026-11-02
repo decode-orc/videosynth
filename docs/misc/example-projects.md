@@ -6,7 +6,7 @@ The repository ships a set of hand-authored projects under `projects/`, covering
 
 | Directory | Contents |
 |-----------|----------|
-| `projects/general/` | Feature examples — audio, EFM audio, VITS, progressive EXR and MKV sources, the PAL pilot burst, the NTSC VBI burst, NTSC film with 2:3 pulldown, the PAL decoder-stress card and zone plates with their picture truth |
+| `projects/general/` | Feature examples — audio, EFM audio, VITS, progressive EXR and MKV sources (including a SECAM still), the PAL pilot burst, the NTSC VBI burst, the PAL LaserVision channel, NTSC film with 2:3 pulldown, the PAL decoder-stress card and zone plates with their picture truth |
 | `projects/general-yc/` | PAL and NTSC audio examples with Y/C output |
 | `projects/stacking/` | Laserdisc disc simulation and multi-source stacking sets for PAL, PAL-M and NTSC |
 | `projects/long-form/` | Three-hour capture-sized PAL and NTSC examples, for testing against realistic file sizes |
@@ -50,7 +50,7 @@ The `stacking-captures` variant derives six captures of every pressing. Each has
 
 A `captures` entry in `projects/variants.json` may set `chroma_error` (a mapping that replaces the project's block, or `null` to remove it) and `timing_offset_samples` (written to `channel.timing_offset_samples`), alongside `capture_seed`, `remove_sections` and `repeat_sections`. The variant's `capture_seed_offsets` maps source filename globs to an integer added to the capture seeds of every matching source.
 
-`stacking-clean` derives an impairment-free truth for every capture (`_capN_clean`). It removes the noise and the dropouts, pressing defects included, but keeps the `channel:` and `laserdisc.channel:` blocks, because the timing offset, the beat and the smear are part of the pressing. The captures of one pressing then match each other on every picture number, apart from capture noise and the overrides of captures 5 and 6. Pressings A and B's truths differ by exactly one sample.
+`stacking-clean` derives an impairment-free truth for every capture (`_capN_clean`). It removes the noise, the dropouts (pressing defects included) and the OSD, but keeps the `channel:` and `laserdisc.channel:` blocks, because the timing offset, the beat and the smear are part of the pressing. The captures of one pressing then match each other on every picture number, apart from capture noise and the overrides of captures 5 and 6. Pressings A and B's truths differ by exactly one sample.
 
 ### Film with 2:3 pulldown
 
@@ -71,7 +71,7 @@ The `<standard>_discsim_A`–`_D` projects are four captures of one 40-frame CAV
 
 ### Decoder stress and zone plates
 
-`pal_decoder_stress.yaml` plays the [`PAL_STRESS.exr`](../user-manual/sources.md#stills-exr) card for 8 frames (two full PAL colour sequences) with its two [`chroma_line_sign`](../reference/sections.md#chroma_line_sign) regions — line-alternating V on the left bar, anti-PAL U on the right — then the static luma and chroma zone plates for 4 frames each. `ntsc_zone_plates.yaml` plays the two zone plates on NTSC. Every section uses the [band-limited mapping](../reference/sections.md#horizontal_resample), and both projects write the [picture truth](../reference/output.md#truth), so a decoder's output can be scored against the component picture that was encoded.
+`pal_decoder_stress.yaml` plays the [`PAL_STRESS.exr`](../user-manual/sources.md#stills-exr) card for 8 frames (two full PAL colour sequences) with its three [`chroma_line_sign`](../reference/sections.md#chroma_line_sign) regions — line-alternating V on the left outer strip and the burst-gate check, anti-PAL U on the right outer strip — then the static luma and chroma zone plates for 4 frames each. `ntsc_zone_plates.yaml` plays the two zone plates on NTSC. Every section uses the [band-limited mapping](../reference/sections.md#horizontal_resample), and both projects write the [picture truth](../reference/output.md#truth), so a decoder's output can be scored against the component picture that was encoded.
 
 ## Running a suite
 
@@ -135,6 +135,7 @@ scripts/output-hashes.sh
 |--------|---------|
 | `scripts/generate_test_projects.py` | Derive variant projects from `projects/` (run automatically by the build), including the per-capture seeds and timelines of the pressing sets |
 | `scripts/generate_fm_beat_reference.py` | Rewrite the FM-beat golden vectors (`tests/unit/fm_beat_reference_vectors.h`) from the reference beat model; needs numpy and scipy, and is not part of the build |
+| `scripts/migrate_laserdisc_keys.py` | Rewrite project files that still carry LaserDisc keys outside the `laserdisc:` blocks; see [`laserdisc`](../reference/laserdisc.md#laserdisc-keys-in-other-blocks) |
 | `scripts/compare_frames.py` | Bit-exact comparison of a picture number across stacking sources |
 | `scripts/compare_frames_detail.py` | As above, split by VBI versus active video |
 | `scripts/convert_progressive_raw_to_exr.py` | Convert raw `yuv422p10le` stills to OpenEXR fixtures |

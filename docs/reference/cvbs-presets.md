@@ -75,7 +75,7 @@ Because the generated signal is one unbroken sequence — subcarrier phase and c
 | `7.5` | Standards-based NTSC setup — black sits 7.5 IRE above blanking |
 | `0.0` | Black at blanking (0 IRE), as in Japanese NTSC and digital-origin material |
 
-**NTSC and PAL-M only.** Specifying it on a PAL project is a validation error, and any value other than `7.5` or `0.0` is rejected.
+**NTSC and PAL-M only.** Specifying it on a PAL or SECAM project is a validation error, and any value other than `7.5` or `0.0` is rejected.
 
 ```text
 Project configuration error: ntsc_black_setup_ire can only be specified for

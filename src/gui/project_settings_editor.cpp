@@ -208,10 +208,6 @@ void ProjectSettingsEditor::BuildUi() {
   connect(setup_ire_combo_, &QComboBox::activated, this,
           &ProjectSettingsEditor::CommitCvbsPresets);
 
-  layout->addWidget(BuildVitsGroup());
-  layout->addWidget(BuildChannelGroup());
-  layout->addWidget(BuildChromaErrorGroup());
-
   // --- output: -------------------------------------------------------------
   auto* output_group = new QGroupBox(tr("Output"), this);
   auto* output_form = new QFormLayout(output_group);
@@ -254,9 +250,14 @@ void ProjectSettingsEditor::BuildUi() {
   output_form->addRow(QString(), outputs_note_);
   layout->addWidget(output_group);
 
-  // Everything LaserDisc-specific sits last, in one group that stays a single
-  // title row for projects without a laserdisc block.
+  // The remaining groups follow the project file's block order: the signal
+  // content (VITS, then everything LaserDisc-specific in one group that stays
+  // a single title row for projects without a laserdisc block), then the
+  // pressing and capture impairments.
+  layout->addWidget(BuildVitsGroup());
   layout->addWidget(BuildLaserdiscGroup());
+  layout->addWidget(BuildChannelGroup());
+  layout->addWidget(BuildChromaErrorGroup());
 
   layout->addStretch();
 

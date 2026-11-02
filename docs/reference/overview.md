@@ -32,15 +32,19 @@ Everything specific to LaserDisc is in the `laserdisc:` block, and in the `laser
 
 ## Section blocks
 
-Each entry in `sections:` may carry these optional sub-blocks:
+Each entry in `sections:` may carry these optional keys, listed in [canonical order](#canonical-key-order):
 
 | Sub-block | Purpose | Page |
 |-----------|---------|------|
+| `cadence` | Film pulldown cadence | [sections](sections.md#cadence) |
 | `laserdisc` | Disc area and biphase codes for this section | [section laserdisc](section-laserdisc.md) |
+| `line_injections` | Section line injections (`vitc`, not implemented) | [section laserdisc](section-laserdisc.md#vitc-line-injections) |
+| `horizontal_resample` | Source-pixel to 4fsc-sample mapping | [sections](sections.md#horizontal_resample) |
+| `chroma_line_sign` | Per-region PAL chroma line sign | [sections](sections.md#chroma_line_sign) |
 | `luma_bandwidth` | Low-pass on the picture luma | [sections](sections.md#luma_bandwidth) |
+| `osd` | On-screen display overlays | [osd](section-osd.md) |
 | `noise` | Gaussian noise injection | [noise](section-noise.md) |
 | `dropouts` | Random and scratch dropouts | [dropouts](section-dropouts.md) |
-| `osd` | On-screen display overlays | [osd](section-osd.md) |
 | `audio` | Audio channel pairs | [audio](section-audio.md) |
 
 ## Value catalogues
@@ -74,7 +78,9 @@ sections:
 
 ## Canonical key order
 
-videosynth can write projects as well as read them, and the emitter uses a fixed key order. A project saved by the GUI comes back in this shape, which keeps files diffable. Hand-written projects need not follow it — order is not significant to the parser — but matching it avoids gratuitous diffs the first time a file passes through the GUI.
+videosynth can write projects as well as read them, and the emitter uses a fixed key order. A project saved by the GUI comes back in this shape, which keeps files diffable. The order follows the signal: the format, outputs and signal content come before the pressing and capture impairments. Within a section the order is the source and its timing, the disc codes, the picture processing (horizontal mapping, chroma line sign, luma limit), the OSD burn-in, the impairments, and then audio. The GUI's project and section editors show their groups in the same order.
+
+Hand-written projects need not follow it — order is not significant to the parser — but matching it avoids gratuitous diffs the first time a file passes through the GUI.
 
 ```yaml
 project:
@@ -166,9 +172,26 @@ sections:
     line_injections:
       - type:
         target_lines:
+    horizontal_resample:
+    chroma_line_sign:
+      - region:
+          x:
+          y:
+          width:
+          height:
+        u:
+        v:
     luma_bandwidth:
       cutoff_mhz:
       transition_mhz:
+    osd:
+      overlays:
+        - text:
+          x:
+          y:
+          scale:
+          fg_luma:
+          bg_luma:
     noise:
       noise_db:
       noise_spread_db:
@@ -194,14 +217,6 @@ sections:
         seed:
         flagged:
         anchor:
-    osd:
-      overlays:
-        - text:
-          x:
-          y:
-          scale:
-          fg_luma:
-          bg_luma:
     audio:
       channel_pairs:
         - pair:

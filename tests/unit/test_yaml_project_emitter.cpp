@@ -237,6 +237,62 @@ TEST(YamlProjectEmitterTest, MinimalProjectKeepsCanonicalTopLevelOrder) {
   EXPECT_LT(output_pos, sections_pos);
 }
 
+// Section keys follow the signal flow: the picture mapping and luma limit,
+// then the OSD burn-in, then the impairments, then audio.
+TEST(YamlProjectEmitterTest, SectionBlocksFollowSignalFlowOrder) {
+  YamlProjectParser parser;
+  const ParseResult parsed = parser.ParseString(R"(
+cvbs_presets:
+  video_standard_preset: PAL
+output:
+  video_path: out/video.cvbs
+sections:
+  - name: Bars
+    type: progressive
+    source: assets/bars.exr
+    duration_frames: 10
+    audio:
+      channel_pairs:
+        - pair: 1
+          left: {waveform: sine, frequency: 1000, amplitude: 0.5}
+          right: {waveform: sine, frequency: 1000, amplitude: 0.5}
+    dropouts:
+      random: {scale: 1}
+    noise:
+      noise_db: 45
+    osd:
+      overlays:
+        - text: "X"
+    luma_bandwidth:
+      cutoff_mhz: 3.0
+    chroma_line_sign:
+      - region: {x: 0, y: 0, width: 10, height: 10}
+        u: follow_switch
+    horizontal_resample: bandlimited
+    cadence:
+      pattern: "2:3"
+)");
+  ASSERT_TRUE(parsed.ok) << (parsed.errors.empty() ? ""
+                                                   : parsed.errors.front());
+
+  const std::string emitted = YamlProjectEmitter().EmitString(parsed.project);
+  const std::vector<std::string> order = {"    cadence:",
+                                          "    horizontal_resample:",
+                                          "    chroma_line_sign:",
+                                          "    luma_bandwidth:",
+                                          "    osd:",
+                                          "    noise:",
+                                          "    dropouts:",
+                                          "    audio:"};
+  std::size_t previous = 0;
+  for (const std::string& key : order) {
+    const std::size_t position = emitted.find(key);
+    ASSERT_NE(position, std::string::npos) << key << "\n" << emitted;
+    EXPECT_GT(position, previous) << key << "\n" << emitted;
+    previous = position;
+  }
+}
+
 TEST(YamlProjectEmitterTest, ProjectMetadataRoundTripsNameVersionDescription) {
   ExpectRoundTrip(R"(
 project:

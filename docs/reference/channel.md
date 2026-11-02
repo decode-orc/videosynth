@@ -16,7 +16,7 @@ Every project that models one pressing must use the same `channel:` block. The [
 
 ## Keys
 
-The block must set at least one of `timing_offset_samples` and `edge_smear`. An empty `channel:` block, or any other key, is a parse error; `fm_beat` here is rejected with an error naming its new place, `laserdisc.channel.fm_beat`.
+The block must set at least one of `timing_offset_samples` and `edge_smear`. An empty `channel:` block, or any other key, is a parse error; `fm_beat` here is rejected with an error pointing to `laserdisc.channel.fm_beat`.
 
 | Key | Type | Required | Range | Description |
 |-----|------|----------|-------|-------------|

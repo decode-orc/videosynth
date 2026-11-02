@@ -70,7 +70,7 @@ Unknown keys are rejected outright, at every level, naming the offending key and
 
 These apply only to a project with a [`laserdisc:`](../reference/laserdisc.md) block.
 
-- Each old LaserDisc key outside the `laserdisc:` blocks (`cvbs_presets.pal_laserdisc_pilot_burst`, `output.efm_audio`, `line_injections.disc_type`, `channel.fm_beat`, `sections[].section_type` and the rest) is a parse error naming its new place; see [where these settings used to live](../reference/laserdisc.md#where-these-settings-used-to-live).
+- Each LaserDisc key outside the `laserdisc:` blocks (`cvbs_presets.pal_laserdisc_pilot_burst`, `output.efm_audio`, `line_injections.disc_type`, `channel.fm_beat`, `sections[].section_type` and the rest) is a parse error naming its place in them; see [LaserDisc keys in other blocks](../reference/laserdisc.md#laserdisc-keys-in-other-blocks).
 - An empty `laserdisc:` block, or an unknown key in it, is a parse error; so is an empty section `laserdisc:` block.
 - A section `laserdisc:` block needs the project-level block.
 - `disc_type` must be `CAV` or `CLV`.
@@ -154,7 +154,7 @@ Checks that read audio files or soundtrack streams run with the CLI, `--validate
 ### On-screen display
 
 - `scale` 1–4; `fg_luma` and `bg_luma` from their permitted sets.
-- Every token in `text` must be one of the six known tokens.
+- Every token in `text` must be one of the eight known tokens.
 
 ## Not yet implemented
 
@@ -165,7 +165,7 @@ Some of the intended design is described by the schema but has no runtime behavi
 | `type: vitc` — vertical interval timecode | Error: *line injection type 'vitc' is not implemented in the current runtime* (without `target_lines` it fails earlier, on the missing lines) |
 | `type: line_content` — custom per-line content | Error: *unsupported injection type 'line_content'* |
 
-`laserdisc` is therefore the only usable section-level injection type today, and VITS remain project-level.
+No section-level line injection type is therefore usable: laserdisc codes go in the section's [`laserdisc.codes`](../reference/section-laserdisc.md#codes) list, and VITS are project-level.
 
 ## Reading an error
 
@@ -174,7 +174,7 @@ Validation messages name the rule and the value that broke it:
 ```text
 Laserdisc injection validation error: code_type 'picture_number' is not allowed in 'lead_in' sections.
 Line injection validation error: VITS target line 17 conflicts with laserdisc reserved VBI ranges for NTSC.
-Line injection validation error: target_lines must not be specified for laserdisc injections.
+laserdisc.codes[] contains unsupported field: 'target_lines'.
 Laserdisc injection warning: CAV lead_out section has 500 frames; IEC 2 mm minimum at 1.6 um track pitch requires 1250.
 ```
 

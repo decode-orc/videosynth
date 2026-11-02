@@ -36,9 +36,9 @@ The setup pedestal is a System M concept. Remove the key from PAL projects.
 
 ### `cvbs_presets.pal_laserdisc_pilot_burst has moved to laserdisc.pilot_burst.`
 
-The project file predates the `laserdisc:` block. Every LaserDisc setting now lives there or in a section's own `laserdisc:` block, and each old key gives this error with its new place:
+The project uses a LaserDisc key outside the `laserdisc:` blocks. Every LaserDisc setting lives in the project's `laserdisc:` block or in a section's own `laserdisc:` block, and each key found elsewhere gives this error naming its place:
 
-| Old key | New key |
+| Rejected key | Use instead |
 |---------|---------|
 | `cvbs_presets.pal_laserdisc_pilot_burst` | `laserdisc.pilot_burst` |
 | `cvbs_presets.ntsc_laserdisc_vbi_burst` | `laserdisc.vbi_burst` |
@@ -58,7 +58,7 @@ Move each key; the values are unchanged. A section's codes list moves up one lev
           start_value: 1
 ```
 
-Opening and saving the project in the GUI does not convert it: the old keys fail to parse. See [`laserdisc`](../reference/laserdisc.md#where-these-settings-used-to-live).
+Opening and saving the project in the GUI does not convert it: the keys fail to parse. `scripts/migrate_laserdisc_keys.py` rewrites such files in place; see [`laserdisc`](../reference/laserdisc.md#laserdisc-keys-in-other-blocks).
 
 ### `section.laserdisc.area has unrecognised value 'x'`
 
@@ -254,7 +254,7 @@ You have set `start_value: 1` on `picture_number` in a later section, which re-a
 
 ### `channel block must set at least one of: timing_offset_samples, edge_smear`
 
-An empty `channel:` block configures nothing. Omit the block for an ideal channel, or set `timing_offset_samples` or `edge_smear`. A `channel:` block that held only `fm_beat` is now empty: the beat is in `laserdisc.channel`.
+An empty `channel:` block configures nothing. Omit the block for an ideal channel, or set `timing_offset_samples` or `edge_smear`. Moving `fm_beat` to `laserdisc.channel` out of a `channel:` block that held nothing else leaves it empty, so remove the block.
 
 ### `timing_offset_samples must be in the range [-8.0, 8.0]`
 

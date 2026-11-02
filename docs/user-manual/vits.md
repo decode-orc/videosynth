@@ -50,7 +50,7 @@ Remember that line numbers are sequential across the whole frame, so 280–331 a
 
 ### `standard` (default)
 
-Each VITS type must sit on its broadcast recommended line, as listed above. Any other line is rejected. `virs` has no fixed line, so it may go on any line. This is what you want for broadcast-style test material, and it is what projects written before the field existed get.
+Each VITS type must sit on its broadcast recommended line, as listed above. Any other line is rejected. `virs` has no fixed line, so it may go on any line. This is what you want for broadcast-style test material, and it is what a project without a `placement` key gets.
 
 ```yaml
 line_injections:

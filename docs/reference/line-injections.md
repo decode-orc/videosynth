@@ -33,7 +33,7 @@ How strictly the validator constrains each VITS entry's `target_lines`.
 | `laserdisc` | VITS must sit on the laserdisc VBI lines — PAL 19, 20, 332, 333; NTSC/PAL-M 19, 20, 282, 283. Not available for `SECAM` |
 | `custom` | Any valid VBI line, subject to the overlap and reserved-range rules |
 
-`standard` is also assumed when the key is absent, which preserves the behaviour of projects written before it existed.
+`standard` is used when the key is absent.
 
 Under `custom` the validator still rejects overlapping lines, and when [`laserdisc.disc_type`](laserdisc.md#disc_type) is set it still rejects the reserved address-code ranges.
 

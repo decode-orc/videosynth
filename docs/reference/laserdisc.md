@@ -91,12 +91,12 @@ The LaserVision pressing and replay channel: the FM-beat herringbone recorded on
 - A section with a `laserdisc` block in a project without one is a validation error.
 - The whole block on a SECAM project is a validation error.
 
-## Where these settings used to live
+## LaserDisc keys in other blocks
 
-Earlier project files spread the LaserDisc settings across the general blocks. They are now rejected there, each with an error naming the new place:
+The LaserDisc settings are accepted only in the `laserdisc` blocks. Each of these keys is a parse error in the other blocks, and the error names the key to use instead:
 
-| Old key | New key |
-|---------|---------|
+| Rejected key | Use instead |
+|--------------|-------------|
 | `cvbs_presets.pal_laserdisc_pilot_burst` | `laserdisc.pilot_burst` |
 | `cvbs_presets.ntsc_laserdisc_vbi_burst` | `laserdisc.vbi_burst` |
 | `output.efm_audio` | `laserdisc.efm_audio` |
@@ -109,11 +109,11 @@ Earlier project files spread the LaserDisc settings across the general blocks. T
 cvbs_presets.pal_laserdisc_pilot_burst has moved to laserdisc.pilot_burst.
 ```
 
-`scripts/migrate_laserdisc_keys.py` rewrites old project files in place, keeping their comments and layout:
+`scripts/migrate_laserdisc_keys.py` rewrites project files that use these keys in place, keeping their comments and layout:
 
 ```bash
 python3 scripts/migrate_laserdisc_keys.py --check projects/*.yaml   # list what would change
 python3 scripts/migrate_laserdisc_keys.py projects/*.yaml           # rewrite
 ```
 
-It expects block-style YAML as the emitter writes it, and leaves alone (with a message) any file whose layout it does not recognise. Comments that mention the old keys are not rewritten.
+It expects block-style YAML as the emitter writes it, and leaves alone (with a message) any file whose layout it does not recognise. Comments that mention the rejected keys are not rewritten.

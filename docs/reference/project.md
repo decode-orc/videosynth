@@ -14,7 +14,7 @@ project:
 | Key | Type | Required | Description |
 |-----|------|----------|-------------|
 | `name` | string | No | A user-friendly project name |
-| `version` | string | No | Project file version. Quote it — bare `1.0` parses as a number |
+| `version` | string | No | Project file version. Quote it so YAML tools treat it as a string |
 | `description` | string | No | Free-text description |
 
 No other key is accepted.
@@ -23,6 +23,6 @@ No other key is accepted.
 
 `version` is the *project's* version, not videosynth's. It is carried through unchanged and is not interpreted; there is no schema migration keyed off it.
 
-Quote the version. Unquoted `1.0` is a YAML float and `1.10` would become `1.1`.
+Quote the version. videosynth reads the value as the text written, but to other YAML tools an unquoted `1.10` is the number `1.1`.
 
 None of these fields affect the generated signal. They are metadata for the human reading the file and for the GUI's window title and recent-files list.

@@ -10,9 +10,9 @@ sections:
     duration_frames: 250
     start_frame: 0
     laserdisc: {area: programme_area}
+    osd: {}
     noise: {}
     dropouts: {}
-    osd: {}
     audio: {}
 ```
 
@@ -30,12 +30,12 @@ sections:
 | `cadence` | map | No | [field cadence](#cadence) | video cadence |
 | `laserdisc` | map | No | [section `laserdisc`](section-laserdisc.md) — disc area and biphase codes (LaserDisc projects only) | absent |
 | `line_injections` | list | No | `vitc` only, not implemented — see [section `laserdisc`](section-laserdisc.md#vitc-line-injections) | absent |
-| `luma_bandwidth` | map | No | [luma bandwidth limit](#luma_bandwidth) | absent |
 | `horizontal_resample` | string | No | `nearest`, `bandlimited` ([horizontal mapping](#horizontal_resample)) | `nearest` |
 | `chroma_line_sign` | list | No | [chroma line sign regions](#chroma_line_sign) (PAL and PAL-M) | absent |
+| `luma_bandwidth` | map | No | [luma bandwidth limit](#luma_bandwidth) | absent |
+| `osd` | map | No | [osd](section-osd.md) | absent |
 | `noise` | map | No | [noise](section-noise.md) | absent |
 | `dropouts` | map | No | [dropouts](section-dropouts.md) | absent |
-| `osd` | map | No | [osd](section-osd.md) | absent |
 | `audio` | map | No | [audio](section-audio.md) | absent |
 
 No other key is accepted.
@@ -72,13 +72,7 @@ Omitting `duration_frames` means `"all"`. The emitter always writes the key out,
 
 With `duration_frames: "all"`, plays the selected range this many times. Total output frames = range length × `duration_repeat`; each replay restarts at `start_frame`.
 
-Ignored with a fixed integer `duration_frames`, and a warning is emitted if you set it there. The emitter writes it only alongside `duration_frames: all`, so a saved project drops an ignored `duration_repeat`.
-
-## `laserdisc`
-
-Where the section sits on a LaserDisc — `lead_in`, `programme_area` or `lead_out` — and the biphase codes it carries. Only a project with a top-level [`laserdisc`](laserdisc.md) block may use it; omit it for a section that is not part of a disc. The disc area replaces the old `section_type` key, and the codes the old `type: laserdisc` line injection.
-
-The keys, the CAV minimum durations, the [ordering rules](section-laserdisc.md#ordering-rules) and the EFM disc-area mapping are on the [section `laserdisc`](section-laserdisc.md) page.
+Ignored with a fixed integer `duration_frames`, and a warning is emitted if you set it to anything other than `1` there. The emitter writes it only alongside `duration_frames: all`, so a saved project drops an ignored `duration_repeat`.
 
 ## `start_frame`
 
@@ -132,35 +126,11 @@ A [video soundtrack](section-audio.md#video_audio) plays in real time from the r
 
 Validation: `"2:3"` on PAL or SECAM, or on an EXR still, is an error; so is a source frame rate other than 24000/1001 under `"2:3"`, or 24000/1001 under `video`, and `continue` on the first section or after a section that is not `"2:3"`. `phase` together with `continue`, and `phase` or `continuity` under `video`, are ignored with a warning. An unknown value or key is a parse error. The emitter writes the block only when it differs from the video default.
 
-## `luma_bandwidth`
+## `laserdisc`
 
-A low-pass on the section's picture luma, as from a player or transfer with a limited luma frequency response. Optional — omit it for the full 4fsc bandwidth.
+Where the section sits on a LaserDisc — `lead_in`, `programme_area` or `lead_out` — and the biphase codes it carries. Only a project with a top-level [`laserdisc`](laserdisc.md) block may use it; omit it for a section that is not part of a disc. A section-level `section_type` key is a parse error that points to `laserdisc.area`, and a [`line_injections`](section-laserdisc.md#vitc-line-injections) entry with `type: laserdisc` is a parse error that points to `laserdisc.codes`.
 
-```yaml
-- name: SoftPlayer
-  type: progressive
-  source: "{bundled}/exr/720x576/MULTIBURST.exr"
-  duration_frames: 4
-  luma_bandwidth:
-    cutoff_mhz: 3.0
-    transition_mhz: 0.4
-```
-
-| Key | Type | Required | Range | Description |
-|-----|------|----------|-------|-------------|
-| `cutoff_mhz` | float | Yes | 0.5 to 2 f_sc − `transition_mhz` / 2 | The −6 dB point, in MHz |
-| `transition_mhz` | float | No (default 0.4) | 0.1 to 2.0 | Width of the transition band, centred on the cutoff, in MHz |
-
-2 f_sc is half the 4fsc sampling rate: 8.867 MHz for PAL and SECAM, 7.159 MHz for NTSC and 7.151 MHz for PAL-M.
-
-- The filter is a Kaiser-windowed-sinc low-pass. The passband runs to `cutoff_mhz` − `transition_mhz` / 2 with a ripple below 0.003 dB; above `cutoff_mhz` + `transition_mhz` / 2 the stopband is at least 70 dB down (designed for 70 dB; the limit promises 60 dB).
-- It filters the luma of each active picture line across the active window, after the source pixels are mapped to 4fsc samples. It therefore also removes the images that the nearest-pixel column mapping leaves above the cutoff (the [band-limited mapping](#horizontal_resample) avoids them at any frequency, for chroma too).
-- Each line is filtered on its own. Beyond the ends of the active window the line's first and last samples are repeated, so a flat line passes unchanged and the window edges do not ring.
-- Sync, blanking, the VBI, the [VITS](vits-types.md) lines and the chroma are not filtered and are bit-identical to an unlimited section.
-- [OSD](section-osd.md) text is drawn after the filter, so it stays sharp.
-- The channel impairments, noise and dropouts are applied afterwards and are not band-limited.
-
-Validation: `cutoff_mhz` outside its range, or `transition_mhz` outside 0.1–2.0, is an error. `luma_bandwidth` without `cutoff_mhz`, a non-numeric value or another key is a parse error.
+The keys, the CAV minimum durations, the [ordering rules](section-laserdisc.md#ordering-rules) and the EFM disc-area mapping are on the [section `laserdisc`](section-laserdisc.md) page.
 
 ## `horizontal_resample`
 
@@ -222,6 +192,36 @@ Rectangles of the source picture whose U or V is multiplied by each line's PAL V
 
 Validation: the block on an NTSC or SECAM project is an error, as is a region with a zero or negative size, one that leaves the 720×576 (PAL) or 720×486 (PAL-M) raster, or one with neither `u` nor `v` set to `follow_switch`. A missing `region` or coordinate, a non-integer coordinate, an unknown value or key is a parse error. The emitter omits components left `normal`.
 
+## `luma_bandwidth`
+
+A low-pass on the section's picture luma, as from a player or transfer with a limited luma frequency response. Optional — omit it for the full 4fsc bandwidth.
+
+```yaml
+- name: SoftPlayer
+  type: progressive
+  source: "{bundled}/exr/720x576/MULTIBURST.exr"
+  duration_frames: 4
+  luma_bandwidth:
+    cutoff_mhz: 3.0
+    transition_mhz: 0.4
+```
+
+| Key | Type | Required | Range | Description |
+|-----|------|----------|-------|-------------|
+| `cutoff_mhz` | float | Yes | 0.5 to 2 f_sc − `transition_mhz` / 2 | The −6 dB point, in MHz |
+| `transition_mhz` | float | No (default 0.4) | 0.1 to 2.0 | Width of the transition band, centred on the cutoff, in MHz |
+
+2 f_sc is half the 4fsc sampling rate: 8.867 MHz for PAL and SECAM, 7.159 MHz for NTSC and 7.151 MHz for PAL-M.
+
+- The filter is a Kaiser-windowed-sinc low-pass. The passband runs to `cutoff_mhz` − `transition_mhz` / 2 with a ripple below 0.003 dB; above `cutoff_mhz` + `transition_mhz` / 2 the stopband is at least 70 dB down (designed for 70 dB; the limit promises 60 dB).
+- It filters the luma of each active picture line across the active window, after the source pixels are mapped to 4fsc samples. It therefore also removes the images that the nearest-pixel column mapping leaves above the cutoff (the [band-limited mapping](#horizontal_resample) avoids them at any frequency, for chroma too).
+- Each line is filtered on its own. Beyond the ends of the active window the line's first and last samples are repeated, so a flat line passes unchanged and the window edges do not ring.
+- Sync, blanking, the VBI, the [VITS](vits-types.md) lines and the chroma are not filtered and are bit-identical to an unlimited section.
+- [OSD](section-osd.md) text is drawn after the filter, so it stays sharp.
+- The channel impairments, noise and dropouts are applied afterwards and are not band-limited.
+
+Validation: `cutoff_mhz` outside its range, or `transition_mhz` outside 0.1–2.0, is an error. `luma_bandwidth` without `cutoff_mhz`, a non-numeric value or another key is a parse error.
+
 ## Section sub-blocks
 
 Each has its own reference page:
@@ -229,9 +229,9 @@ Each has its own reference page:
 | Block | Purpose |
 |-------|---------|
 | [`laserdisc`](section-laserdisc.md) | Disc area and laserdisc biphase codes |
+| [`osd`](section-osd.md) | On-screen display overlays |
 | [`noise`](section-noise.md) | Gaussian noise injection |
 | [`dropouts`](section-dropouts.md) | Random and scratch dropouts |
-| [`osd`](section-osd.md) | On-screen display overlays |
 | [`audio`](section-audio.md) | Audio channel pairs |
 
 All are optional, and only blocks that are explicitly set are written back out by the emitter.
@@ -245,6 +245,6 @@ All are optional, and only blocks that are explicitly set are written back out b
 - An EXR still takes neither `start_frame` nor `end_frame`, and needs an integer `duration_frames`.
 - A `laserdisc` block needs the project's top-level `laserdisc` block. Disc areas follow the [ordering rules](section-laserdisc.md#ordering-rules), and a section with `codes` must set `area`.
 - `cadence` rules (above).
-- `luma_bandwidth` within its ranges (above).
 - `chroma_line_sign` only on PAL and PAL-M, with every region inside the raster and following the switch on at least one component.
+- `luma_bandwidth` within its ranges (above).
 - CAV lead-in and lead-out minimum durations (warnings; see [section `laserdisc`](section-laserdisc.md#area)).

@@ -179,7 +179,7 @@ VideoSynth currently follows a **six-stage sampled-domain architecture**:
 
 Alongside these six stages, an optional **Audio Track Generator** (`AudioTrackGenerator`) runs when at least one section declares an `audio:` channel pair. Per pair and section it either synthesises test-tone waveforms (`AudioSynthesizer`) or reads an audio file or the section video's soundtrack (`AudioMediaReader` over an `IAudioSampleSource`, implemented by `FfmpegAudioSampleSource`), frame-locked to the video, and streams one stereo 24-bit PCM RIFF/WAVE track per declared channel pair (0–7) to `<basename>_audio_<pair>.wav` (each via an `AudioWavWriter`). The generator is driven with the output-order frame sequence (each frame's section and source time from the schedule, via `AudioOutputFramesForSchedule`), so per-frame sample counts follow output position and every track stays sample-accurately aligned to the stored video frames. See [Section 7 `audio:`](#audio-sub-key-optional-per-section).
 
-When `output.efm_audio` selects one of those channel pairs, the same generator additionally produces that pair at 44 100 Hz (tones synthesised directly, file and video audio read a second time at that rate) and streams it through the `videosynth_efm` module (`AudioEfmWriter`) as a LaserDisc digital audio EFM channel stream written to `<basename>.efm` with its own `<basename>.efm.meta` sidecar. The pair's 48 kHz WAV track is unaffected. See [LaserDisc Digital Audio (EFM) Output](#laserdisc-digital-audio-efm-output).
+When `laserdisc.efm_audio` selects one of those channel pairs, the same generator additionally produces that pair at 44 100 Hz (tones synthesised directly, file and video audio read a second time at that rate) and streams it through the `videosynth_efm` module (`AudioEfmWriter`) as a LaserDisc digital audio EFM channel stream written to `<basename>.efm` with its own `<basename>.efm.meta` sidecar. The pair's 48 kHz WAV track is unaffected. See [LaserDisc Digital Audio (EFM) Output](#laserdisc-digital-audio-efm-output).
 
 ### **Key Principles**
 
@@ -334,7 +334,7 @@ $$
 
 - Line-to-line NTSC burst phase alternates at 4fsc because 910 samples/line corresponds to a $\pi$ radian subcarrier phase advance per line (SMPTE 244M §4.1.1 interpretation in this model).
 - The NTSC colour sequence is modeled as a 2-frame SC-H progression using a frame phase offset of $0$ then $\pi$, repeating (SMPTE 170M field/frame color-sequence behavior).
-- Burst is present on horizontal lines and suppressed on equalizing/broad-sync lines, except with `ntsc_laserdisc_vbi_burst: true`, which keeps it on every line as [IEC 60857](../analogue-video-specifications/docs/laserdisc/IEC-60857-1986-Laservision-NTSC/IEC-60857-1986-Laservision-NTSC.md) §9.1.2 requires (see Section 9, NTSC Laserdisc VBI Burst).
+- Burst is present on horizontal lines and suppressed on equalizing/broad-sync lines, except with `laserdisc.vbi_burst: true`, which keeps it on every line as [IEC 60857](../analogue-video-specifications/docs/laserdisc/IEC-60857-1986-Laservision-NTSC/IEC-60857-1986-Laservision-NTSC.md) §9.1.2 requires (see Section 9, NTSC Laserdisc VBI Burst).
 
 ### **SECAM Chroma Encoding Model**
 
@@ -345,7 +345,7 @@ SECAM is selected with `cvbs_presets.video_standard_preset: SECAM` and follows [
 - The D'R/D'B line sequence follows Figure 16 (line 7 of the first frame is D'R) and runs continuously through the odd-length frame, so it has a 2-frame period. The subcarrier phase at 0H follows the Note 1 pattern 0°, 0°, 180° by frame line, inverted every frame. Because the encoder renders every line from 0H independently of the 4fsc lattice position, the SECAM colour sequence period used by the frame template cache is 2 frames, matching the specification's 2-frame SECAM sequence.
 - Field-blanking lines carry no subcarrier, except the field identification lines 7–15 and 320–328 (enabled by default, `secam_field_identification`), which carry the Figure 17 trapezoids (D'R* to +1.25 over 15 µs, D'B* to −1.52 over 18 µs, starting at the end of line blanking) without low-pass or precorrection.
 - OSD overlays write the colourless (undeviated) subcarrier under their text: the synthesis resources precompute one neutral line per D'R/D'B component and 0H phase, and `OsdRenderer` copies it in place of the zero chroma used for the quadrature standards. The carrier phase restarts at the text edges.
-- No SECAM LaserVision format exists, so laserdisc line injections, `disc_type`, laserdisc VITS placement, the pilot burst and EFM audio are validation errors for SECAM.
+- No SECAM LaserVision format exists, so the top-level `laserdisc:` block (disc type, pilot burst, EFM audio, LaserVision channel), section `laserdisc:` blocks and laserdisc VITS placement are validation errors for SECAM.
 - Known gaps: VITS use the 625-line PAL catalogue and keep their PAL-modulated chroma packets (validator warning), and the optional SECAM luminance intermodulation correction (BT.470-6 Table 2 note 6) is not modelled.
 
 **Progressive sources** are converted during ingestion by `ProgressiveFrameSource`, but only when they match one of the supported source profiles defined in [Section 8.1](#81-frame-based-sections). Inputs that do not match a supported profile are invalid.
@@ -599,7 +599,7 @@ A project may additionally emit the LaserDisc digital audio channel of one audio
 
 **Sample timing** — the EFM path synthesises the selected pair independently at exactly 44 100 Hz (PAL 1764/625 × F_H, IEC 60856:1986 Amd 2, 13.2; NTSC 7007/2500 × F_H, IEC 60857:1986 Amd 2, 13.2) from the same `AudioParameters` as the 48 kHz WAV path — there is no resampling. Per video frame that is 1764 samples for PAL (exact) and the SMPTE 272M-1994 Table 1 sequence for NTSC and PAL-M, which share the 30000/1001 frame rate (147147 samples per 100 frames). Samples are converted from 24-bit to the CD's 16-bit domain by rounding to nearest with saturation.
 
-**Track layout** — every contiguous run of output frames sharing one `programme_area` section is one track, numbered 01, 02, … in output order (maximum 79 tracks). `lead_in` sections carry the repetitive mode-4 TOC (one POINT per track plus A0/A1/A2, with the video-system identification 22 = PAL / 12 = NTSC (also used for PAL-M, a 525-line disc) in the A0 P FRAME field), and `lead_out` sections carry lead-out subcode (TNO = AA). Track boundaries are placed on the nearest subcode section, so a boundary sits within 1/150 s of the video frame carrying the section change. The first 2 s of track 1 are the mandatory pause required by IEC 60908-1999, 17.5.1: digital silence in the EFM stream while the WAV track carries the section's tone.
+**Track layout** — every contiguous run of output frames sharing one section whose `laserdisc.area` is `programme_area` is one track, numbered 01, 02, … in output order (maximum 79 tracks). `lead_in` sections carry the repetitive mode-4 TOC (one POINT per track plus A0/A1/A2, with the video-system identification 22 = PAL / 12 = NTSC (also used for PAL-M, a 525-line disc) in the A0 P FRAME field), and `lead_out` sections carry lead-out subcode (TNO = AA). Track boundaries are placed on the nearest subcode section, so a boundary sits within 1/150 s of the video frame carrying the section change. The first 2 s of track 1 are the mandatory pause required by IEC 60908-1999, 17.5.1: digital silence in the EFM stream while the WAV track carries the section's tone.
 
 **Timing alignment** — t = 0 is common to video frame 0, WAV sample 0, EFM source sample 0, and Q absolute time 00:00:00. The only structural delay is the CIRC interleave, exported as `kCircPipelineLatencyFrames = 108` (ECMA-130, C.9): a complementary decoder emits 108 F1 frames (648 stereo samples, ≈14.69 ms) of warm-up silence before source sample 0, after which decoded PCM is sample-exact against the 44.1 kHz source. The stream is **not** pre-compensated for that delay, so the shared datum with the video and WAV timelines holds.
 
@@ -692,7 +692,7 @@ This derives from the NTSC definition that 100 IRE = 714.3 mV (the luminance ran
 
 #### **Internal Fixed-Point Representation**
 
-The generator uses **signed fixed-point millivolt buffers** to represent all signal levels internally. The runtime path now stores Y and C samples in a high-resolution integer domain (signed 64-bit integers with 20 fractional bits, i.e. millivolts scaled by $2^{20}$; `include/videosynth/fixed_point.h`) so the generation stage and output stage can stay deterministic without carrying a floating-point representation.
+The generator uses **signed fixed-point millivolt buffers** to represent all signal levels internally. The runtime path stores Y and C samples in a high-resolution integer domain (signed 64-bit integers with 20 fractional bits, i.e. millivolts scaled by $2^{20}$; `include/videosynth/fixed_point.h`) so the generation stage and output stage can stay deterministic without carrying a floating-point representation.
 
 **Why fixed-point is sufficient:**  
 Certain signal additions push levels well outside the nominal PAL or NTSC signal range. The most significant case is the **PAL Laserdisc pilot burst** ([IEC 60856](../analogue-video-specifications/docs/laserdisc/IEC-60856-1986-Laservision-PAL/IEC-60856-1986-Laservision-PAL.md) §9.1.2), which is superimposed on the sync pulse at 3.75 MHz with a peak-to-peak amplitude of $\frac{6}{7} \times 700\ \text{mV} = 600\ \text{mV p-p}$. Centred on sync tip level (−300 mV), this burst swings between **−600 mV and 0 mV** — 300 mV below the standard sync tip. The fixed-point domain retains this headroom while still avoiding floating-point state in the runtime pipeline.
@@ -862,25 +862,23 @@ For **NTSC (525-line system)**, the vertical blanking interval (VBI) is defined 
 
 ### **Current Implementation Status**
 
-The current parser, validator, and runtime implement only a subset of the YAML surface described in this section:
+The parser (`src/yaml_project_parser.cpp`), validator (`src/project_validator.cpp`), emitter (`src/yaml_project_emitter.cpp`) and runtime implement the project-file surface below. The project file has exactly eight top-level blocks — `project`, `cvbs_presets`, `output`, `line_injections`, `laserdisc`, `channel`, `chroma_error` and `sections` — and any other top-level key is a parse error. Every block validates its key set, so an unrecognised key anywhere is a parse error naming the key and its block.
 
-- Implemented top-level presets: `video_standard_preset`, `sample_encoding_preset`, `signal_state_preset`, `ntsc_black_setup_ire`, `output.video_path`, and `output.signal_type` (`"composite"` or `"yc"`; defaults to `"composite"`). The metadata sidecar is not configured in YAML: it is always colocated with the video output and its path is derived from `output.video_path` (`.cvbs`/`.cvbsy` → `.meta`).
-- `output.efm_audio` is parsed, emitted, and validated: its presence enables LaserDisc digital audio (EFM) output for the single channel pair named by `pair`. See [`efm_audio:`](#efm_audio-sub-key-optional-project-level).
-- `output.truth` is parsed, emitted (only when `true`), validated (error on SECAM, warning with OSD overlays) and implemented. See [Picture Truth Output](#picture-truth-output).
-- The project-level `channel:` block (`timing_offset_samples`, `edge_smear`, `fm_beat`) is parsed, emitted, validated and applied by the Channel Stage. See [`channel:`](#channel-block-optional-project-level).
-- The project-level `chroma_error:` block (`gain`, `phase_deg`, `line_jitter`) is parsed, emitted, validated and applied by the Chroma Error Stage. See [`chroma_error:`](#chroma_error-block-optional-project-level).
+- Implemented `cvbs_presets` keys: `video_standard_preset`, `sample_encoding_preset`, `signal_state_preset`, `ntsc_black_setup_ire` (both System M standards, NTSC and PAL-M) and `secam_field_identification`. `video_standard_preset: SECAM` and `secam_field_identification` (default `true`) are parsed, emitted, validated, and implemented; SECAM requires `signal_state_preset: STANDARD_STABLE_UNLOCKED` (the default when the key is omitted). See [SECAM Chroma Encoding Model](#secam-chroma-encoding-model).
+- Implemented `output` keys: `video_path`, `signal_type` (`"composite"` or `"yc"`; defaults to `"composite"`) and `truth`. The metadata sidecar is not configured in YAML: it is always colocated with the video output and its path is derived from `output.video_path` (`.cvbs`/`.cvbsy` → `.meta`). `output.truth` is parsed, emitted (only when `true`), validated (error on SECAM, warning with OSD overlays) and implemented. See [Picture Truth Output](#picture-truth-output).
+- The project-level `line_injections:` block is parsed into a `ProjectLineInjections` value on `Project` holding the optional `placement` policy (`standard` default / `laserdisc` / `custom`, governing how VITS `target_lines` are constrained — see [VITS](#vits-vertical-interval-test-signals)) and the `vits` set (each entry a `vits_type` plus `target_lines`) applied to every frame of every section.
+- The project-level `laserdisc:` block is parsed into `LaserdiscParameters` on `Project`: the project-wide `disc_type` (`CAV`/`CLV`), `pilot_burst` (PAL: a 3.75 MHz (240 × f_H) sinusoidal burst at ±300 mV superimposed on every sync pulse in the Y channel), `vbi_burst` (NTSC: the colour burst kept on the equalizing and broad sync lines of the vertical interval), `efm_audio` (LaserDisc digital audio for one channel pair) and `channel` (the LaserVision pressing and replay channel: `fm_beat`, `group_delay`, `response_db`, `response_by_picture`, `field2_offset`). All of it is parsed, emitted, validated and implemented. See [`laserdisc:`](#laserdisc-block-optional-project-level).
+- The project-level `channel:` block (`timing_offset_samples`, `edge_smear`) is parsed, emitted, validated and applied by the Channel Stage. See [`channel:`](#channel-block-optional-project-level).
+- The project-level `chroma_error:` block (`gain`, `phase_deg`, `line_jitter`, `differential`, `crosstalk`, `include_burst`) is parsed, emitted, validated and applied by the Chroma Error Stage. See [`chroma_error:`](#chroma_error-block-optional-project-level).
 - The `project:` block fields `name`, `version`, and `description` are parsed and retained on the in-memory `Project` model, so they survive load/save round-trips.
-- A YAML project **emitter** (`YamlProjectEmitter` in `videosynth_core`) serialises an in-memory `Project` back to this schema. It writes fields in the canonical order shown below and emits only explicitly-set optional blocks (the project-level `line_injections:`, `channel:` and `chroma_error:`, and the per-section `luma_bandwidth:`, `horizontal_resample:` (only `bandlimited`), `chroma_line_sign:`, `noise:`, `dropouts:`, `osd:`, `audio:`, `line_injections:`), so emitted files stay minimal and diffable. Emit → parse is lossless: a saved file parses back to an equal `Project`, which is the contract that keeps GUI-saved projects loadable by the CLI and vice versa.
-- Implemented section fields: `name`, `type`, `source`, `start_frame`, `end_frame`, `duration_frames`, `duration_repeat`, `horizontal_resample` (`nearest` default, `bandlimited`), and the optional per-section `luma_bandwidth:`, `chroma_line_sign:` (PAL/PAL-M), `noise:`, `dropouts:`, `osd:`, and `audio:` blocks (channel pairs carrying tones, `file:` audio or `video_audio:`).
-- The `line_injections` schema is split across two levels of the data model. A **project-level** `line_injections:` block (a sibling of `output:` and `sections:`) is parsed into a `ProjectLineInjections` value on `Project` holding the project-wide `disc_type` (`CAV`/`CLV`), the optional `placement` policy (`standard` default / `laserdisc` / `custom`, governing how VITS `target_lines` are constrained — see [VITS](#vits-vertical-interval-test-signals)), and the `vits` set (each entry a `vits_type` plus `target_lines`) applied to every frame of every section. Each **section-level** `line_injections:` list holds only `Section::LineInjection` entries (`type` plus, per type, `target_lines`/`codes`) — the per-section biphase `codes` (picture_number, chapter_number, lead_in/out, etc.) that legitimately differ between lead-in, programme, and lead-out. Both levels receive validator-level schema/compatibility checks for injection type, `target_lines`, and standard-dependent VITS constraints.
-- VITS line injections have a generation-stage orchestration path and are applied only on their targeted frame lines within the owning section span.
-- Built-in VITS catalog entries now carry full waveform-definition primitive/composite trees for every supported `vits_type`, so the default runtime path can render all supported PAL and NTSC VITS patterns.
-- `video_standard_preset: SECAM` and `secam_field_identification` (default `true`) are parsed, emitted, validated, and implemented; SECAM requires `signal_state_preset: STANDARD_STABLE_UNLOCKED` (the default when the key is omitted). See [SECAM Chroma Encoding Model](#secam-chroma-encoding-model).
-- `pal_laserdisc_pilot_burst` is parsed, validated, and fully implemented: a 3.75 MHz (240 × f_H) sinusoidal burst at ±300 mV is superimposed on every sync pulse in the Y channel when enabled.
-- `ntsc_black_setup_ire` applies to both System M standards (NTSC and PAL-M).
-- `ntsc_laserdisc_vbi_burst` is parsed, validated, and implemented: the colour burst is kept on the equalizing and broad sync lines of the vertical interval when enabled.
+- Implemented section fields: `name`, `type`, `source`, `duration_frames`, `duration_repeat`, `start_frame`, `end_frame`, `cadence` (2:3 pulldown; see [2:3 Pulldown Sections](#progressive-source-to-two-field-frame-conversion)), `laserdisc` (`area` and biphase `codes`; see [Laserdisc Biphase Encoding](#laserdisc-biphase-encoding)), `horizontal_resample` (`nearest` default, `bandlimited`), `chroma_line_sign` (PAL/PAL-M), `luma_bandwidth`, `osd`, `noise`, `dropouts`, and `audio` (channel pairs carrying tones, `file:` audio or `video_audio:`).
+- A section's `laserdisc.area` is held as `Section::section_type`, and its `laserdisc.codes` list as a `Section::LineInjection` of type `laserdisc` whose `codes` are the per-section biphase codes (picture_number, chapter_number, lead_in/out, etc.) that legitimately differ between lead-in, programme, and lead-out. A section's own `line_injections:` list accepts `type` and `target_lines` only; its one recognised type, `vitc`, is parsed and then rejected by the validator as not implemented (see [VITC](#vitc-vertical-interval-timecode)).
+- VITS line injections have a generation-stage orchestration path and are applied only on their targeted frame lines.
+- Built-in VITS catalog entries carry full waveform-definition primitive/composite trees for every supported `vits_type`, so the default runtime path can render all supported PAL and NTSC VITS patterns.
+- LaserDisc keys are accepted only in the `laserdisc` blocks. `cvbs_presets.pal_laserdisc_pilot_burst`, `cvbs_presets.ntsc_laserdisc_vbi_burst`, `output.efm_audio`, `line_injections.disc_type`, `channel.fm_beat`, `sections[].section_type` and a section `line_injections` entry with `type: laserdisc` are parse errors whose message names the replacement key (`ReportMovedKeys` in the parser), e.g. "cvbs_presets.pal_laserdisc_pilot_burst has moved to laserdisc.pilot_burst." `scripts/migrate_laserdisc_keys.py` rewrites such files in place.
+- A YAML project **emitter** (`YamlProjectEmitter` in `videosynth_core`) serialises an in-memory `Project` back to this schema. It writes fields in the canonical order shown below and emits only explicitly-set optional blocks — at project level `line_injections:`, `laserdisc:`, `channel:` and `chroma_error:`; per section `cadence:`, `laserdisc:`, `line_injections:`, `horizontal_resample:` (only `bandlimited`), `chroma_line_sign:`, `luma_bandwidth:`, `osd:`, `noise:`, `dropouts:` and `audio:` — so emitted files stay minimal and diffable. Emit → parse is lossless: a saved file parses back to an equal `Project` (the one exception is a `duration_repeat` alongside an integer `duration_frames`, which has no effect and is not written), which is the contract that keeps GUI-saved projects loadable by the CLI and vice versa.
 
-The remainder of Section 7 should therefore be read as the intended project-file design rather than the currently implemented parser surface.
+The rest of Section 7 describes implemented behaviour. The only designed-but-unimplemented project-file content is the section-level `vitc` line injection, whose intended fields are given in [Section 8.2](#vitc-vertical-interval-timecode).
 
 ---
 
@@ -896,8 +894,6 @@ cvbs_presets:
   video_standard_preset: PAL     # PAL, NTSC, PAL_M, or SECAM (only one allowed per project)
   sample_encoding_preset: CVBS_U10_4FSC  # CVBS_U10_4FSC, CVBS_U16_4FSC, CVBS_TPG21_4FSC, CVBS_S16_4FSC, RAW_S16_28M, RAW_S16_40M
   signal_state_preset: STANDARD_STABLE_LOCKED  # STANDARD_STABLE_LOCKED; STANDARD_STABLE_UNLOCKED for SECAM (default: per standard)
-  pal_laserdisc_pilot_burst: false  # PAL only; inject 3.75 MHz pilot burst on all sync pulses (IEC 60856 §9.1.2); default: false
-  ntsc_laserdisc_vbi_burst: false   # NTSC only; colour burst also on the equalizing and broad sync lines (IEC 60857 §9.1.2); default: false
   ntsc_black_setup_ire: 7.5     # NTSC and PAL-M only; allowed values: 7.5 (standard setup) or 0.0 (black = blanking); default: 7.5
   secam_field_identification: true  # SECAM only; field identification signals on lines 7-15 / 320-328; default: true
   # No other key is accepted. Field order/dominance follow the standard,
@@ -907,39 +903,63 @@ cvbs_presets:
 output:
   video_path: "out/pal_test_video.cvbs"
   signal_type: composite      # "composite" (default) or "yc"; for "yc", video_path must end in ".cvbsy"
-  efm_audio:                  # Optional; LaserDisc digital audio (EFM) for one channel pair (PAL/NTSC/PAL-M only)
-    pair: 0                   # Channel-pair number 0–7; must be declared by at least one section
   truth: false                # Optional; write <basename>.truth/.truth.meta picture truth (PAL/NTSC/PAL-M only)
 
-line_injections:               # Project-wide laserdisc/VITS settings (sibling of output/sections)
-  disc_type: CAV               # CAV or CLV; applies to every section (omit for non-laserdisc projects)
-  placement: standard          # VITS placement policy: standard (default) | laserdisc | custom (omit for standard)
+line_injections:               # Project-wide VITS settings (sibling of output/sections)
+  placement: laserdisc         # VITS placement policy: standard (default) | laserdisc | custom (omit for standard)
   vits:                        # Project-wide VITS set applied to every frame of every section
-    - vits_type: "virs"
-      target_lines: [10, 11, 12]
+    - vits_type: "uk-national"
+      target_lines: [19, 332]
+
+laserdisc:                     # Optional; LaserDisc only (not SECAM); must set at least one key
+  disc_type: CAV               # CAV or CLV; applies to every section; required when any section carries codes
+  pilot_burst: false           # PAL only; 3.75 MHz pilot burst on all sync pulses (IEC 60856 §9.1.2); default: false
+  vbi_burst: false             # NTSC only; colour burst also on the equalizing and broad sync lines (IEC 60857 §9.1.2); default: false
+  efm_audio:                   # Optional; LaserDisc digital audio (EFM) for one channel pair (PAL/NTSC/PAL-M only)
+    pair: 0                    # Channel-pair number 0–7; should be declared by at least one section
+  channel:                     # Optional; LaserVision pressing and replay channel
+    fm_beat: { carrier_black_hz: 7088000, level_db: -24.0 }  # 625-line PAL only; carrier [6.9e6, 7.3e6]; level [-60, 0] dB
+    group_delay: { preset: iec60856_nominal, scale: 1.0 }    # Or points_ns: [[MHz, ns], ...]; scale [-2, 2]
+    response_db: [[0.0, 0.0], [4.4, -2.0], [5.0, -6.0]]      # Replay response [MHz, dB]; or response_by_picture
+    field2_offset: { x_samples: 0.25, y_lines: 0.0 }         # Field-2 misregistration; x [-8, 8] samples, y [-4, 4] lines
 
 channel:                       # Optional; pressing impairments (project-level)
   timing_offset_samples: 0.25  # Sub-sample timing offset in 4fsc samples [-8.0, 8.0]
   edge_smear: { fraction: 0.12, tau_samples: 3.0 }  # Smeared fraction [0, 0.5]; time constant (0, 100] samples
-  fm_beat: { carrier_black_hz: 7088000, level_db: -24.0 }  # 625-line PAL only; carrier [6.9e6, 7.3e6]; level [-60, 0] dB
 
 chroma_error:                  # Optional; one capture's chroma gain/phase error (not SECAM)
   gain: 1.05                   # Saturation multiplier [0.5, 1.5]
   phase_deg: 2.0               # Hue advance vs burst [-180, 180]
   line_jitter: { phase_deg: 0.5, gain: 0.01, seed: 5 }  # Per-line Gaussian σ: phase [0, 10], gain [0, 0.1]
+  differential:                # Gain/phase against the luma level under the chroma, [IRE, value] curves
+    gain: [[0, 1.00], [100, 0.95]]       # Gain [0.5, 1.5]
+    phase_deg: [[0, 0.0], [100, 2.5]]    # Phase [-30, 30] degrees
+  crosstalk: { v_to_u: 0.3, alternate_with_switch: true }  # U/V mixing [-0.5, 0.5]; alternation PAL/PAL-M only
+  include_burst: false         # Apply the error to the burst as well; default: false
 
 sections:
-  - name: "Progressive Source with VITS and Laserdisc"
+  - name: "Progressive Source with Laserdisc Codes"
     type: progressive
     source: "assets/test.mkv"
     duration_frames: 10
-    luma_bandwidth:            # Optional luma low-pass for this section
-      cutoff_mhz: 4.0          # -6 dB point [0.5, 2 fsc - transition/2]
-      transition_mhz: 0.4      # Transition width, default 0.4 [0.1, 2.0]
+    # cadence: { pattern: "2:3", phase: A, continuity: restart }  # Optional; 2:3 pulldown of 24000/1001 film; NTSC/PAL-M only
+    laserdisc:                 # Optional; disc area and biphase codes for this section
+      area: programme_area     # lead_in, programme_area or lead_out
+      codes:                   # No target_lines or disc_type — line placement is fixed by IEC 60856 §10
+        - code_type: picture_number
+          start_value: 1
+        - code_type: picture_stop
+        - code_type: chapter_number
+          chapter: 5
+        - code_type: programme_status
+          programme_status: "0x8F0000"
     horizontal_resample: nearest  # Optional; nearest (default, zero-order hold) or bandlimited
     chroma_line_sign:          # Optional; PAL/PAL-M only; regions in source pixels
       - region: { x: 48, y: 96, width: 96, height: 144 }
         v: follow_switch       # normal (default) or follow_switch; also u:
+    luma_bandwidth:            # Optional luma low-pass for this section
+      cutoff_mhz: 4.0          # -6 dB point [0.5, 2 fsc - transition/2]
+      transition_mhz: 0.4      # Transition width, default 0.4 [0.1, 2.0]
     noise:                     # Optional noise injection for this section
       noise_db: 48.0           # Floor noise level; sets Black PSNR target [20.0–61.0 dB]
       noise_spread_db: 4.0     # White is 4 dB noisier than black; White SNR = noise_db - noise_spread_db
@@ -950,19 +970,9 @@ sections:
             waveform: sine     # sine, square, sawtooth, or triangle
             frequency: 1000.0  # Fixed-tone frequency in Hz [0, 22000]
             amplitude: 0.5     # Peak amplitude as a fraction of full scale [0.0, 1.0]
-    line_injections:           # Per-section laserdisc codes for this section
-      - type: laserdisc
-        # No disc_type or target_lines — disc_type is project-wide; line
-        # placement is fixed by IEC 60856 §10
-        codes:
-          - code_type: picture_number
-            start_value: 1
-          - code_type: picture_stop
-          - code_type: chapter_number
-            chapter: 5
-          - code_type: programme_status
-            programme_status: "0x8F0000"
 ```
+
+The `cadence` line is commented out because 2:3 pulldown applies to 525-line standards only. Keys appear in the emitter's canonical order — top level `project`, `cvbs_presets`, `output`, `line_injections`, `laserdisc`, `channel`, `chroma_error`, `sections`; within a section `name`, `type`, `source`, `duration_frames`, `duration_repeat`, `start_frame`, `end_frame`, `cadence`, `laserdisc`, `line_injections`, `horizontal_resample`, `chroma_line_sign`, `luma_bandwidth`, `osd`, `noise`, `dropouts`, `audio`. The parser does not depend on order.
 
 #### **Asset Roots & Path Resolution**
 
@@ -995,6 +1005,69 @@ Rather than expose these roots directly, the GUI section editor presents a secti
 
 The compose/classify logic is a pure, Qt-free helper (`source_path_model.h`), independent of the resolution rules above.
 
+#### **`laserdisc:` Block (Optional, Project-Level)**
+
+The `laserdisc:` block holds everything about a project that is specific to LaserDisc (LaserVision): the disc format, the LaserVision signal options, EFM digital audio and the LaserVision pressing and replay channel. It is parsed into `LaserdiscParameters` (`Project::laserdisc`). A project that is not a disc has no `laserdisc:` block. Each section that belongs to the disc carries its own section `laserdisc:` block (`area` and `codes`; see [Laserdisc Biphase Encoding](#laserdisc-biphase-encoding)); a section `laserdisc:` block in a project without the top-level block is a validation error.
+
+| Key | Type | Required | Range / Values | Description |
+|-----|------|----------|----------------|-------------|
+| `disc_type` | string | No | `CAV`, `CLV` | Disc format for the whole project. Required as soon as any section carries biphase `codes`; setting it also turns on the disc VITS rules (reserved address-code lines; VIRS on NTSC/PAL-M). An EFM-only or pilot-burst-only project may omit it. |
+| `pilot_burst` | bool | No | default `false` | PAL only: 3.75 MHz pilot burst on every sync pulse (IEC 60856 §9.1.2; see Section 9). |
+| `vbi_burst` | bool | No | default `false` | NTSC only: colour burst kept on the equalizing and broad sync lines (IEC 60857 §9.1.2; see Section 9). |
+| `efm_audio` | map | No | — | LaserDisc digital audio for one channel pair; see below. |
+| `channel` | map | No | — | LaserVision pressing and replay channel; see below. |
+
+Rules:
+- The block must set at least one key. An empty block, an unknown key, a non-string `disc_type`, or a non-boolean `pilot_burst`/`vbi_burst` is a parse error.
+- `disc_type` other than `CAV`/`CLV` is a validation error, as is a section with biphase codes in a project without `disc_type`.
+- The whole block on a SECAM project is a validation error (there is no SECAM LaserVision format).
+- LaserDisc keys are accepted only in the `laserdisc` blocks. Each of these keys is a parse error whose message names the replacement (`ReportMovedKeys` in the parser): `cvbs_presets.pal_laserdisc_pilot_burst` → `laserdisc.pilot_burst`, `cvbs_presets.ntsc_laserdisc_vbi_burst` → `laserdisc.vbi_burst`, `output.efm_audio` → `laserdisc.efm_audio`, `line_injections.disc_type` → `laserdisc.disc_type`, `channel.fm_beat` → `laserdisc.channel.fm_beat`, `sections[].section_type` → `sections[].laserdisc.area`, and a section `line_injections` entry with `type: laserdisc` → `sections[].laserdisc.codes`. `scripts/migrate_laserdisc_keys.py` rewrites project files that use them.
+
+##### **`efm_audio`**
+
+The `laserdisc.efm_audio:` block selects **one** audio channel pair to be additionally encoded as a LaserDisc digital audio (EFM) channel stream, written as `<basename>.efm` with a `<basename>.efm.meta` frame-index sidecar beside that pair's WAV track. The pair's WAV output and every other pair are unaffected; the pair's content (tones, file or video soundtrack) is shared between the two paths and declared only in the per-section [`audio:`](#audio-sub-key-optional-per-section) blocks. Tones are synthesised directly at 44 100 Hz; file and video audio are read a second time, resampled to 44 100 Hz. The encoding is described in [LaserDisc Digital Audio (EFM) Output](#laserdisc-digital-audio-efm-output).
+
+| Key | Type | Required | Range / Values | Description |
+|-----|------|----------|----------------|-------------|
+| `pair` | int | Yes | 0–7 | Channel pair to encode. Presence of the `efm_audio:` block is what enables the output; omit the block to disable it. |
+
+Constraints:
+
+- **PAL, NTSC and PAL-M only** — LaserDisc digital audio is defined by IEC 60856:1986 Amd 2 clause 13 (625-line PAL) and IEC 60857:1986 Amd 2 clause 13 (525-line); PAL-M discs take the 525-line definition (NTSC frame rate and sample sequence, 525-line TOC identification). SECAM is a validation error.
+- **The pair must be declared** — if no section declares `pair`, a warning is emitted and no `.efm` file is written.
+- **Track rules** — the disc areas come from each section's `laserdisc.area`: one track per `programme_area` section, maximum 79 (IEC 60856 Amd 2, 13.5.3.3 / IEC 60857 Amd 2, 13.6.3.3); tracks shorter than 4 s (6 s for track 1, whose first 2 s are the mandatory pause) and a project with no `lead_in` section (no TOC is emitted) produce warnings.
+
+Example YAML:
+
+```yaml
+laserdisc:
+  efm_audio:
+    pair: 0
+```
+
+##### **`channel`**
+
+`laserdisc.channel:` is the LaserVision pressing and replay channel (`LaserdiscChannelParameters`): what the glass master, the disc and a player's replay path do to the video signal. Like the general [`channel:`](#channel-block-optional-project-level) block it belongs to the pressing, so every project that models one pressing uses the same settings. The block must set at least one key.
+
+| Key | Type | Required | Range | Description |
+|-----|------|----------|-------|-------------|
+| `fm_beat.carrier_black_hz` | float | No (default 7.088e6) | [6.9e6, 7.3e6] | FM video carrier at black. |
+| `fm_beat.level_db` | float | Yes, with `fm_beat` | [−60, 0] | Beat level relative to the local chroma amplitude on a 50 IRE colour. |
+| `group_delay.preset` | string | One of `preset`/`points_ns` | `iec60856_nominal` | The nominal IEC 60856 §9.1.6 pre-distortion, relative to 0.5 MHz (0, −10, −35, −85, −135, −200 ns at 0.5, 2.0, 3.0, 4.0, 4.43, 4.8 MHz). |
+| `group_delay.points_ns` | list of `[MHz, ns]` | One of `preset`/`points_ns` | MHz strictly ascending in [0, 4fsc Nyquist]; ns in [−1000, 1000] | A custom group-delay curve. |
+| `group_delay.scale` | float | No (default 1.0) | [−2.0, 2.0] | Fraction of the curve left in the signal; −1 models a replay filter applied to a signal that never carried the pre-distortion. |
+| `response_db` | list of `[MHz, dB]` | No | MHz strictly ascending in [0, 4fsc Nyquist]; dB in [−60, +20] | Linear-phase replay amplitude response. |
+| `response_by_picture` | list of `{picture, response_db}` | No | ≥ 2 entries; `picture` ≥ 1, strictly ascending | Replay response at disc positions, interpolated in picture number. |
+| `field2_offset.x_samples` | float | One of the two | [−8.0, 8.0] | Field-2 horizontal misregistration in 4fsc samples. |
+| `field2_offset.y_lines` | float | One of the two | [−4.0, 4.0] | Field-2 vertical misregistration in frame lines. |
+
+Rules:
+- An empty block, an unknown key, a non-numeric value, a `group_delay` with both or neither of `preset` and `points_ns`, an unknown `preset`, a `[frequency, value]` entry that is not a numeric pair, a `response_by_picture` entry without both keys, or `fm_beat` without `level_db` is a parse error. Out-of-range or non-finite values are validation errors.
+- `fm_beat` and `group_delay.preset: iec60856_nominal` on any standard but 625-line PAL are validation errors. `response_db` together with `response_by_picture`, fewer than two `response_by_picture` entries, or pictures that do not ascend are validation errors.
+- **FM beat.** A port of the reference model `_beat_basis` (domesday-aiv-restore `newdecode/deherring.py`, model-2026-10-27b), with videosynth's separate C buffer in place of the reference's FFT chroma mask: composite → IRE; 400/100 ns bilinear pre-emphasis started at the first sample's level; analytic chroma `C + jH{C}` from the picture line windows only (the chroma-error Hilbert FIR, `picture_chroma.h`); carrier `f_c = f0 + 8 kHz/IRE·(ip − (1 − γ)·Re(ca·H_pre(f_sc)))`, γ = 0.4; phase `Φ = Σ 2π f_c / f_s` from 0 at the frame start; amplitude `am = (lf − f_sc)/3e9 · exp(α(lf − 7.5 MHz)/1 MHz)`, α = −1, `lf` the box(4)·box(17)-filtered carrier; `Re(e^{jΦ}·am·conj(ca))`; de-emphasis; then a 255-tap Kaiser-windowed band-pass (2.2–3.9 MHz with the reference's 0.3 MHz ramps). The result is scaled by `10^(level_db/20)` over the basis gain of a flat colour at the 50 IRE carrier and added to Y inside the picture line windows (VITS target lines excluded). It is a function of the frame's error-free Y and C, so every capture of one pressing carries the same beat; the chroma error and both noise layers come after it. The constants are named after the reference in `fm_beat_model.h`; `scripts/generate_fm_beat_reference.py` writes the golden vectors the unit test compares against (within 1e-3 of the beat's peak).
+- **Replay filter.** `group_delay` (scaled curve, breakpoints joined by straight lines and held beyond the ends) and `response_db`/`response_by_picture` (dB against MHz, joined by straight lines and held beyond the ends) form one 255-tap FIR (`ReplayChannelFilter`) designed by frequency sampling with a Hann window: the all-pass group delay and the linear-phase amplitude response, with delays relative so low frequencies keep their timing. It filters Y and C of the whole frame (sync, burst, VBI and VITS included) circularly within the frame, after the beat; Y is clamped to the legal composite range and C is not. With `response_by_picture` the filter is designed per frame from the frame's picture number, `FrameEnrichment::disc_frame_index` + 1 (the key the shared noise layer uses), interpolating each frequency's dB linearly between the bracketing entries. `scale: 0`, an all-zero curve and an all-0 dB response are the identity and are not processed.
+- **Field-2 offset.** Applied by the Generation Stage, not the Channel Stage: field 2 reads its rows from an offset copy of its source picture (`OffsetSourceImage`) before encoding, so its chroma stays correctly modulated. `x_samples` is converted to source pixels across the active window; whole-number offsets are exact shifts and fractional ones a separable 16-tap Kaiser-windowed-sinc interpolation (β = 8) normalised to unit DC gain, with edge-clamped positions. Field 1 is untouched, zero offsets are the identity, and the picture truth carries the offset.
+
 #### **`channel:` Block (Optional, Project-Level)**
 
 The `channel:` block describes the pressing and the channel it is read through, as opposed to one capture. Every project that models one pressing must use the same block; capture noise and dropouts may differ between them.
@@ -1006,17 +1079,14 @@ The block must set at least one key.
 | `timing_offset_samples` | float | No | [−8.0, 8.0] | Sub-sample timing offset in 4fsc samples; positive values make the signal arrive later. |
 | `edge_smear.fraction` | float | Yes, with `edge_smear` | [0, 0.5] | Smeared fraction c of the signal. |
 | `edge_smear.tau_samples` | float | Yes, with `edge_smear` | (0, 100] | Smear time constant in 4fsc samples. |
-| `fm_beat.carrier_black_hz` | float | No (default 7.088e6) | [6.9e6, 7.3e6] | FM video carrier at black. |
-| `fm_beat.level_db` | float | Yes, with `fm_beat` | [−60, 0] | Beat level relative to the local chroma amplitude on a 50 IRE colour. |
 
 Rules:
-- Block absent → no channel processing. An empty block, an unknown key, a missing required key or a non-numeric value is a parse error; an out-of-range value is a validation error. `fm_beat` on any standard but 625-line PAL is a validation error.
-- An offset of exactly 0 and a smear fraction of exactly 0 are not processed, and a beat on a picture without chroma is exactly zero, so each leaves the output bit-identical to the key being absent.
-- The steps run in disc order: FM beat, edge smear, timing offset. The beat is on the disc, so the readout smear and the sampling offset apply to it. Each step rounds to the fixed-point step and clamps Y to the legal composite range used by noise injection (`SampleClampBoundsFor`); C is zero-centred and saturated chroma legitimately exceeds that range, so it is never clamped and is left to the output stage.
+- Block absent → no channel processing. An empty block, an unknown key, a missing required key or a non-numeric value is a parse error; an out-of-range value is a validation error. `fm_beat` here is a parse error naming `laserdisc.channel.fm_beat`.
+- An offset of exactly 0 and a smear fraction of exactly 0 are not processed, so each leaves the output bit-identical to the key being absent.
+- The Channel Stage runs the steps in disc order: the LaserVision channel's FM beat and replay filter ([`laserdisc.channel`](#laserdisc-block-optional-project-level)), then edge smear, then timing offset. The beat and the replay filter belong to the disc, so the readout smear and the sampling offset apply to them. Each step rounds to the fixed-point step and clamps Y to the legal composite range used by noise injection (`SampleClampBoundsFor`); C is zero-centred and saturated chroma legitimately exceeds that range, so it is never clamped and is left to the output stage.
 - **Timing offset.** Applies to Y and C over the whole frame (sync, VBI and VITS included) with circular wrap within the frame; the frame boundary lies in vertical blanking, so only sync and equalising pulses wrap. The integer part is an exact index shift. The fractional part is a 32-tap Kaiser-windowed-sinc fractional-delay FIR (`kTimingOffsetHalfTaps = 16`, β = `kTimingOffsetKaiserBeta = 8`), normalised to unit DC gain: within 0.001 dB and 0.0002 sample of ideal, complex error below −76 dB, up to 6 MHz at both 4fsc rates.
 - **Edge smear.** `H(z) = (1 − c) + c(1 − a)/(1 − a z⁻¹)`, `a = exp(−1/τ)`, over Y and C of the whole frame, VITS included. The step response is `1 − c·aⁿ⁺¹` and the DC gain 1. The IIR state is primed circularly over the frame's last ⌈20τ⌉ samples (`kEdgeSmearWarmupTaus`), so each frame's result depends on that frame alone.
-- **FM beat.** A port of the reference model `_beat_basis` (domesday-aiv-restore `newdecode/deherring.py`, model-2026-10-27b), with videosynth's separate C buffer in place of the reference's FFT chroma mask: composite → IRE; 400/100 ns bilinear pre-emphasis started at the first sample's level; analytic chroma `C + jH{C}` from the picture line windows only (the chroma-error Hilbert FIR, `picture_chroma.h`); carrier `f_c = f0 + 8 kHz/IRE·(ip − (1 − γ)·Re(ca·H_pre(f_sc)))`, γ = 0.4; phase `Φ = Σ 2π f_c / f_s` from 0 at the frame start; amplitude `am = (lf − f_sc)/3e9 · exp(α(lf − 7.5 MHz)/1 MHz)`, α = −1, `lf` the box(4)·box(17)-filtered carrier; `Re(e^{jΦ}·am·conj(ca))`; de-emphasis; then a 255-tap Kaiser-windowed band-pass (2.2–3.9 MHz with the reference's 0.3 MHz ramps). The result is scaled by `10^(level_db/20)` over the basis gain of a flat colour at the 50 IRE carrier and added to Y inside the picture line windows (VITS target lines excluded). It is a function of the frame's error-free Y and C, so every capture of one pressing carries the same beat; the chroma error and both noise layers come after it. The constants are named after the reference in `fm_beat_model.h`; `scripts/generate_fm_beat_reference.py` writes the golden vectors the unit test compares against (within 1e-3 of the beat's peak).
-- The stage runs before noise, so both noise layers keep their configured spectrum. The noise stage delays the shared (pressing) layer by the same `timing_offset_samples` with the same `TimingOffsetFilter`, since a real capture reads the pressing noise off the disc with the picture; the capture layer stays on the output grid. The smear and the beat are not applied to the shared layer.
+- The stage runs before noise, so both noise layers keep their configured spectrum. The noise stage delays the shared (pressing) layer by the same `timing_offset_samples` with the same `TimingOffsetFilter`, since a real capture reads the pressing noise off the disc with the picture; the capture layer stays on the output grid. The smear and the LaserVision channel (beat and replay filter) are not applied to the shared layer.
 
 `timing_offset_samples` lives in `channel:` rather than `output:` because it is a property of the pressing, not of the output file.
 
@@ -1031,14 +1101,21 @@ The `chroma_error:` block describes the chroma path of the player that made one 
 | `line_jitter.phase_deg` | float | No | [0.0, 10.0] | Per-line phase standard deviation, in degrees. |
 | `line_jitter.gain` | float | No | [0.0, 0.1] | Per-line gain standard deviation. |
 | `line_jitter.seed` | int | No | any int64 | Fixed jitter seed. If absent, a seed drawn when the pipeline is constructed is used, so the jitter differs between runs. |
+| `differential.gain` | list of `[IRE, gain]` | One of `gain`/`phase_deg`, with `differential` | IRE [−50, 150] strictly ascending; gain [0.5, 1.5] | Chroma gain against the luma level under the chroma. |
+| `differential.phase_deg` | list of `[IRE, degrees]` | One of `gain`/`phase_deg`, with `differential` | IRE [−50, 150] strictly ascending; phase [−30, 30] | Chroma phase advance against the luma level under the chroma. |
+| `crosstalk.v_to_u` | float | One of `v_to_u`/`u_to_v`, with `crosstalk` | [−0.5, 0.5] | Fraction of decoded V added to U. |
+| `crosstalk.u_to_v` | float | One of `v_to_u`/`u_to_v`, with `crosstalk` | [−0.5, 0.5] | Fraction of decoded U added to V. |
+| `crosstalk.alternate_with_switch` | bool | No | `true`/`false` | Multiply the crosstalk by the line's PAL V-switch sign (PAL/PAL-M only). Default `false`. |
 | `include_burst` | bool | No | `true`/`false` | Apply the error to the burst as well (a whole chroma path, or an FM/MTF loss). Default `false`. |
 
 Rules:
-- Block absent → no processing. An empty `chroma_error:` or `line_jitter:` block (one setting only `include_burst` counts as empty), an unknown key, a non-numeric value or a non-boolean `include_burst` is a parse error; out-of-range or non-finite values are validation errors. SECAM is a validation error (no quadrature chroma).
-- Gain 1, phase 0 and no jitter (or zero deviations) is not processed, so the output is bit-identical to the block being absent.
+- Block absent → no processing. An empty `chroma_error:`, `line_jitter:`, `differential:` or `crosstalk:` block (one setting only `include_burst` counts as empty), an unknown key, a non-numeric value or a non-boolean `include_burst` is a parse error; out-of-range or non-finite values are validation errors. SECAM is a validation error (no quadrature chroma), as is `crosstalk.alternate_with_switch: true` on NTSC (no V-switch).
+- Gain 1, phase 0, no jitter (or zero deviations), an identity `differential` and zero `crosstalk` terms are not processed, so the output is bit-identical to the block being absent.
 - Picture chroma by default: the picture window (`GetActiveRasterGeometry`, `ActivePictureEndSamples`) of horizontal-sync active picture lines, less every project VITS target line. Burst, VBI, VITS and blanking samples are untouched, so a burst-locked decoder sees a real hue/saturation error.
 - With `include_burst`, the burst window of every line (`BuildBurstLineWindows`: the burst gate widened by `kBurstWindowGuardSamples = 8` each side, covering the largest channel timing offset) is rotated as well. A picture line's burst takes that line's own θ and g, jitter included; every other line's burst (VBI and VITS lines) takes the constants. The jitter draws are unchanged, so turning the flag on changes the bursts and nothing else. A burst-referenced decoder then sees a gain it can measure and correct and no hue error against burst. The burst is short against the Hilbert transformer and its quadrature is the true transform of the gated burst, so a burst rotation is accurate to about 1° and 3 % (a pure gain is exact).
 - On each picture line `C ← g·(C·cos θ − Ĉ·sin θ)`, where Ĉ is the Hilbert transform of the line's active-window samples alone (zero outside, so burst cannot leak in). The transformer (`DesignChromaHilbertKernel`) is a 47-tap Kaiser-windowed ideal Hilbert FIR (`kChromaHilbertHalfTaps = 23`, β = `kChromaHilbertKaiserBeta = 8`; odd taps only), within 10⁻⁴ of −j from 2 MHz to Nyquist − 2 MHz at both 4fsc rates (2–6.87 MHz at 625-line, 2–5.16 MHz at 525-line), covering every chroma band. The 525-line Nyquist (7.16 MHz) rules out a 2–7 MHz band there.
+- With `differential`, g is also multiplied and θ advanced sample by sample by the curves' values at the luma level under each chroma sample, `100·(Y − blanking)/(white − blanking)` IRE (breakpoints joined by straight lines and held beyond the ends); a burst under `include_burst` takes the values at 0 IRE.
+- With `crosstalk`, applied first, each line is demodulated against the subcarrier reference it was modulated with (U on the sin axis, V on the cos axis, with the line's V-switch sign), mixed as `U' = U + a·v_to_u·V`, `V' = V + a·u_to_v·U` (a = the line's V-switch sign with `alternate_with_switch`, otherwise 1), and remodulated before the gain and phase are applied.
 - θ and g are the constants plus, with jitter, per-line Gaussian deviations. The jitter RNG is `std::mt19937_64` seeded with `DeriveImpairmentSeed(seed, kChromaJitterSeedDomain, output_frame_index)`; each picture line draws two unit normals in frame order (phase, then gain) whether or not each deviation is set. Chroma error is a capture property, so it is keyed by output position, not disc position.
 - C is not clamped; the output stage quantises it.
 - The stage runs after the channel stage (pressing impairments see error-free chroma) and before noise.
@@ -1248,31 +1325,6 @@ sections:
 
 ---
 
-#### **`efm_audio:` Sub-Key (Optional, Project-Level)**
-
-The `output.efm_audio:` block selects **one** audio channel pair to be additionally encoded as a LaserDisc digital audio (EFM) channel stream, written as `<basename>.efm` with a `<basename>.efm.meta` frame-index sidecar beside that pair's WAV track. The pair's WAV output and every other pair are unaffected; the pair's content (tones, file or video soundtrack) is shared between the two paths and declared only in the per-section [`audio:`](#audio-sub-key-optional-per-section) blocks. Tones are synthesised directly at 44 100 Hz; file and video audio are read a second time, resampled to 44 100 Hz. The encoding is described in [LaserDisc Digital Audio (EFM) Output](#laserdisc-digital-audio-efm-output).
-
-| Key | Type | Required | Range / Values | Description |
-|-----|------|----------|----------------|-------------|
-| `pair` | int | Yes | 0–7 | Channel pair to encode. Presence of the `efm_audio:` block is what enables the output; omit the block to disable it. |
-
-Constraints:
-
-- **PAL, NTSC and PAL-M only** — LaserDisc digital audio is defined by IEC 60856:1986 Amd 2 clause 13 (625-line PAL) and IEC 60857:1986 Amd 2 clause 13 (525-line); PAL-M discs take the 525-line definition (NTSC frame rate and sample sequence, 525-line TOC identification). SECAM is a validation error.
-- **The pair must be declared** — if no section declares `pair`, a warning is emitted and no `.efm` file is written.
-- **Track rules** — one track per `programme_area` section, maximum 79 (IEC 60856 Amd 2, 13.5.3.3 / IEC 60857 Amd 2, 13.6.3.3); tracks shorter than 4 s (6 s for track 1, whose first 2 s are the mandatory pause) and a project with no `lead_in` section (no TOC is emitted) produce warnings.
-
-Example YAML:
-
-```yaml
-output:
-  video_path: "out/pal_disc.cvbs"
-  efm_audio:
-    pair: 0
-```
-
----
-
 ### **File Path Resolution**
 
 Every field in a project YAML that accepts a file path (section `source`, audio `file.path`, `output.video_path`) is resolved by the rules in [Asset Roots & Path Resolution](#asset-roots-path-resolution): a leading `{name}` logical-root token, an absolute path, or a plain relative path (working-directory-relative in the CLI, project-directory-relative in the GUI). There is no other prefix scheme. The validator reports an error when a referenced source cannot be found after resolution, or when a path names an unknown root.
@@ -1300,22 +1352,22 @@ video_path: "{output}/pal_test_video.cvbs" # run output directory (defaults to t
   - When `output.signal_type` is `"yc"`, `output.video_path` must end in `".cvbsy"`; the chroma path is derived automatically by replacing the suffix with `".cvbsc"`.
   - Output resolution is fixed by the standard (720x576 for PAL and SECAM, 720x486 for NTSC and PAL-M) and must not be specified in the project file.
   - `sample_encoding_preset` must be one of the supported 4fsc or raw presets, and `signal_state_preset` must be `STANDARD_STABLE_LOCKED` (`STANDARD_STABLE_UNLOCKED` for SECAM).
-  - `pal_laserdisc_pilot_burst` can **only be enabled for PAL projects**; any other standard is **invalid**. With a preset that cannot carry sub-sync excursions (U10/U16/TPG21) a warning is emitted.
-  - `ntsc_laserdisc_vbi_burst` can **only be enabled for NTSC projects**; any other standard is **invalid**. With a preset that cannot carry sub-sync excursions (U10/U16/TPG21) a warning is emitted.
+  - `laserdisc.pilot_burst` can **only be enabled for PAL projects**; any other standard is **invalid**. With a preset that cannot carry sub-sync excursions (U10/U16/TPG21) a warning is emitted.
+  - `laserdisc.vbi_burst` can **only be enabled for NTSC projects**; any other standard is **invalid**. With a preset that cannot carry sub-sync excursions (U10/U16/TPG21) a warning is emitted.
   - `ntsc_black_setup_ire` can **only be specified for NTSC or PAL-M projects**. If specified for PAL or SECAM, the YAML is considered **invalid**.
   - `ntsc_black_setup_ire` allowed values are `7.5` and `0.0`. `7.5` selects standards-based NTSC setup; `0.0` moves NTSC black level to blanking (`0 IRE`).
 2. **Sections**:
     - Each section must have a valid `type` (`progressive`).
   - Each section must have at least one of:
       - Frame-based content (`progressive`).
-    - Line injections (`line_injections`).
+    - Line injections (section `laserdisc.codes` or `line_injections`).
   - For `progressive` sections, `source` must point to a valid file.
 3. **Line Injection Constraints**:
   - `target_lines` must be within the valid range for the standard (1-625 for PAL, 1-525 for NTSC).
-  - `target_lines` must **not** be specified for `laserdisc` injection types; specifying it is a validation error.
+  - A section's `laserdisc.codes` take no `target_lines` (the key is not accepted, so it is a parse error): line placement is fixed by the standard.
   - **If injected lines overlap within a section, the YAML must fail validation.**
-  - **When the project declares a `disc_type` (a laserdisc project), no project VITS entry may target lines within the laserdisc reserved ranges** (PAL: Field 1 lines 6–18, Field 2 lines 319–331; NTSC/PAL-M: Field 1 lines 10–18, Field 2 lines 273–281).
-  - **A `vitc` injection and a `laserdisc` injection must not appear in the same section.** Laserdisc does not use VITC.
+  - **When the project declares `laserdisc.disc_type` (a laserdisc project), no project VITS entry may target lines within the laserdisc reserved ranges** (PAL: Field 1 lines 6–18, Field 2 lines 319–331; NTSC/PAL-M: Field 1 lines 10–18, Field 2 lines 273–281).
+  - **A `vitc` injection and laserdisc `codes` must not appear in the same section.** Laserdisc does not use VITC.
 4. **Progressive Sources**:
   - `source` must resolve to an accessible file after applying [File Path Resolution](#file-path-resolution) rules. If the resolved path does not exist, the YAML is considered **invalid**.
   - `source` must match one of the supported progressive source profiles defined in [Section 8.1](#81-frame-based-sections); container extension alone is not sufficient.
@@ -1351,7 +1403,7 @@ video_path: "{output}/pal_test_video.cvbs" # run output directory (defaults to t
 - **Implemented**: `progressive` frame-based sections in Section 8.1.
 - **Implemented**: Section 8.2 parser/validator constraints for VITS line-injection schema, VITS/line-allocation compatibility checks, and generation-stage VITS line application for all supported built-in PAL and NTSC VITS patterns.
 - **Implemented**: Full laserdisc biphase injection for PAL, NTSC and PAL-M (CAV and CLV; PAL-M follows the System M/NTSC rules — 1800 frames/min and 30 fps CLV picture numbers, colour time error correction, 79 999 maximum CAV picture number, and the NTSC line placement), including 24-bit biphase signal generation, 40-bit FM signal generation (NTSC/PAL-M), all code types (lead_in, lead_out, picture_number, picture_stop, chapter_number, programme_status, users_code, programme_time_code, clv_code, clv_picture_number, fm_picture_number, fm_programme_time, fm_white_flag), field-aware line placement, timecode continuity, chapter stop-bit logic, NTSC frozen values, System M CLV colour time error correction, and biphase/VITS line-conflict validation.
-- **Not yet implemented**: runtime synthesis/application for VITC and custom per-line content. A section-level injection whose `type` is not `laserdisc` is a **validation error** (`vitc`: "line injection type 'vitc' is not implemented in the current runtime"; `vits`: VITS must be declared project-wide; anything else: "unsupported injection type"), so a project cannot silently generate a file that lacks the content it declares.
+- **Not yet implemented**: runtime synthesis/application for VITC and custom per-line content. Every section-level `line_injections` entry is therefore rejected, so a project cannot silently generate a file that lacks the content it declares: `type: laserdisc` is a parse error naming the section's `laserdisc.codes`; `vitc` is a validation error ("line injection type 'vitc' is not implemented in the current runtime"); `vits` is a validation error (VITS are declared project-wide); anything else is a validation error ("unsupported injection type").
 
 For VITC and custom per-line content paths, Section 8.2 remains the intended design contract for later implementation work.
 
@@ -1433,8 +1485,8 @@ Line-based content to inject into the **VBI of frames**.
 
 Line injections live at two levels:
 
-- **Project level** — the top-level `line_injections:` block (a sibling of `output:` and `sections:`) carries the project-wide `disc_type` (`CAV`/`CLV`) and the `vits` set. The VITS set is applied to every frame of every section, so a disc's reference/test signals are declared once for the whole disc. See [VITS](#vits-vertical-interval-test-signals) below.
-- **Section level** — each section's own `line_injections:` list carries the per-section `laserdisc` code injections and any `vitc` injection, i.e. content that legitimately differs between sections (lead-in vs programme vs lead-out).
+- **Project level** — the top-level `line_injections:` block (a sibling of `output:` and `sections:`) carries the VITS `placement` policy and the `vits` set. The VITS set is applied to every frame of every section, so a disc's reference/test signals are declared once for the whole disc. See [VITS](#vits-vertical-interval-test-signals) below.
+- **Section level** — each section's `laserdisc:` block carries the disc `area` and the biphase `codes`, i.e. content that legitimately differs between sections (lead-in vs programme vs lead-out); the disc format is project-wide (`laserdisc.disc_type`). See [Laserdisc Biphase Encoding](#laserdisc-biphase-encoding) below. A section's own `line_injections:` list carries only `vitc`, which is not implemented (see [VITC](#vitc-vertical-interval-timecode)).
 
 ---
 
@@ -1443,8 +1495,8 @@ Line injections live at two levels:
 
 | **Field**      | **Type** | **Required**              | **Description**                                                                                                                                                  | **Example**    |
 | -------------- | -------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
-| `type`         | string   | Section-level only        | Type of a section-level line injection: `laserdisc` (implemented) or `vitc` (parsed, rejected as not implemented). Any other value, including `vits` (VITS is declared project-wide), is a validation error. | `"laserdisc"`  |
-| `target_lines` | list     | Yes (except `laserdisc`)  | Lines to inject into (1-based, sequential across the entire frame). **Not applicable for `laserdisc` injections** — line placement is fixed by the standard.     | `[10, 11, 12]` |
+| `type`         | string   | Section-level only        | Type of a section-level line injection: `vitc` (parsed, rejected as not implemented). `laserdisc` is a parse error naming the section's `laserdisc.codes`; any other value, including `vits` (VITS is declared project-wide), is a validation error. | `"vitc"`  |
+| `target_lines` | list     | Yes                       | Lines to inject into (1-based, sequential across the entire frame). Laserdisc biphase codes have no `target_lines` — line placement is fixed by the standard.     | `[10, 11, 12]` |
 
 
 ---
@@ -1455,7 +1507,7 @@ VITS are a **project-level** signal set. Each VITS entry lives in the top-level 
 
 **Placement modes.** The optional `line_injections.placement` field selects how the validator constrains each VITS entry's `target_lines`:
 
-- `standard` (default; also assumed when the field is absent) — each VITS type must sit on its broadcast recommended line (`vits17` → 17, `ntc7-composite` → 17, etc.). Any other line is rejected. This preserves the behaviour of projects authored before the field existed.
+- `standard` (default; also assumed when the field is absent) — each VITS type must sit on its broadcast recommended line (`vits17` → 17, `ntc7-composite` → 17, etc.). Any other line is rejected.
 - `laserdisc` — VITS must sit on the laserdisc VBI lines, which are clear of the address-code ranges: **PAL** 19, 20, 332, 333 (IEC 60856 §9.1.3); **NTSC/PAL-M** 19, 20, 282, 283 (IEC 60857 §9.1.3 VIRS on 19/282, §9.1.4 composite/combination ITS on 20/283). The editor's one-click laserdisc preset seeds the spec-required set (PAL: `uk-national` on 19/332, `vits20` on 20/333; NTSC: `virs` on 19/282, `ntc7-composite` on 20, `ntc7-combination` on 283).
 - `custom` — VITS may sit on any valid VBI line; the validator still rejects overlapping lines and, on a disc carrying biphase codes, the reserved address-code ranges (see §8.2 reserved-range rule).
 
@@ -1518,13 +1570,15 @@ For **Laserdisc biphase encoding**, refer to:
 - [IEC 60856](../analogue-video-specifications/docs/laserdisc/IEC-60856-1986-Laservision-PAL/IEC-60856-1986-Laservision-PAL.md) (and Amendments 1–2): Laservision PAL
 - [IEC 60857](../analogue-video-specifications/docs/laserdisc/IEC-60857-1986-Laservision-NTSC/IEC-60857-1986-Laservision-NTSC.md) (and Amendments 1–2): Laservision NTSC
 
-> **Important**: For `laserdisc` injections, **`target_lines` must not be specified**. VBI line placement is entirely determined by the standard: each code type is assigned to specific lines based on the `disc_type`, the section type, and the field (field 1 always opens the picture). User-specified `target_lines` on a `laserdisc` injection will fail validation.
+Biphase codes are declared per section in the section's `laserdisc:` block, which sets the section's disc `area` and its `codes` list. The disc format is project-wide (`laserdisc.disc_type` in the top-level [`laserdisc:`](#laserdisc-block-optional-project-level) block), since a disc is entirely CAV or entirely CLV.
+
+> **Important**: Biphase codes take **no `target_lines`**. VBI line placement is entirely determined by the standard: each code type is assigned to specific lines based on `laserdisc.disc_type`, the section's `laserdisc.area`, and the field's role in the picture sequence. `target_lines` is not an accepted key in a `codes[]` entry, so supplying it is a parse error.
 
 Laserdisc VBI encoding is a **frame-level operation**: both fields of each frame carry codes on specific lines, with many codes split between the first field of the picture (field 1) and the remaining field (field 2). This field-conditional placement is intrinsic to the standard and is handled automatically by the encoder.
 
 ##### **Reserved VBI Address Ranges**
 
-The following VBI lines are reserved exclusively for laserdisc address/data signals. When the project declares a `disc_type` (a laserdisc project), no project VITS entry may target lines within these ranges:
+The following VBI lines are reserved exclusively for laserdisc address/data signals. When the project declares `laserdisc.disc_type` (a laserdisc project), no project VITS entry may target lines within these ranges:
 
 | **Standard** | **Field** | **Reserved Line Range** | **Reference**    |
 | ------------ | --------- | ----------------------- | ---------------- |
@@ -1592,13 +1646,16 @@ This signal co-exists with the 24-bit biphase system and occupies separate lines
 
 ##### **Fields**
 
+Section `laserdisc:` block (`ParseSectionLaserdisc`; the block must set at least one key, and any other key is a parse error):
+
 | **Field**   | **Type** | **Required** | **Description**                            | **Example** |
 | ----------- | -------- | ------------ | ------------------------------------------ | ----------- |
-| `codes`     | list     | Yes          | List of biphase codes to encode per frame. | (See below) |
+| `area`      | string   | With `codes` | Disc area: `lead_in`, `programme_area` or `lead_out` (held as `Section::section_type`). Drives the section-type/code-type matrix, the CAV minimum-duration warnings, the disc-structure ordering rules and the EFM track layout. | `programme_area` |
+| `codes`     | list     | No           | List of biphase codes to encode per frame (held as a `Section::LineInjection` of type `laserdisc`). | (See below) |
 
-> **Note**: `disc_type` is **not** specified on a per-section `laserdisc` injection. It is a project-wide setting (`CAV` or `CLV`) declared once in the top-level `line_injections:` block, since a disc is entirely CAV or entirely CLV.
+> **Note**: `disc_type` is **not** specified per section. It is a project-wide setting (`CAV` or `CLV`) declared once as `laserdisc.disc_type`, and it is required as soon as any section carries `codes`.
 >
-> **Note**: `target_lines` must **not** be specified for `laserdisc` injections.
+> **Note**: A section with `codes` must set `area`. A section `laserdisc:` block in a project without the top-level `laserdisc:` block is a validation error.
 
 ##### **`codes` Item Fields**
 
@@ -1643,42 +1700,43 @@ These five keys are the complete accepted set; any other key in a `codes[]` entr
 
 ##### **Example (PAL CAV)**
 
-`disc_type` (CAV vs CLV) is set once in the project-level `line_injections:` block; the per-section fragments below carry only the `codes:`.
+`disc_type` (CAV vs CLV) is set once in the project-level `laserdisc:` block; the per-section fragments below carry the `area` and the `codes:`.
 
 ```yaml
-# Project-level: line_injections: { disc_type: CAV }
-line_injections:
-  - type: laserdisc
-    # No disc_type or target_lines — disc_type is project-wide; line placement
-    # is fixed by IEC 60856 §10
-    codes:
-      - code_type: picture_number
-        start_value: 1          # Auto-increments each frame
-      - code_type: picture_stop
-      - code_type: chapter_number
-        chapter: 1
-      - code_type: programme_status
-        programme_status: "0x8F0000"
+# Section-level block; the project-level laserdisc: block sets disc_type: CAV
+laserdisc:
+  area: programme_area
+  # No disc_type or target_lines — disc_type is project-wide; line placement
+  # is fixed by IEC 60856 §10
+  codes:
+    - code_type: picture_number
+      start_value: 1          # Auto-increments each frame
+    - code_type: picture_stop
+    - code_type: chapter_number
+      chapter: 1
+    - code_type: programme_status
+      programme_status: "0x8F0000"
 ```
 
 ##### **Example (NTSC CLV)**
 
 ```yaml
-# Project-level: line_injections: { disc_type: CLV, vits: [ { vits_type: virs, target_lines: [19, 282] } ] }
-line_injections:
-  - type: laserdisc
-    # No disc_type or target_lines — disc_type is project-wide; line placement
-    # is fixed by IEC 60857 §10
-    codes:
-      - code_type: programme_time_code  # Starts at 0:00; no parameters
-      - code_type: clv_code
-      - code_type: clv_picture_number   # Auto-updates each frame; no parameters
-      - code_type: chapter_number
-        chapter: 1
-      - code_type: programme_status
-        programme_status: "0x8F0000"
-      - code_type: fm_programme_time    # 40-bit FM signal (NTSC mandatory)
-      - code_type: fm_white_flag
+# Section-level block; the project-level laserdisc: block sets disc_type: CLV, and
+# line_injections: { vits: [ { vits_type: virs, target_lines: [19, 282] } ] } supplies the mandatory VIRS
+laserdisc:
+  area: programme_area
+  # No disc_type or target_lines — disc_type is project-wide; line placement
+  # is fixed by IEC 60857 §10
+  codes:
+    - code_type: programme_time_code  # Starts at 0:00; no parameters
+    - code_type: clv_code
+    - code_type: clv_picture_number   # Auto-updates each frame; no parameters
+    - code_type: chapter_number
+      chapter: 1
+    - code_type: programme_status
+      programme_status: "0x8F0000"
+    - code_type: fm_programme_time    # 40-bit FM signal (NTSC mandatory)
+    - code_type: fm_white_flag
 ```
 
 ---
@@ -1687,7 +1745,7 @@ line_injections:
 
 > **Status**: target design only. The parser accepts `type: vitc` with `target_lines`, but the validator rejects it ("line injection type 'vitc' is not implemented in the current runtime"); the other fields below (`timecode`, `flags`, `crc`, `user_data`) are not accepted yet and are parse errors ("unsupported field").
 
-> **Note**: VITC is **incompatible with laserdisc biphase encoding**. Laserdisc discs use the IEC biphase system as their sole timecode and address mechanism; VITC is not used on laserdisc and must not be combined with a `laserdisc` injection in the same section. Doing so will fail validation.
+> **Note**: VITC is **incompatible with laserdisc biphase encoding**. Laserdisc discs use the IEC biphase system as their sole timecode and address mechanism; VITC is not used on laserdisc and must not be combined with laserdisc `codes` in the same section. Doing so will fail validation.
 
 For **VITC timecode**, refer to:
 
@@ -1816,18 +1874,18 @@ For **HSync, VSync, and colour burst insertion**, refer to:
     - Sequence II: lines 310–318.
     - Sequence III: lines 622–625 and 1–5.
     - Sequence IV: lines 311–319.
-3. **PAL Laserdisc Pilot Burst** (when `pal_laserdisc_pilot_burst: true`):
+3. **PAL Laserdisc Pilot Burst** (when `laserdisc.pilot_burst: true`):
   - Superimpose a continuous **3.75 MHz** ($240 \times f_H$) sinusoidal burst on the **sync pulse level** of every horizontal and vertical sync pulse in every line (see [IEC 60856](../analogue-video-specifications/docs/laserdisc/IEC-60856-1986-Laservision-PAL/IEC-60856-1986-Laservision-PAL.md) §9.1.2).
   - Amplitude: $\frac{6}{7} \times 700\ \text{mV} = 600\ \text{mV p-p}$, centred on sync tip (−300 mV), so the burst swings between **−600 mV and 0 mV**.
   - The pilot burst is applied to the full duration of every sync pulse (line-sync, broad/vertical sync, and equalizing pulses).
   - $17\,734\,475 = 25 \times 709\,379$, so the pilot advances a whole number of cycles per PAL frame and its waveform is identical on every frame. The runtime therefore derives each burst's phase from its offset **within** the frame — not from the absolute sample index — and renders every burst of the frame once per run.
   - This extends the signal range 300 mV below standard sync tip; see §6.1 for the headroom rationale and the required internal floating-point representation.
-4. **NTSC Laserdisc VBI Burst** (when `ntsc_laserdisc_vbi_burst: true`):
+4. **NTSC Laserdisc VBI Burst** (when `laserdisc.vbi_burst: true`):
   - Insert the standard NTSC **colour burst (3.579545 MHz)** on the **equalizing and broad (field) sync lines** of the vertical interval, where burst is normally suppressed in standard NTSC (see [IEC 60857](../analogue-video-specifications/docs/laserdisc/IEC-60857-1986-Laservision-NTSC/IEC-60857-1986-Laservision-NTSC.md) §9.1.2 and Figure 6a).
   - One burst per line at the normal gate position after 0H — not after the mid-line equalizing or broad pulses. The burst uses the same gate, envelope, amplitude and continuous subcarrier phase as the regular NTSC colour burst; no new frequency or amplitude is introduced.
   - This applies to every line whose 0H pulse is an equalizing or broad pulse: lines 1–9 in Field 1 and 264–272 in Field 2, the lines the timing model marks non-horizontal.
   - The burst is written to the C channel, so it adds to the luma beneath the gate: on equalizing lines it sits at blanking, and on broad sync lines — whose broad pulse covers the gate — it is centred on sync tip and reaches −60 IRE. That trough is below the NTSC 10-bit legal-code floor (code 16 = sync tip), so unsigned presets clip it and the validator warns.
-  - The NTSC colour sequence period (2 frames) and the template cache are unaffected; the flag is part of the CVBS presets that key the synthesis-resource and template caches.
+  - The NTSC colour sequence period (2 frames) and the template cache are unaffected; the flag is fixed for the run and is read from `laserdisc.vbi_burst` when the per-thread synthesis resources are built.
 
 ---
 
@@ -1959,8 +2017,8 @@ Current implementation status:
 ### **Conflict Resolution**
 
 - **If injected lines overlap within a section, the YAML must fail validation.**
-- **When the project declares a `disc_type`, any project VITS entry targeting lines within the reserved range for that standard must fail validation** (PAL: F1 6–18, F2 319–331; NTSC/PAL-M: F1 10–18, F2 273–281).
-- **A `vitc` injection and a `laserdisc` injection must not appear in the same section.** Laserdisc does not use VITC; the biphase system is the sole timecode and address mechanism on laserdisc.
+- **When the project declares `laserdisc.disc_type`, any project VITS entry targeting lines within the reserved range for that standard must fail validation** (PAL: F1 6–18, F2 319–331; NTSC/PAL-M: F1 10–18, F2 273–281).
+- **A `vitc` injection and laserdisc `codes` must not appear in the same section.** Laserdisc does not use VITC; the biphase system is the sole timecode and address mechanism on laserdisc.
 ---
 
 ---
@@ -2015,7 +2073,7 @@ The runtime uses a **central pipeline module** to process sections and combine t
     - For each frame in the section:
       - Insert **sync pulses** and **colour burst** (see [ITU-R BT.470-6](../analogue-video-specifications/docs/video_formats/BT-470-6-1998/BT-470-6-1998.md), [ITU-R BT.1700](../analogue-video-specifications/docs/video_formats/BT-1700-E/BT-1700-E.md)).
       - Apply **ramping and transition smoothing** to simulate analogue behavior (see [ITU-R BT.470-6](../analogue-video-specifications/docs/video_formats/BT-470-6-1998/BT-470-6-1998.md) for ramping requirements).
-      - Map each active line's source row onto the 4fsc window, nearest pixel or band-limited (see *Horizontal mapping* above), applying any `chroma_line_sign` regions.
+      - Map each active line's source row onto the 4fsc window, nearest pixel or band-limited (see *Horizontal mapping* above), applying any `chroma_line_sign` regions. With `laserdisc.channel.field2_offset`, field 2's rows come from an offset copy of its source picture (`OffsetSourceImage`).
       - When the section sets `luma_bandwidth:`, low-pass each active line's 4fsc-mapped luma before painting it (see *Luma bandwidth limit* above).
       - When the run writes a picture truth, record each active line's Y and filtered U/V (see *Picture truth* above).
     - Emit bounded batches of `4fsc` Y and C sample buffers in fixed-point mV units, ready for handoff to the Channel Stage.
@@ -2028,11 +2086,12 @@ Current implementation note:
 
 #### **3. Channel Stage**
 
-- **Input**: `4fsc`-discrete fixed-point Y/C mV batches from the generation stage; the project's `channel:` block.
-- **Output**: In-place modified Y/C mV buffers; untouched when the block is absent or every configured impairment is the identity.
+- **Input**: `4fsc`-discrete fixed-point Y/C mV batches from the generation stage; the project's `channel:` block and `laserdisc.channel:` block.
+- **Output**: In-place modified Y/C mV buffers; untouched when both blocks are absent or every configured impairment is the identity.
 - **Steps**:
-  1. Once per batch: build the picture line windows and an `FmBeatModel` (when `fm_beat` is set on PAL), and one `TimingOffsetFilter` for the project's offset (integer shift plus a 32-tap fractional-delay kernel when the offset is fractional).
-  2. For each frame: add the scaled beat basis to Y inside the picture windows; apply the edge smear to Y and C; write the circularly delayed copy of Y and C. Y is clamped to the legal fixed-point mV range for the standard after each step; C is not.
+  1. Once per batch: build the picture line windows and an `FmBeatModel` (when `laserdisc.channel.fm_beat` is set on PAL); design the `ReplayChannelFilter` from `group_delay` and `response_db` (once, or per frame from the frame's picture number with `response_by_picture`); and build one `TimingOffsetFilter` for the project's offset (integer shift plus a 32-tap fractional-delay kernel when the offset is fractional).
+  2. For each frame: add the scaled beat basis to Y inside the picture windows; apply the replay filter to Y and C; apply the edge smear to Y and C; write the circularly delayed copy of Y and C. Y is clamped to the legal fixed-point mV range for the standard after each step; C is not.
+- `laserdisc.channel.field2_offset` is not part of this stage: the Generation Stage applies it to field 2's source picture before encoding.
 - The stage is owned by `VideoSynthPipeline` (it is stateless) and runs on the pool workers like the other per-frame stages, so output is byte-identical for any `--threads`. `PreviewFrameService` applies it unconditionally, since the channel is part of the previewed signal rather than an optional impairment.
 
 #### **4. Chroma Error Stage**
@@ -2133,11 +2192,11 @@ To simulate **analogue output**, the generator must:
 The current validator enforces a narrower subset than the full design intent in this section:
 
 - Implemented: standard selection, sample-encoding and signal-state preset constraints, output-path requirements (including `signal_type` validation and `.cvbsy`-suffix enforcement for Y/C mode), progressive source profile checks, accepted raster checks, NTSC/PAL-M black-setup constraints, and validator-side VITS/line-injection compatibility checks including overlap detection, laserdisc reserved-range conflicts, and VITC/laserdisc incompatibility (VITC itself is then rejected as not implemented).
-- Implemented: full laserdisc biphase validation including section_type/code_type matrix enforcement, IEC value range constraints (`picture_number`/`fm_picture_number` `start_value` against the standard's maximum — the start value only, not the incremented count — `chapter` 0–79, and the `users_code` X₁ 0–7 and D = `0xD` nibbles; the CLV clocks take no parameters), CAV minimum duration **warnings** (lead-in ≥ 938 frames, lead-out ≥ 1250 frames; skipped for `duration_frames: "all"`), a CAV-only minimum chapter length **warning** (`ValidateChapterLengths`: a chapter run shorter than 30 frames; runs containing a `duration_frames: "all"` section are skipped, and CLV discs are not checked), the NTSC/PAL-M VIRS mandatory presence check (a `virs` entry in the project-level `line_injections.vits`), and VITS/biphase reserved-range line conflict detection.
+- Implemented: top-level `laserdisc:` block validation (`disc_type` value, pilot/VBI burst standard restrictions, EFM audio, LaserVision channel ranges and standard restrictions, SECAM rejection, and a section `laserdisc:` block without the top-level block) and full laserdisc biphase validation including `laserdisc.area`/code_type matrix enforcement (a section with `codes` must set `area`), IEC value range constraints (`picture_number`/`fm_picture_number` `start_value` against the standard's maximum — the start value only, not the incremented count — `chapter` 0–79, and the `users_code` X₁ 0–7 and D = `0xD` nibbles; the CLV clocks take no parameters), CAV minimum duration **warnings** (lead-in ≥ 938 frames, lead-out ≥ 1250 frames; skipped for `duration_frames: "all"`), a CAV-only minimum chapter length **warning** (`ValidateChapterLengths`: a chapter run shorter than 30 frames; runs containing a `duration_frames: "all"` section are skipped, and CLV discs are not checked), the NTSC/PAL-M VIRS mandatory presence check (a `virs` entry in the project-level `line_injections.vits` when `laserdisc.disc_type` is set), and VITS/biphase reserved-range line conflict detection.
 - Implemented: project-level `channel:` validation (`timing_offset_samples` in [−8.0, 8.0] and finite).
 - Implemented: project-level `chroma_error:` validation (gain, phase and jitter ranges, finiteness, SECAM rejection).
 - Implemented: per-section noise parameter validation (range, spread floor, mutual dependency, spectrum tables, shared-layer level and seed), dropout validation (scale range, an error for a `dropouts:` block that enables neither type, and a seed for `anchor: disc`), luma bandwidth validation (cutoff and transition ranges), `chroma_line_sign` validation (PAL/PAL-M only, regions inside the raster and following the switch on at least one component), `output.truth` validation (not SECAM; a warning with OSD overlays), and audio validation (including an error when a tone sets both `ramp:` and `frequency`).
-- Implemented: disc-structure section ordering. When any section declares a `section_type`, the section sequence must be `[lead_in] programme_area... [lead_out]`: at most one `lead_in` (first) and one `lead_out` (last), no section may precede the `lead_in` or follow the `lead_out`, and every section after a `lead_in` or before a `lead_out` must be `programme_area`. Out-of-order sections would break monotonic picture-number and time-code generation (IEC 60856/60857). The GUI surfaces these errors through the shared validator in the validation issues dock.
+- Implemented: disc-structure section ordering. When any section's `laserdisc.area` is `lead_in` or `lead_out`, the section sequence must be `[lead_in] programme_area... [lead_out]`: at most one `lead_in` (first) and one `lead_out` (last), no section may precede the `lead_in` or follow the `lead_out`, and every section after a `lead_in` or before a `lead_out` must be `programme_area`. Out-of-order sections would break monotonic picture-number and time-code generation (IEC 60856/60857). The GUI surfaces these errors through the shared validator in the validation issues dock.
 - Not yet implemented in the validator/runtime pair: VITC and custom per-line content runtime paths.
 
 The rule set below remains the intended validation contract for VITC and custom per-line content, which are not yet implemented.
@@ -2152,15 +2211,15 @@ The rule set below remains the intended validation contract for VITC and custom 
   - Only one `signal_state_preset` per project.
   - Output resolution is fixed by the standard (720x576 for PAL and SECAM, 720x486 for NTSC and PAL-M) and must not be specified in the project file.
   - `sample_encoding_preset` must be a supported 4fsc or raw preset; `signal_state_preset` must be `STANDARD_STABLE_LOCKED` (`STANDARD_STABLE_UNLOCKED` for SECAM).
-  - `pal_laserdisc_pilot_burst` can **only be enabled for PAL projects**; any other standard is **invalid**. A warning is emitted when the preset cannot carry the burst's sub-sync trough.
-  - `ntsc_laserdisc_vbi_burst` can **only be enabled for NTSC projects**; any other standard is **invalid**. A warning is emitted when the preset cannot carry the burst's sub-sync trough on the broad pulses.
+  - `laserdisc.pilot_burst` can **only be enabled for PAL projects**; any other standard is **invalid**. A warning is emitted when the preset cannot carry the burst's sub-sync trough.
+  - `laserdisc.vbi_burst` can **only be enabled for NTSC projects**; any other standard is **invalid**. A warning is emitted when the preset cannot carry the burst's sub-sync trough on the broad pulses.
   - `ntsc_black_setup_ire` can **only be specified for NTSC or PAL-M projects**. If specified for PAL or SECAM, the YAML is considered **invalid**.
   - `ntsc_black_setup_ire` must be either `7.5` or `0.0`.
 2. **Sections**:
   - Each section must have a valid `type` (`progressive`).
   - Each section must have at least one of:
     - Frame-based content (`progressive`).
-    - Line injections (`line_injections`).
+    - Line injections (section `laserdisc.codes` or `line_injections`).
   - For `progressive` sections, `source` must point to a valid file.
   - **Input source frame rate must match the required output format and be constant (including MKV and MP4 sources)**. A section with `cadence.pattern: "2:3"` instead requires 24000/1001 film on a 525-line standard (validated and sized by `film_cadence`, generated field by field as described under *Progressive Source to Two-Field Frame Conversion*).
   - **Progressive source must match a supported source profile (Section 8.1): EXR still rules, or for video a container matching its extension, a video stream and no crop metadata.**
@@ -2169,17 +2228,17 @@ The rule set below remains the intended validation contract for VITC and custom 
   - **Scaling/resizing of progressive sources is not supported**.
   - **Ingestion must preserve the full source raster geometry (`720x576` or `720x486`) with no horizontal crop, no vertical crop, and no sample-rate conversion.**
   - **Ingestion must not apply implicit width normalization or ad-hoc crop/remap operations**.
-  - **Disc-structure section ordering** (applies when any section declares a `section_type`):
+  - **Disc-structure section ordering** (applies when any section's `laserdisc.area` is `lead_in` or `lead_out`):
     - At most one `lead_in` section; if present, it must be the **first** section (no section may precede it).
     - At most one `lead_out` section; if present, it must be the **last** section (no section may follow it).
     - Every section after a `lead_in` or before a `lead_out` must be `programme_area`.
     - Violations are **errors**: out-of-order sections would break monotonic picture-number and time-code generation (IEC 60856/60857).
 3. **Line Injection Constraints**:
   - `target_lines` must be within the valid range for the standard (1-625 for PAL, 1-525 for NTSC).
-  - `target_lines` must **not** be specified for `laserdisc` injection types; specifying it is a validation error.
+  - A section's `laserdisc.codes` take no `target_lines` (the key is not accepted, so it is a parse error): line placement is fixed by the standard.
   - **If injected lines overlap within a section, the YAML must fail validation.**
-  - **When the project declares a `disc_type` (a laserdisc project), no project VITS entry may target lines within the laserdisc reserved ranges** (PAL: Field 1 lines 6–18, Field 2 lines 319–331; NTSC/PAL-M: Field 1 lines 10–18, Field 2 lines 273–281).
-  - **A `vitc` injection and a `laserdisc` injection must not appear in the same section.** Laserdisc does not use VITC.
+  - **When the project declares `laserdisc.disc_type` (a laserdisc project), no project VITS entry may target lines within the laserdisc reserved ranges** (PAL: Field 1 lines 6–18, Field 2 lines 319–331; NTSC/PAL-M: Field 1 lines 10–18, Field 2 lines 273–281).
+  - **A `vitc` injection and laserdisc `codes` must not appear in the same section.** Laserdisc does not use VITC.
 4. **Noise Parameters** (per-section `noise:` block):
   - `noise_db` must be in **[20.0, 61.0] dB** (error if outside this range).
   - `noise_spread_db` must be **≥ 0.0** (error if negative).
@@ -2193,11 +2252,12 @@ The rule set below remains the intended validation contract for VITC and custom 
   - If `noise_spread_db > 0` and no VITS injection targets the orc-gui White SNR measurement line (PAL: frame line 19; NTSC: frame line 20), a **warning** is emitted that the White SNR target will not be verifiable in orc-gui without a suitable VITS white-flag injection.
 5. **Channel Parameters** (project-level `channel:` block):
   - `timing_offset_samples` must be in **[−8.0, 8.0]** and finite (error otherwise).
-  - An empty `channel:` block or a non-numeric `timing_offset_samples` is a parse error.
+  - `edge_smear.fraction` in **[0, 0.5]** and `edge_smear.tau_samples` in **(0, 100]** (error otherwise).
+  - An empty `channel:` block, an unknown key (including `fm_beat`, which names `laserdisc.channel.fm_beat`) or a non-numeric value is a parse error.
 6. **Chroma Error Parameters** (project-level `chroma_error:` block):
-  - `gain` in **[0.5, 1.5]**, `phase_deg` in **[−180.0, 180.0]**, `line_jitter.phase_deg` in **[0.0, 10.0]**, `line_jitter.gain` in **[0.0, 0.1]**, all finite (error otherwise).
-  - `chroma_error:` on a SECAM project is an error.
-  - An empty `chroma_error:` or `line_jitter:` block, an unknown key or a non-numeric value is a parse error.
+  - `gain` in **[0.5, 1.5]**, `phase_deg` in **[−180.0, 180.0]**, `line_jitter.phase_deg` in **[0.0, 10.0]**, `line_jitter.gain` in **[0.0, 0.1]**, `differential` levels in **[−50, 150]** IRE strictly ascending with gains in **[0.5, 1.5]** and phases in **[−30, 30]**, `crosstalk.v_to_u`/`u_to_v` in **[−0.5, 0.5]**, all finite (error otherwise).
+  - `chroma_error:` on a SECAM project is an error, as is `crosstalk.alternate_with_switch: true` on NTSC.
+  - An empty `chroma_error:`, `line_jitter:`, `differential:` or `crosstalk:` block, an unknown key, a non-numeric value or a non-boolean `include_burst`/`alternate_with_switch` is a parse error.
 7. **Dropout Parameters** (per-section `dropouts:` block):
   - `random.scale` must be in **[0, 20]** (error if outside this range; `0` means disabled).
   - `scratch.scale` must be in **[0, 20]** (error if outside this range; `0` means disabled).
@@ -2207,9 +2267,13 @@ The rule set below remains the intended validation contract for VITC and custom 
   - **Luma bandwidth** (per-section `luma_bandwidth:` block): `transition_mhz` in **[0.1, 2.0]**; `cutoff_mhz` in **[0.5, 2 f_sc − transition_mhz/2]**, where 2 f_sc is the 4fsc Nyquist frequency (error otherwise). A missing `cutoff_mhz`, an unknown key or a non-numeric value is a parse error.
   - **Chroma line sign** (per-section `chroma_line_sign:` list): PAL and PAL-M only (error otherwise); every region must have a positive width and height, lie inside the 720×576 (PAL) or 720×486 (PAL-M) source raster and set `u` or `v` to `follow_switch` (errors). A non-list value, a missing `region` or coordinate, a non-integer coordinate, an unknown mode or key is a parse error. `horizontal_resample` other than `nearest`/`bandlimited` is a parse error.
   - **Picture truth** (`output.truth`): an error on SECAM; a warning when any section has OSD overlays (the truth excludes them).
-8. **EFM Digital Audio** (`output.efm_audio:` block):
+8. **LaserDisc** (top-level `laserdisc:` block and section `laserdisc:` blocks):
+  - An empty block or an unknown key is a parse error; so is any of the LaserDisc keys placed in another block (`cvbs_presets.pal_laserdisc_pilot_burst`, `cvbs_presets.ntsc_laserdisc_vbi_burst`, `output.efm_audio`, `line_injections.disc_type`, `channel.fm_beat`, `sections[].section_type`, a section `line_injections` entry with `type: laserdisc`), with a message naming the replacement.
+  - `disc_type` must be `CAV` or `CLV`; it is required when any section carries `codes`. A section with `codes` must set `laserdisc.area`. A section `laserdisc:` block without the top-level block is an error. The whole block, or any section `laserdisc:` block, on SECAM is an error.
+  - `laserdisc.channel`: `fm_beat` and `group_delay.preset: iec60856_nominal` are 625-line PAL only; `fm_beat.carrier_black_hz` in **[6.9e6, 7.3e6]**, `fm_beat.level_db` in **[−60, 0]**, `group_delay.scale` in **[−2, 2]**, `group_delay.points_ns` MHz strictly ascending in [0, 4fsc Nyquist] with delays in **[−1000, 1000]** ns, `response_db` (and each `response_by_picture` entry's) MHz strictly ascending in [0, 4fsc Nyquist] with levels in **[−60, +20]** dB, `field2_offset.x_samples` in **[−8, 8]**, `field2_offset.y_lines` in **[−4, 4]** (errors). `response_db` with `response_by_picture`, fewer than two `response_by_picture` entries, or pictures below 1 or not ascending are errors.
+9. **EFM Digital Audio** (`laserdisc.efm_audio:` block):
   - `pair` must be in **[0, 7]** (error if outside this range).
-  - `video_standard_preset` must be `PAL` or `NTSC` — no other standard has a LaserDisc digital audio specification (error otherwise).
+  - `video_standard_preset` must be `PAL`, `NTSC` or `PAL_M` — SECAM has no LaserDisc digital audio specification (error otherwise).
   - If no section declares the selected `pair`, a **warning** is emitted: no `.efm` file is written.
   - More than **79** `programme_area` sections is an error (IEC 60856 Amd 2, 13.5.3.3 / IEC 60857 Amd 2, 13.6.3.3 — one track per section).
   - A `programme_area` section shorter than **4 s** (**6 s** for the first, whose leading 2 s are the mandatory pause) emits a **warning** (IEC 60908-1999, 17.5.1).
@@ -2227,12 +2291,16 @@ Representative messages as emitted by the parser (`src/yaml_project_parser.cpp`)
 | Invalid standard                           | "Project configuration error: video_standard_preset must be 'PAL', 'NTSC', 'PAL_M', or 'SECAM'." |
 | Invalid sample encoding preset             | "Project configuration error: sample_encoding_preset must be one of the supported CVBS or raw presets." |
 | Invalid signal state preset                | "Project configuration error: signal_state_preset must be 'STANDARD_STABLE_LOCKED'." (`… 'STANDARD_STABLE_UNLOCKED' for SECAM projects.`) |
-| Invalid pilot burst                        | "Project configuration error: pal_laserdisc_pilot_burst can only be enabled for PAL projects." |
-| Invalid VBI burst                          | "Project configuration error: ntsc_laserdisc_vbi_burst can only be enabled for NTSC projects." |
+| LaserDisc key outside the `laserdisc` blocks | "`<block>`.`<key>` has moved to `<replacement>`." (parse error, e.g. "cvbs_presets.pal_laserdisc_pilot_burst has moved to laserdisc.pilot_burst."); a section entry with `type: laserdisc`: "line_injections[] type 'laserdisc' has moved: laserdisc codes go in the section's laserdisc.codes list." |
+| Invalid pilot burst                        | "Project configuration error: laserdisc.pilot_burst can only be enabled for PAL projects." |
+| Invalid VBI burst                          | "Project configuration error: laserdisc.vbi_burst can only be enabled for NTSC projects." |
+| Codes without disc type                    | "Laserdisc validation error: a section declares laserdisc codes but laserdisc.disc_type is not set. Set laserdisc.disc_type to 'CAV' or 'CLV'." |
+| Codes without disc area                    | "Laserdisc validation error: section '`<name>`' carries laserdisc codes, so its laserdisc.area must be set to 'lead_in', 'programme_area' or 'lead_out'." |
+| Section block without project block        | "Laserdisc validation error: section '`<name>`' has a laserdisc block, but the project has no top-level laserdisc block. Add one (with disc_type for biphase codes)." |
+| LaserDisc on SECAM                         | "Project configuration error: there is no SECAM LaserVision format, so the laserdisc block, section laserdisc blocks and laserdisc VITS placement are not available for SECAM projects." |
 | Invalid NTSC black setup scope             | "Project configuration error: ntsc_black_setup_ire can only be specified for NTSC or PAL-M projects." |
 | Unknown asset root                         | "…: unknown asset root '`<name>`' in `<field>`. Known roots: bundled, user, project, output." |
 | Invalid line injection target lines        | "Line injection validation error: VITS target line `<n>` is outside the valid frame-line range for `<standard>`." |
-| Laserdisc `target_lines` specified         | "Line injection validation error: target_lines must not be specified for laserdisc injections." |
 | Laserdisc reserved range conflict          | "Line injection validation error: VITS target line `<n>` conflicts with laserdisc reserved VBI ranges for `<standard>`." |
 | VITC with laserdisc                        | "Line injection validation error: vitc and laserdisc injections cannot appear in the same section." |
 | Overlapping target lines                   | "Line injection validation error: overlapping VITS target line `<n>` within the project VITS set." |

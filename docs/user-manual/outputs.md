@@ -71,7 +71,7 @@ With [`output.truth: true`](../reference/output.md#truth), `<name>.truth` holds 
 
 The same project produces byte-identical files on every run, on any machine, at any thread count, with or without the frame template cache. Where randomness is involved — noise and dropouts — a fixed seed makes it reproducible too.
 
-This is a testable property, not just an intention: the repository ships `scripts/output-hashes.sh`, which records SHA-256 manifests of every artefact (using SQLite's canonical `.dump` for the databases) and fails if a later build differs from a recorded baseline.
+This is a testable property, not just an intention: the repository ships `scripts/output-hashes.sh`, which records SHA-256 manifests of the sample, audio, picture-truth and `.meta` files (using SQLite's canonical `.dump` for the databases; the `.efm` stream is not included) and fails if a later build differs from a recorded baseline.
 
 ```bash
 # On a known-good build
