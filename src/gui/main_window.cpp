@@ -708,6 +708,7 @@ void MainWindow::EditProject(IssueField field) {
   document_->SetLaserdisc(edited.laserdisc);
   document_->SetChannel(edited.channel);
   document_->SetChromaError(edited.chroma_error);
+  document_->SetLineTiming(edited.line_timing);
   // The settings can rewrite sections too: removing the laserdisc block
   // clears every section's disc area and codes.
   const int section_count = std::min(document_->section_count(),

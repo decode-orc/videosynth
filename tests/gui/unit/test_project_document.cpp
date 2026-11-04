@@ -369,6 +369,11 @@ TEST_F(ProjectDocumentTest, ImpairmentFieldEditsUndoAndRedo) {
       [](Section* s) { s->luma_bandwidth.enabled = true; },
       [](Section* s) { s->luma_bandwidth.cutoff_mhz = 3.0; },
       [](Section* s) { s->luma_bandwidth.transition_mhz = 0.8; },
+      [](Section* s) { s->picture_response.enabled = true; },
+      [](Section* s) {
+        s->picture_response.preset = PictureResponsePreset::kDomesday;
+      },
+      [](Section* s) { s->picture_response.vertical_db = {{0.25, -3.0}}; },
   };
   for (const Edit edit : edits) {
     ExpectSectionEditUndoesAndRedoes(&document_, edit);
@@ -475,6 +480,36 @@ TEST_F(ProjectDocumentTest, ChromaErrorEditUndoesAndRedoesEveryField) {
     EXPECT_EQ(document_.project().chroma_error, edited);
   }
   EXPECT_EQ(document_.UndoDescription(), QStringLiteral("Edit chroma error"));
+}
+
+TEST_F(ProjectDocumentTest, LineTimingEditUndoesAndRedoesEveryField) {
+  using Edit = void (*)(LineTimingParameters*);
+  const Edit edits[] = {
+      [](LineTimingParameters* l) { l->enabled = true; },
+      [](LineTimingParameters* l) { l->capture.enabled = true; },
+      [](LineTimingParameters* l) { l->capture.line_ns = 4.9; },
+      [](LineTimingParameters* l) { l->capture.line_correlation = 0.6; },
+      [](LineTimingParameters* l) { l->capture.field_ns = 3.1; },
+      [](LineTimingParameters* l) { l->capture.slope_ns = 3.4; },
+      [](LineTimingParameters* l) { l->capture.seed_specified = true; },
+      [](LineTimingParameters* l) { l->capture.seed = 7; },
+      [](LineTimingParameters* l) { l->include_burst = true; },
+      [](LineTimingParameters* l) { l->shared.enabled = true; },
+      [](LineTimingParameters* l) { l->shared.line_ns = 2.0; },
+      [](LineTimingParameters* l) { l->shared.seed = 7001; },
+  };
+  for (const Edit edit : edits) {
+    const LineTimingParameters original = document_.project().line_timing;
+    LineTimingParameters edited = original;
+    edit(&edited);
+    ASSERT_TRUE(document_.SetLineTiming(edited));
+    EXPECT_FALSE(document_.SetLineTiming(edited));
+    ASSERT_TRUE(document_.Undo());
+    EXPECT_EQ(document_.project().line_timing, original);
+    ASSERT_TRUE(document_.Redo());
+    EXPECT_EQ(document_.project().line_timing, edited);
+  }
+  EXPECT_EQ(document_.UndoDescription(), QStringLiteral("Edit line timing"));
 }
 
 TEST_F(ProjectDocumentTest, EndFrameOnlyEditIsAChange) {

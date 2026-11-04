@@ -62,9 +62,10 @@ The truth is taken after every step applied before modulation, and before any im
 |----------|----------|
 | The source-to-4fsc [horizontal mapping](sections.md#horizontal_resample) | [`channel`](channel.md) (timing offset, edge smear) |
 | The section's [`luma_bandwidth`](sections.md#luma_bandwidth) limit | The [LaserVision channel](laserdisc-channel.md) (FM beat, group delay, replay response) |
-| The chroma low-pass (33-tap Hamming-windowed 1.3 MHz for PAL and PAL-M, 17-tap 1.2 MHz for NTSC) | [`chroma_error`](chroma-error.md) |
+| The chroma low-pass (33-tap Hamming-windowed 1.3 MHz for PAL and PAL-M, 17-tap 1.2 MHz for NTSC) | [`chroma_error`](chroma-error.md) and [`line_timing`](line-timing.md) |
 | [`chroma_line_sign`](sections.md#chroma_line_sign) regions | [Noise](section-noise.md) and [dropouts](section-dropouts.md) |
 | [`laserdisc.channel.field2_offset`](laserdisc-channel.md#field2_offset), which changes the picture that is modulated | [OSD](section-osd.md) text (drawn afterwards; a warning) |
+| The section's [`picture_response`](sections.md#picture_response) (horizontal and vertical) | |
 
 ### `.truth`
 

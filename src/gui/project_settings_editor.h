@@ -1,9 +1,9 @@
 /*
  * File:        project_settings_editor.h
  * Module:      gui
- * Purpose:     Form editor for project info, CVBS presets, VITS, channel and
- *              chroma error impairments, output targets and the LaserDisc
- *              block
+ * Purpose:     Form editor for project info, CVBS presets, VITS, channel,
+ *              chroma error and line timing impairments, output targets and
+ *              the LaserDisc block
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -35,7 +35,8 @@ class CurvePointsEditor;
 class ResponseByPictureEditor;
 
 // Editor for the project-level YAML blocks (project:, cvbs_presets:,
-// line_injections:, channel:, chroma_error:, output:, laserdisc:). Every
+// line_injections:, channel:, chroma_error:, line_timing:, output:,
+// laserdisc:). Every
 // control maps 1:1 to a Project field and commits through ProjectDocument
 // commands; standard-dependent enablement follows BuildProjectSettingsFormState
 // so invalid combinations cannot be entered. Everything LaserDisc-specific
@@ -57,9 +58,9 @@ class ProjectSettingsEditor : public QWidget {
   // dialog calls this with `false` so it is shown read-only.
   void SetStandardEditable(bool editable);
 
-  // The group holding `field` (kChannel, kChromaError, kLaserdiscChannel) and
-  // the input to focus
-  // in it, for validation issue navigation; null for other fields.
+  // The group holding `field` (kChannel, kChromaError, kLineTiming,
+  // kLaserdiscChannel) and the input to focus in it, for validation issue
+  // navigation; null for other fields.
   QWidget* FieldGroup(IssueField field) const;
   QWidget* FieldFocusWidget(IssueField field) const;
 
@@ -74,6 +75,7 @@ class ProjectSettingsEditor : public QWidget {
   void CommitOutputTargets();
   void CommitChannel();
   void CommitChromaError();
+  void CommitLineTiming();
   void CommitLaserdisc();
   // Clears every section's laserdisc data (disc area and codes), which the
   // validator rejects once the project has no laserdisc block. Returns true
@@ -83,9 +85,11 @@ class ProjectSettingsEditor : public QWidget {
   QWidget* BuildVitsGroup();
   QWidget* BuildChannelGroup();
   QWidget* BuildChromaErrorGroup();
+  QWidget* BuildLineTimingGroup();
   QWidget* BuildLaserdiscGroup();
   QWidget* BuildLaserdiscChannelGroup(QWidget* parent);
   void LoadChannelAndChromaError(const Project& project);
+  void LoadLineTiming(const Project& project);
   void LoadLaserdisc(const Project& project);
   void ApplyLaserdiscEnablement(const ProjectSettingsFormState& state);
 
@@ -165,6 +169,22 @@ class ProjectSettingsEditor : public QWidget {
   QDoubleSpinBox* crosstalk_u_to_v_spin_ = nullptr;
   QCheckBox* crosstalk_alternate_check_ = nullptr;
   QLabel* chroma_error_hint_ = nullptr;
+
+  // line_timing: (capture layer, with an optional pressing layer). One
+  // widget set per layer.
+  struct LineTimingLayerWidgets {
+    QDoubleSpinBox* line_ns = nullptr;
+    QDoubleSpinBox* correlation = nullptr;
+    QDoubleSpinBox* field_ns = nullptr;
+    QDoubleSpinBox* slope_ns = nullptr;
+    QCheckBox* seed_check = nullptr;
+    QLineEdit* seed_edit = nullptr;
+  };
+  QGroupBox* line_timing_group_ = nullptr;
+  LineTimingLayerWidgets line_timing_capture_;
+  QCheckBox* line_timing_burst_check_ = nullptr;
+  QGroupBox* line_timing_shared_group_ = nullptr;
+  LineTimingLayerWidgets line_timing_shared_;
 
   QCheckBox* truth_check_ = nullptr;
 

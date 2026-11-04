@@ -10,6 +10,7 @@
 #include "project_settings_presenter.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <utility>
 
 namespace videosynth::gui {
@@ -80,6 +81,17 @@ constexpr double kDefaultDifferentialWhitePhaseDeg = 3.0;
 constexpr double kWhiteLevelIre = 100.0;
 // Freshly-enabled crosstalk: a small symmetric U/V leak.
 constexpr double kDefaultCrosstalk = 0.02;
+// Freshly-enabled line timing: the per-capture figures measured on a
+// Domesday capture after time-base correction (decode-orc/videosynth#19),
+// and a smaller recorded (pressing) part.
+constexpr double kDefaultLineTimingLineNs = 4.9;
+constexpr double kDefaultLineTimingCorrelation = 0.6;
+constexpr double kDefaultLineTimingFieldNs = 3.1;
+constexpr double kDefaultLineTimingSlopeNs = 3.4;
+constexpr double kDefaultSharedLineTimingLineNs = 3.0;
+constexpr double kDefaultSharedLineTimingFieldNs = 1.5;
+constexpr double kDefaultSharedLineTimingSlopeNs = 2.0;
+constexpr std::int64_t kDefaultSharedLineTimingSeed = 1;
 // Freshly-enabled field-2 offset: half a sample to the right.
 constexpr double kDefaultField2OffsetSamples = 0.5;
 // Pictures between a new response_by_picture entry and the one before it.
@@ -127,6 +139,7 @@ ProjectSettingsFormState BuildProjectSettingsFormState(const Project& project) {
   state.crosstalk_alternate_editable =
       standard == Standard::kPal || standard == Standard::kPalM;
   state.chroma_error_editable = standard != Standard::kSecam;
+  state.line_timing_burst_editable = standard != Standard::kSecam;
   state.vbi_burst_editable = standard == Standard::kNtsc;
   state.setup_ire_editable =
       standard == Standard::kNtsc || standard == Standard::kPalM;
@@ -203,6 +216,14 @@ ChromaErrorParameters NormalizeChromaErrorForStandard(
   return chroma_error;
 }
 
+LineTimingParameters NormalizeLineTimingForStandard(
+    LineTimingParameters line_timing, Standard standard) {
+  if (standard == Standard::kSecam) {
+    line_timing.include_burst = false;
+  }
+  return line_timing;
+}
+
 void SetChannelEnabled(ChannelParameters* channel, bool enabled) {
   if (!enabled) {
     *channel = ChannelParameters{};
@@ -277,6 +298,43 @@ void SetCrosstalkEnabled(ChromaErrorParameters* chroma_error, bool enabled) {
   crosstalk.enabled = true;
   crosstalk.v_to_u = kDefaultCrosstalk;
   crosstalk.u_to_v = kDefaultCrosstalk;
+}
+
+void SetLineTimingEnabled(LineTimingParameters* line_timing, bool enabled) {
+  if (!enabled) {
+    *line_timing = LineTimingParameters{};
+    return;
+  }
+  line_timing->enabled = true;
+  if (line_timing->capture.enabled || line_timing->shared.enabled) {
+    return;
+  }
+  LineTimingLayer& capture = line_timing->capture;
+  capture.enabled = true;
+  capture.line_ns = kDefaultLineTimingLineNs;
+  capture.line_correlation = kDefaultLineTimingCorrelation;
+  capture.field_ns = kDefaultLineTimingFieldNs;
+  capture.slope_ns = kDefaultLineTimingSlopeNs;
+}
+
+void SetSharedLineTimingEnabled(LineTimingParameters* line_timing,
+                                bool enabled) {
+  if (!enabled) {
+    line_timing->shared = LineTimingLayer{};
+    return;
+  }
+  line_timing->enabled = true;
+  LineTimingLayer& shared = line_timing->shared;
+  if (shared.enabled) {
+    return;
+  }
+  shared.enabled = true;
+  shared.line_ns = kDefaultSharedLineTimingLineNs;
+  shared.line_correlation = kDefaultLineTimingCorrelation;
+  shared.field_ns = kDefaultSharedLineTimingFieldNs;
+  shared.slope_ns = kDefaultSharedLineTimingSlopeNs;
+  shared.seed_specified = true;
+  shared.seed = kDefaultSharedLineTimingSeed;
 }
 
 void SetLaserdiscEnabled(LaserdiscParameters* laserdisc, bool enabled) {

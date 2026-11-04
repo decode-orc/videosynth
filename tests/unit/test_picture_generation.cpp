@@ -23,6 +23,7 @@
 #include "videosynth/fixed_point.h"
 #include "videosynth/frame_line_layout.h"
 #include "videosynth/generation_stage.h"
+#include "videosynth/picture_response_filter.h"
 #include "videosynth/picture_truth.h"
 #include "videosynth/progressive_frame_source.h"
 #include "videosynth/timing_constants.h"
@@ -33,8 +34,13 @@ namespace {
 constexpr double kPi = 3.14159265358979323846;
 
 // Source pictures by name. "flat_v.mkv" is a uniform grey with +V (Cr above
-// 512); "edge.mkv" is a luma and chroma step at the raster's centre column.
-YCbCr444Pixel PixelFor(const std::string& source, int x) {
+// 512); "edge.mkv" is a luma and chroma step at the raster's centre column;
+// "rows.mkv" alternates dark and light grey rows (the row Nyquist frequency).
+YCbCr444Pixel PixelFor(const std::string& source, int x, int y) {
+  if (source == "rows.mkv") {
+    return (y % 2 == 0) ? YCbCr444Pixel{.y = 300, .cb = 512, .cr = 512}
+                        : YCbCr444Pixel{.y = 700, .cb = 512, .cr = 512};
+  }
   if (source == "edge.mkv") {
     return x < 360 ? YCbCr444Pixel{.y = 300, .cb = 400, .cr = 600}
                    : YCbCr444Pixel{.y = 700, .cb = 620, .cr = 450};
@@ -61,7 +67,7 @@ class PatternFrameDecoder final : public IVideoFrameDecoder {
     for (int y = 0; y < height_; ++y) {
       for (int x = 0; x < 720; ++x) {
         out_image->pixels[(static_cast<std::size_t>(y) * 720) + x] =
-            PixelFor(source_, x);
+            PixelFor(source_, x, y);
       }
     }
     return VideoFrameReadStatus::kFrame;
@@ -407,6 +413,106 @@ TEST(BandlimitedGenerationTest, EdgePictureIsResampled) {
     const GeneratedFrames bandlimited = Generate(project, 1, false);
     EXPECT_NE(nearest.y_mv, bandlimited.y_mv) << StandardToString(standard);
     EXPECT_NE(nearest.c_mv, bandlimited.c_mv) << StandardToString(standard);
+  }
+}
+
+PictureResponseParameters CustomResponse(
+    std::vector<NoiseSpectrumPoint> horizontal,
+    std::vector<VerticalResponsePoint> vertical) {
+  PictureResponseParameters response;
+  response.enabled = true;
+  response.horizontal_db = std::move(horizontal);
+  response.vertical_db = std::move(vertical);
+  return response;
+}
+
+// The designed vertical kernel's gain in dB at the row Nyquist frequency:
+// alternate taps summed with alternating signs.
+double RowNyquistResponseDb(const PictureResponseParameters& response) {
+  const PictureResponseFilter filter(response, 1.0);
+  double sum = 0.0;
+  const std::vector<double>& kernel = filter.vertical_kernel();
+  for (std::size_t n = 0; n < kernel.size(); ++n) {
+    sum += (n % 2U == 0U) ? kernel[n] : -kernel[n];
+  }
+  return 20.0 * std::log10(std::abs(sum));
+}
+
+// Swing in mV between truth rows row and row + 1 at the centre column.
+double TruthRowSwingMv(const GeneratedFrames& frames,
+                       const PictureTruthLayout& layout, int row) {
+  const std::size_t width = static_cast<std::size_t>(layout.samples_per_line);
+  const std::size_t column = width / 2U;
+  const std::vector<float>& y = frames.truth[0].y_mv;
+  return static_cast<double>(
+             y[(static_cast<std::size_t>(row) * width) + column]) -
+         static_cast<double>(
+             y[(static_cast<std::size_t>(row + 1) * width) + column]);
+}
+
+TEST(PictureResponseGenerationTest, FlatResponseIsBitIdenticalToNoBlock) {
+  Project project = MakeProject(Standard::kPal, "edge.mkv");
+  const GeneratedFrames plain = Generate(project, 1, true);
+  project.sections[0].picture_response =
+      CustomResponse({{0.0, 0.0}}, {{0.0, 0.0}});
+  const GeneratedFrames flat = Generate(project, 1, true);
+  EXPECT_EQ(flat.y_mv, plain.y_mv);
+  EXPECT_EQ(flat.c_mv, plain.c_mv);
+  EXPECT_EQ(flat.truth[0].y_mv, plain.truth[0].y_mv);
+}
+
+TEST(PictureResponseGenerationTest, HorizontalResponseLeavesRowDetailAlone) {
+  // Every row of rows.mkv is flat along its length.
+  Project project = MakeProject(Standard::kPal, "rows.mkv");
+  const GeneratedFrames plain = Generate(project, 1, false);
+  project.sections[0].picture_response =
+      CustomResponse({{0.0, 0.0}, {2.0, 0.0}, {5.0, -20.0}}, {});
+  const GeneratedFrames shaped = Generate(project, 1, false);
+  EXPECT_EQ(shaped.y_mv, plain.y_mv);
+}
+
+TEST(PictureResponseGenerationTest, VerticalResponseLeavesColumnDetailAlone) {
+  // Every column of edge.mkv is flat down its height.
+  Project project = MakeProject(Standard::kPal, "edge.mkv");
+  const GeneratedFrames plain = Generate(project, 1, false);
+  project.sections[0].picture_response =
+      CustomResponse({}, {{0.0, 0.0}, {0.5, -20.0}});
+  const GeneratedFrames shaped = Generate(project, 1, false);
+  EXPECT_EQ(shaped.y_mv, plain.y_mv);
+  EXPECT_EQ(shaped.c_mv, plain.c_mv);
+}
+
+// The vertical response filters the progressive picture's rows before the
+// fields are split, so alternate frame rows (one field dark, the other light)
+// are pulled together in both fields, and the truth carries it.
+TEST(PictureResponseGenerationTest, VerticalResponseActsOnFrameRowsInTruth) {
+  for (const Standard standard : {Standard::kPal, Standard::kNtsc}) {
+    for (const HorizontalResample resample :
+         {HorizontalResample::kNearest, HorizontalResample::kBandlimited}) {
+      Project project = MakeProject(standard, "rows.mkv");
+      project.sections[0].horizontal_resample = resample;
+      const PictureTruthLayout layout =
+          BuildPictureTruthLayout(project.cvbs_presets);
+      const GeneratedFrames plain = Generate(project, 1, true);
+      project.sections[0].picture_response =
+          CustomResponse({}, {{0.0, 0.0}, {0.5, -20.0}});
+      const GeneratedFrames shaped = Generate(project, 1, true);
+      const int row = layout.rows / 2;
+      const double plain_swing = TruthRowSwingMv(plain, layout, row);
+      const double shaped_swing = TruthRowSwingMv(shaped, layout, row);
+      ASSERT_GT(std::abs(plain_swing), 100.0);
+      EXPECT_NEAR(20.0 * std::log10(shaped_swing / plain_swing),
+                  RowNyquistResponseDb(project.sections[0].picture_response),
+                  0.01)
+          << StandardToString(standard);
+      // The mean level is unchanged.
+      const std::size_t width =
+          static_cast<std::size_t>(layout.samples_per_line);
+      const std::size_t at = (static_cast<std::size_t>(row) * width) + 300U;
+      EXPECT_NEAR(shaped.truth[0].y_mv[at] + shaped.truth[0].y_mv[at + width],
+                  plain.truth[0].y_mv[at] + plain.truth[0].y_mv[at + width],
+                  0.01);
+    }
   }
 }
 

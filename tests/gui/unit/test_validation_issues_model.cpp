@@ -179,6 +179,13 @@ TEST(ValidationIssuesModelTest, ImpairmentIssuesNavigateToTheirField) {
          p->sections[1].luma_bandwidth.cutoff_mhz = 0.2;
        },
        1, IssueField::kLumaBandwidth},
+      {"picture response",
+       [](Project* p) {
+         p->sections[1].picture_response.enabled = true;
+         p->sections[1].picture_response.vertical_db = {{0.0, 0.0},
+                                                        {0.6, -10.0}};
+       },
+       1, IssueField::kPictureResponse},
       {"chroma line sign",
        [](Project* p) {
          p->sections[1].chroma_line_sign.push_back(
@@ -212,6 +219,13 @@ TEST(ValidationIssuesModelTest, ImpairmentIssuesNavigateToTheirField) {
          p->chroma_error.gain = 2.0;
        },
        -1, IssueField::kChromaError},
+      {"line timing",
+       [](Project* p) {
+         p->line_timing.enabled = true;
+         p->line_timing.capture.enabled = true;
+         p->line_timing.capture.line_ns = 80.0;
+       },
+       -1, IssueField::kLineTiming},
   };
   for (const Case& test_case : cases) {
     SCOPED_TRACE(test_case.label);

@@ -241,7 +241,8 @@ void ProjectSettingsEditor::BuildUi() {
          "output: the Y, U and V that went into the composite at 4fsc over "
          "the active window, after the horizontal mapping, luma bandwidth "
          "limit, chroma low-pass and chroma line sign, and before any "
-         "channel, chroma error, noise or dropout impairment."));
+         "channel, chroma error, line timing, noise or dropout "
+         "impairment."));
 
   output_form->addRow(tr("Signal type:"), signal_type_combo_);
   output_form->addRow(tr("Video path:"), video_row);
@@ -258,6 +259,7 @@ void ProjectSettingsEditor::BuildUi() {
   layout->addWidget(BuildLaserdiscGroup());
   layout->addWidget(BuildChannelGroup());
   layout->addWidget(BuildChromaErrorGroup());
+  layout->addWidget(BuildLineTimingGroup());
 
   layout->addStretch();
 
@@ -473,6 +475,111 @@ QWidget* ProjectSettingsEditor::BuildChromaErrorGroup() {
   });
   connect(jitter_seed_edit_, &QLineEdit::editingFinished, this, commit);
   return chroma_error_group_;
+}
+
+QWidget* ProjectSettingsEditor::BuildLineTimingGroup() {
+  namespace limits = project_editor_limits;
+  // --- line_timing: (capture impairment, optional pressing part) -----------
+  line_timing_group_ = new QGroupBox(tr("Line timing (capture)"), this);
+  line_timing_group_->setCheckable(true);
+  line_timing_group_->setToolTip(
+      tr("Per-line timing error of the active picture left after time-base "
+         "correction: each line is shifted by a few ns, differently on every "
+         "line, field and frame. Sync, VBI and VITS lines stay where they "
+         "are. The figures are r.m.s. values."));
+  auto* outer = new QVBoxLayout(line_timing_group_);
+  outer->setContentsMargins(0, 0, 0, 0);
+  auto* body = new QWidget(line_timing_group_);
+  auto* layout = new QVBoxLayout(body);
+
+  // One layer's figures and seed, in `form`.
+  const auto build_layer = [this](QWidget* parent, QFormLayout* form,
+                                  LineTimingLayerWidgets* widgets) {
+    widgets->line_ns =
+        MakeSpin(parent, 0.0, limits::kLineTimingMaxNs, 2, 0.1, tr(" ns"));
+    widgets->line_ns->setToolTip(
+        tr("R.m.s. shift of each line within its field (field mean "
+           "removed)."));
+    form->addRow(tr("Per line:"), widgets->line_ns);
+    widgets->correlation = MakeSpin(
+        parent, 0.0, limits::kLineTimingCorrelationMax, 2, 0.05, QString());
+    widgets->correlation->setToolTip(
+        tr("Correlation of a line's error with the next line of the same "
+           "field; 0 draws every line independently."));
+    form->addRow(tr("Line correlation:"), widgets->correlation);
+    widgets->field_ns =
+        MakeSpin(parent, 0.0, limits::kLineTimingMaxNs, 2, 0.1, tr(" ns"));
+    widgets->field_ns->setToolTip(tr("R.m.s. offset common to a whole field."));
+    form->addRow(tr("Per field:"), widgets->field_ns);
+    widgets->slope_ns =
+        MakeSpin(parent, 0.0, limits::kLineTimingMaxNs, 2, 0.1, tr(" ns"));
+    widgets->slope_ns->setToolTip(
+        tr("R.m.s. difference between the shifts of the two halves of a line "
+           "(a velocity error growing along the line)."));
+    form->addRow(tr("Slope:"), widgets->slope_ns);
+    widgets->seed_check = new QCheckBox(tr("Fixed seed"), parent);
+    widgets->seed_edit = new QLineEdit(parent);
+    CapFieldWidthToText(widgets->seed_edit, QStringLiteral("10,000,000"));
+    auto* seed_row = new QHBoxLayout();
+    seed_row->addWidget(widgets->seed_check);
+    seed_row->addWidget(widgets->seed_edit);
+    seed_row->addStretch();
+    form->addRow(seed_row);
+  };
+
+  auto* form = new QFormLayout();
+  build_layer(body, form, &line_timing_capture_);
+  line_timing_capture_.seed_check->setToolTip(
+      tr("Off: a different draw on every run."));
+  line_timing_burst_check_ = new QCheckBox(tr("Include burst"), body);
+  line_timing_burst_check_->setToolTip(
+      tr("Move each picture line's colour burst with the line, for decoders "
+         "that reference every line to its own burst. Off: the picture moves "
+         "against a burst-locked line, as measured on real captures."));
+  form->addRow(QString(), line_timing_burst_check_);
+  layout->addLayout(form);
+
+  line_timing_shared_group_ =
+      new QGroupBox(tr("Recorded on the disc (pressing)"), body);
+  line_timing_shared_group_->setCheckable(true);
+  line_timing_shared_group_->setToolTip(
+      tr("A second part shared by every capture of the pressing: drawn by "
+         "disc position from its own fixed seed, and added to the capture "
+         "part."));
+  auto* shared_form = new QFormLayout(line_timing_shared_group_);
+  build_layer(line_timing_shared_group_, shared_form, &line_timing_shared_);
+  // Validation requires the pressing seed, so it is always fixed.
+  line_timing_shared_.seed_check->setChecked(true);
+  line_timing_shared_.seed_check->setEnabled(false);
+  layout->addWidget(line_timing_shared_group_);
+  outer->addWidget(body);
+
+  const auto commit = [this] {
+    if (!updating_) {
+      CommitLineTiming();
+    }
+  };
+  connect(line_timing_group_, &QGroupBox::toggled, body, &QWidget::setVisible);
+  connect(line_timing_group_, &QGroupBox::toggled, this, commit);
+  body->setVisible(line_timing_group_->isChecked());
+  connect(line_timing_shared_group_, &QGroupBox::toggled, this, commit);
+  connect(line_timing_burst_check_, &QCheckBox::toggled, this, commit);
+  for (LineTimingLayerWidgets* widgets :
+       {&line_timing_capture_, &line_timing_shared_}) {
+    for (QDoubleSpinBox* spin : {widgets->line_ns, widgets->correlation,
+                                 widgets->field_ns, widgets->slope_ns}) {
+      connect(spin, &QDoubleSpinBox::valueChanged, this, commit);
+    }
+    connect(widgets->seed_edit, &QLineEdit::editingFinished, this, commit);
+  }
+  connect(line_timing_capture_.seed_check, &QCheckBox::toggled, this,
+          [this](bool checked) {
+            line_timing_capture_.seed_edit->setEnabled(checked);
+            if (!updating_) {
+              CommitLineTiming();
+            }
+          });
+  return line_timing_group_;
 }
 
 QWidget* ProjectSettingsEditor::BuildVitsGroup() {
@@ -759,6 +866,30 @@ void ProjectSettingsEditor::LoadChannelAndChromaError(const Project& project) {
   crosstalk_alternate_check_->setChecked(crosstalk.alternate_with_switch);
 }
 
+void ProjectSettingsEditor::LoadLineTiming(const Project& project) {
+  const LineTimingParameters& line_timing = project.line_timing;
+  line_timing_group_->setChecked(line_timing.enabled);
+  line_timing_burst_check_->setChecked(line_timing.include_burst);
+  line_timing_shared_group_->setChecked(line_timing.shared.enabled);
+  const auto load_layer = [](const LineTimingLayer& layer,
+                             const LineTimingLayerWidgets& widgets) {
+    widgets.line_ns->setValue(layer.line_ns);
+    widgets.correlation->setValue(layer.line_correlation);
+    widgets.field_ns->setValue(layer.field_ns);
+    widgets.slope_ns->setValue(layer.slope_ns);
+    widgets.seed_edit->setText(
+        layer.seed_specified
+            ? QString::number(static_cast<qlonglong>(layer.seed))
+            : QString());
+  };
+  load_layer(line_timing.capture, line_timing_capture_);
+  line_timing_capture_.seed_check->setChecked(
+      line_timing.capture.seed_specified);
+  line_timing_capture_.seed_edit->setEnabled(
+      line_timing.capture.seed_specified);
+  load_layer(line_timing.shared, line_timing_shared_);
+}
+
 void ProjectSettingsEditor::LoadLaserdisc(const Project& project) {
   const LaserdiscParameters& laserdisc = project.laserdisc;
   laserdisc_group_->setChecked(laserdisc.enabled);
@@ -884,6 +1015,7 @@ void ProjectSettingsEditor::LoadFromDocument() {
   truth_check_->setChecked(project.output.truth);
 
   LoadChannelAndChromaError(project);
+  LoadLineTiming(project);
   LoadLaserdisc(project);
 
   ApplyEnablement();
@@ -1003,6 +1135,8 @@ void ProjectSettingsEditor::ApplyEnablement() {
   crosstalk_alternate_check_->setEnabled(
       state.crosstalk_alternate_editable ||
       crosstalk_alternate_check_->isChecked());
+  line_timing_burst_check_->setEnabled(state.line_timing_burst_editable ||
+                                       line_timing_burst_check_->isChecked());
 
   ApplyLaserdiscEnablement(state);
   truth_check_->setEnabled(state.truth_editable || truth_check_->isChecked());
@@ -1120,6 +1254,8 @@ void ProjectSettingsEditor::CommitCvbsPresets() {
     }
     document_->SetChromaError(NormalizeChromaErrorForStandard(
         document_->project().chroma_error, new_standard));
+    document_->SetLineTiming(NormalizeLineTimingForStandard(
+        document_->project().line_timing, new_standard));
 
     // The VITS catalogue is standard-specific, so a standard change must
     // reconcile the project VITS set (re-seed under laserdisc placement, drop
@@ -1343,6 +1479,49 @@ void ProjectSettingsEditor::CommitChromaError() {
   }
 }
 
+void ProjectSettingsEditor::CommitLineTiming() {
+  if (updating_) {
+    return;
+  }
+  const LineTimingParameters& stored = document_->project().line_timing;
+  LineTimingParameters line_timing = stored;
+  // Reads one layer's widgets into `layer`.
+  const auto read_layer = [](const LineTimingLayerWidgets& widgets,
+                             LineTimingLayer* layer) {
+    layer->line_ns = widgets.line_ns->value();
+    layer->line_correlation = widgets.correlation->value();
+    layer->field_ns = widgets.field_ns->value();
+    layer->slope_ns = widgets.slope_ns->value();
+    layer->seed_specified = widgets.seed_check->isChecked();
+    layer->seed =
+        layer->seed_specified ? ParseSeed(widgets.seed_edit->text()) : 0;
+  };
+  if (!line_timing_group_->isChecked()) {
+    SetLineTimingEnabled(&line_timing, false);
+  } else {
+    // A freshly ticked block takes the presenter defaults; the widgets still
+    // hold the disabled block's values.
+    SetLineTimingEnabled(&line_timing, true);
+    if (stored.enabled) {
+      line_timing.capture.enabled = true;
+      read_layer(line_timing_capture_, &line_timing.capture);
+      line_timing.include_burst = line_timing_burst_check_->isChecked();
+    }
+    SetSharedLineTimingEnabled(&line_timing,
+                               line_timing_shared_group_->isChecked());
+    if (line_timing_shared_group_->isChecked() && stored.shared.enabled) {
+      read_layer(line_timing_shared_, &line_timing.shared);
+      line_timing.shared.seed_specified = true;
+    }
+  }
+  committing_ = true;
+  const bool changed = document_->SetLineTiming(line_timing);
+  committing_ = false;
+  if (changed) {
+    LoadFromDocument();
+  }
+}
+
 void ProjectSettingsEditor::CommitLaserdisc() {
   if (updating_) {
     return;
@@ -1448,6 +1627,8 @@ QWidget* ProjectSettingsEditor::FieldGroup(IssueField field) const {
       return channel_group_;
     case IssueField::kChromaError:
       return chroma_error_group_;
+    case IssueField::kLineTiming:
+      return line_timing_group_;
     case IssueField::kLaserdiscChannel:
       return ld_channel_group_;
     default:
@@ -1461,6 +1642,8 @@ QWidget* ProjectSettingsEditor::FieldFocusWidget(IssueField field) const {
       return timing_offset_spin_;
     case IssueField::kChromaError:
       return chroma_gain_spin_;
+    case IssueField::kLineTiming:
+      return line_timing_capture_.line_ns;
     case IssueField::kLaserdiscChannel:
       return ld_channel_group_;
     default:

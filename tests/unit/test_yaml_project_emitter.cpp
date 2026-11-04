@@ -881,6 +881,34 @@ sections:
 )");
 }
 
+TEST(YamlProjectEmitterTest, PictureResponseRoundTripsPresetAndCurves) {
+  ExpectRoundTrip(R"(
+cvbs_presets:
+  video_standard_preset: PAL
+output:
+  video_path: out/video.cvbs
+sections:
+  - name: Mastered
+    type: progressive
+    source: assets/bars.exr
+    duration_frames: 10
+    picture_response: domesday
+  - name: Shaped
+    type: progressive
+    source: assets/bars.exr
+    duration_frames: 10
+    picture_response:
+      horizontal_db: [[0, 0], [2.5, -2], [5.25, -10]]
+      vertical_db: [[0, 0], [0.28, -4], [0.375, -10]]
+  - name: VerticalOnly
+    type: progressive
+    source: assets/bars.exr
+    duration_frames: 10
+    picture_response:
+      vertical_db: [[0.25, 0], [0.5, -6]]
+)");
+}
+
 TEST(YamlProjectEmitterTest, OsdOverlaysRoundTripTokensAndGeometry) {
   ExpectRoundTrip(R"(
 cvbs_presets:

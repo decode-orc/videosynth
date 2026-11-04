@@ -1,0 +1,48 @@
+project:
+  name: PALProgrammeStillsFixture
+  version: "1.0"
+  description: >-
+    Programme stills softened like real Domesday pictures: Test Card F sharp
+    and with the domesday picture response, then the two OSM maps and the
+    text card with the same response, each a single band-limited frame
+    written with its picture truth
+
+cvbs_presets:
+  video_standard_preset: PAL
+  sample_encoding_preset: CVBS_TPG21_4FSC
+  signal_state_preset: STANDARD_STABLE_LOCKED
+
+output:
+  video_path: "{output}/videosynth_pal_programme_stills.cvbs"
+  truth: true
+
+sections:
+  - name: TestCardSharp
+    type: progressive
+    source: "{bundled}/exr/720x576/TESTCARD-F.exr"
+    duration_frames: 1
+    horizontal_resample: bandlimited
+  - name: TestCardMastered
+    type: progressive
+    source: "{bundled}/exr/720x576/TESTCARD-F.exr"
+    duration_frames: 1
+    horizontal_resample: bandlimited
+    picture_response: domesday
+  - name: OsmTown
+    type: progressive
+    source: "{bundled}/exr/720x576/OSM_TOWN.exr"
+    duration_frames: 1
+    horizontal_resample: bandlimited
+    picture_response: domesday
+  - name: OsmRural
+    type: progressive
+    source: "{bundled}/exr/720x576/OSM_RURAL.exr"
+    duration_frames: 1
+    horizontal_resample: bandlimited
+    picture_response: domesday
+  - name: TextCard
+    type: progressive
+    source: "{bundled}/exr/720x576/TEXT_CARD.exr"
+    duration_frames: 1
+    horizontal_resample: bandlimited
+    picture_response: domesday

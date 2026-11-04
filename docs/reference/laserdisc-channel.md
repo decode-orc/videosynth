@@ -40,9 +40,10 @@ The channel stage runs once per frame, between generation and the chroma error:
 1. Generation, with [`field2_offset`](#field2_offset) applied to the source picture
 2. **Channel**: `fm_beat`, then `group_delay` with `response_db` / `response_by_picture` (one filter), then the general [`edge_smear`](channel.md#edge_smear), then [`timing_offset_samples`](channel.md#timing_offset_samples)
 3. [Chroma error](chroma-error.md)
-4. Noise (capture layer, then shared layer)
-5. Dropouts
-6. Output
+4. [Line timing](line-timing.md)
+5. Noise (capture layer, then shared layer)
+6. Dropouts
+7. Output
 
 The beat is on the disc, so the replay filter, the readout smear and the sampling offset all apply to it. The [picture truth](output.md#truth) includes `field2_offset`, which changes the picture that is modulated, and excludes every other key here.
 

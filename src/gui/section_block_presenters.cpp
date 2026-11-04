@@ -17,6 +17,7 @@
 
 #include "line_injection_presenter.h"
 #include "videosynth/film_cadence.h"
+#include "videosynth/picture_response_filter.h"
 #include "videosynth/progressive_frame_source.h"
 #include "videosynth/source_frame_range.h"
 #include "videosynth/timing_constants.h"
@@ -273,6 +274,56 @@ void SetLumaBandwidthEnabled(Section* section, bool enabled) {
   section->luma_bandwidth = LumaBandwidthParameters{};
   section->luma_bandwidth.enabled = true;
   section->luma_bandwidth.cutoff_mhz = kDefaultLumaCutoffMhz;
+}
+
+void SetPictureResponseEnabled(Section* section, bool enabled) {
+  if (!enabled) {
+    section->picture_response = PictureResponseParameters{};
+    return;
+  }
+  if (section->picture_response.enabled) {
+    return;
+  }
+  section->picture_response = PictureResponseParameters{};
+  section->picture_response.enabled = true;
+  section->picture_response.preset = PictureResponsePreset::kDomesday;
+}
+
+void SetPictureResponsePreset(Section* section, PictureResponsePreset preset) {
+  PictureResponseParameters& response = section->picture_response;
+  if (!response.enabled || response.preset == preset) {
+    return;
+  }
+  response.preset = preset;
+  if (preset != PictureResponsePreset::kCustom) {
+    response.horizontal_db.clear();
+    response.vertical_db.clear();
+    return;
+  }
+  if (response.horizontal_db.empty() && response.vertical_db.empty()) {
+    response.horizontal_db = DomesdayHorizontalResponseDb();
+    response.vertical_db = DomesdayVerticalResponseDb();
+  }
+}
+
+std::vector<CurvePoint> VerticalResponseToCurvePoints(
+    const std::vector<VerticalResponsePoint>& points) {
+  std::vector<CurvePoint> curve;
+  curve.reserve(points.size());
+  for (const VerticalResponsePoint& point : points) {
+    curve.push_back({point.cycles_per_row, point.relative_db});
+  }
+  return curve;
+}
+
+std::vector<VerticalResponsePoint> CurvePointsToVerticalResponse(
+    const std::vector<CurvePoint>& points) {
+  std::vector<VerticalResponsePoint> response;
+  response.reserve(points.size());
+  for (const CurvePoint& point : points) {
+    response.push_back({point.x, point.y});
+  }
+  return response;
 }
 
 double LumaBandwidthMaxCutoffMhz(Standard standard, double transition_mhz) {
@@ -639,6 +690,9 @@ Section ApplySectionEditDelta(const Section& before, const Section& after,
   }
   if (!(after.luma_bandwidth == before.luma_bandwidth)) {
     target.luma_bandwidth = after.luma_bandwidth;
+  }
+  if (!(after.picture_response == before.picture_response)) {
+    target.picture_response = after.picture_response;
   }
   if (after.horizontal_resample != before.horizontal_resample) {
     target.horizontal_resample = after.horizontal_resample;

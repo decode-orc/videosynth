@@ -72,8 +72,9 @@ Every dock can be hidden, floated or rearranged; **View → Panels** toggles the
 - **LaserDisc** — the [LaserDisc settings](#laserdisc), for disc projects only.
 - **Channel (pressing)** — the [`channel:` block](../reference/channel.md): a sub-sample **timing offset**, plus optional **Edge smear** (fraction and time constant). These describe the pressing, so every project of one pressing should use the same values.
 - **Chroma error (capture)** — the [`chroma_error:` block](../reference/chroma-error.md): chroma **gain** and **phase**, **Include burst**, plus optional **Per-line jitter** (phase and gain deviations, with an optional fixed seed), **Differential gain and phase** (gain and phase curves against luma level, in IRE) and **Crosstalk** (V into U, U into V, and **Alternate with PAL V-switch**, which NTSC cannot carry). It is not available for SECAM.
+- **Line timing (capture)** — the [`line_timing:` block](../reference/line-timing.md): the per-line timing error left after time-base correction, as **Per line**, **Line correlation**, **Per field** and **Slope** figures with an optional fixed seed, **Include burst** (not available for SECAM), and an optional **Recorded on the disc (pressing)** group with the same figures and a fixed seed. For a pressing-only error, set the capture figures to 0: a capture layer whose figures are all 0 does nothing.
 
-Ticking a group that was off fills in typical values, which you can then edit. Changing the standard in the New Project dialog clears the settings the new standard cannot carry: the picture truth and chroma error on SECAM, and the LaserDisc settings described below.
+Ticking a group that was off fills in typical values, which you can then edit. Changing the standard in the New Project dialog clears the settings the new standard cannot carry: the picture truth, chroma error and line timing **Include burst** on SECAM, and the LaserDisc settings described below.
 
 ### LaserDisc
 
@@ -147,6 +148,8 @@ Unticking it clears the section's disc area and codes. See [Laserdisc discs](las
 
 **Luma bandwidth limit** — a low-pass on the picture luma, set by its **cutoff** (the −6 dB point) and **transition width**. The cutoff's upper limit follows the standard and the transition width. See [Luma bandwidth](impairments.md#luma-bandwidth).
 
+**Picture response** — a camera-chain softening of the picture luma. **Response** picks the **Domesday** preset (selected when the group is ticked) or **Custom curves**, which shows a horizontal (MHz, dB) and a vertical (cycles per frame row, dB) breakpoint table, seeded with the Domesday curves. See [Picture response](video-signal.md#picture-response).
+
 **On-screen display** — the overlay list, with text, position, scale and foreground/background luma per overlay. The available substitution tokens are listed beneath the text field.
 
 **Noise injection** — two independent layers. See [Impairments](impairments.md).
@@ -205,7 +208,7 @@ Frames are cached, so scrubbing back and forth is cheap. When a project edit inv
 
 Validation runs continuously in the background, debounced so typing does not trigger a run per keystroke. The Issues dock lists every error and warning; the status bar summarises as *Project valid* or *n error(s), m warning(s)*.
 
-Double-clicking an issue selects the section it relates to and scrolls to the group the issue names: cadence, luma bandwidth, picture mapping, the capture or shared noise layer, or random or scratch dropouts. For a project-level issue it opens **Edit Project…**, scrolled to the **Channel**, **Chroma error** or **LaserVision channel** group when the issue is about one of them.
+Double-clicking an issue selects the section it relates to and scrolls to the group the issue names: cadence, luma bandwidth, picture response, picture mapping, the capture or shared noise layer, or random or scratch dropouts. For a project-level issue it opens **Edit Project…**, scrolled to the **Channel**, **Chroma error**, **Line timing** or **LaserVision channel** group when the issue is about one of them.
 
 Errors block generation. Warnings do not — they flag things that are legal but probably not what you meant, such as a scratch whose lifespan is longer than the section it lives in.
 

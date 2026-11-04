@@ -18,7 +18,7 @@ Both read and write the same YAML project file, and both produce byte-identical 
 # What it can generate
 
 - **Standards-based signals** for PAL, PAL-M, NTSC and SECAM, in composite or Y/C form, at 4fsc or raw high sample rates.
-- **Picture content** from validated progressive sources — OpenEXR stills and MKV/MP4 video clips in any FFmpeg-decodable codec, colour-normalised to BT.601.
+- **Picture content** from validated progressive sources — OpenEXR stills and MKV/MP4 video clips in any FFmpeg-decodable codec, colour-normalised to BT.601, optionally softened horizontally and vertically like a real camera and production chain (a measured Domesday preset).
 - **Vertical interval test signals** (VITS) — the EBU, ITU, NTC-7, FCC and VIRS families.
 - **Laserdisc VBI metadata** — IEC 60856/60857 24-bit biphase codes and NTSC 40-bit FM codes: picture numbers, programme time codes, chapters, picture stops, programme status, lead-in and lead-out.
 - **Impairments** — two-component Gaussian noise with optional spectral shaping and a shared pressing layer, dropout simulation (random surface events and persistent scratches, flagged in a sidecar database or left unflagged), pressing channel effects (sub-sample timing offset, edge smear, PAL FM-beat herringbone), chroma gain and phase error, and a per-section luma bandwidth limit.

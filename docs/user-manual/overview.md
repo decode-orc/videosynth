@@ -25,6 +25,7 @@ line_injections:  # Project-wide VITS set
 laserdisc:        # LaserDisc only: disc format, bursts, EFM audio, LaserVision channel
 channel:          # Pressing impairments
 chroma_error:     # Capture chroma error
+line_timing:      # Per-line timing error after time-base correction
 sections:         # The ordered timeline
 ```
 
@@ -52,6 +53,8 @@ A run is a fixed sequence of stages:
   Channel          Pressing and replay impairments (LaserVision channel, edge smear, timing offset)
       ↓
   Chroma error     The capture's chroma gain, phase, differential and crosstalk
+      ↓
+  Line timing      The per-line picture timing error left after time-base correction
       ↓
   Noise            Add per-section Gaussian noise, before quantisation
       ↓
@@ -84,11 +87,13 @@ A frame template cache holds the parts of a frame that do not change between fra
 | VITS placement, VITS set | Project | [`line_injections`](../reference/line-injections.md) |
 | Pressing timing offset, edge smear | Project | [`channel`](../reference/channel.md) |
 | Capture chroma gain, phase, differential and crosstalk | Project | [`chroma_error`](../reference/chroma-error.md) |
+| Per-line picture timing error (capture and pressing parts) | Project | [`line_timing`](../reference/line-timing.md) |
 | Picture source, duration, cadence | Section | [`sections[]`](../reference/sections.md) |
 | *LaserDisc:* disc format, pilot/VBI burst, EFM audio | Project | [`laserdisc`](../reference/laserdisc.md) |
 | *LaserDisc:* FM beat, group delay, replay response, field-2 offset | Project | [`laserdisc.channel`](../reference/laserdisc-channel.md) |
 | *LaserDisc:* disc area, biphase codes | Section | [`sections[].laserdisc`](../reference/section-laserdisc.md) |
 | Noise, dropouts, luma bandwidth | Section | [`noise`](../reference/section-noise.md), [`dropouts`](../reference/section-dropouts.md), [`luma_bandwidth`](../reference/sections.md#luma_bandwidth) |
+| Camera-chain picture softening | Section | [`picture_response`](../reference/sections.md#picture_response) |
 | Audio channel pairs | Section | [`audio`](../reference/section-audio.md) |
 | On-screen display overlays | Section | [`osd`](../reference/section-osd.md) |
 

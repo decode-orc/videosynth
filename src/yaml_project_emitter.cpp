@@ -280,6 +280,39 @@ void EmitChromaError(YAML::Emitter& out,
   out << YAML::EndMap;
 }
 
+void EmitLineTimingLayer(YAML::Emitter& out, const LineTimingLayer& layer) {
+  out << YAML::Key << "line_ns" << YAML::Value << layer.line_ns;
+  out << YAML::Key << "line_correlation" << YAML::Value
+      << layer.line_correlation;
+  out << YAML::Key << "field_ns" << YAML::Value << layer.field_ns;
+  out << YAML::Key << "slope_ns" << YAML::Value << layer.slope_ns;
+  if (layer.seed_specified) {
+    out << YAML::Key << "seed" << YAML::Value << layer.seed;
+  }
+}
+
+void EmitLineTiming(YAML::Emitter& out,
+                    const LineTimingParameters& line_timing) {
+  if (!line_timing.enabled) {
+    return;
+  }
+  out << YAML::Key << "line_timing" << YAML::Value << YAML::BeginMap;
+  // A block declares at least one layer, so a block with neither present
+  // writes the (zero) capture figures rather than an empty map.
+  if (line_timing.capture.enabled || !line_timing.shared.enabled) {
+    EmitLineTimingLayer(out, line_timing.capture);
+  }
+  if (line_timing.include_burst) {
+    out << YAML::Key << "include_burst" << YAML::Value << true;
+  }
+  if (line_timing.shared.enabled) {
+    out << YAML::Key << "shared" << YAML::Value << YAML::BeginMap;
+    EmitLineTimingLayer(out, line_timing.shared);
+    out << YAML::EndMap;
+  }
+  out << YAML::EndMap;
+}
+
 void EmitLineInjectionCode(YAML::Emitter& out,
                            const Section::LineInjectionCode& code) {
   out << YAML::BeginMap;
@@ -466,6 +499,34 @@ void EmitLumaBandwidth(YAML::Emitter& out,
   if (luma_bandwidth.transition_mhz != kLumaBandwidthTransitionDefaultMhz) {
     out << YAML::Key << "transition_mhz" << YAML::Value
         << luma_bandwidth.transition_mhz;
+  }
+  out << YAML::EndMap;
+}
+
+std::pair<double, double> VerticalResponseFields(
+    const VerticalResponsePoint& point) {
+  return {point.cycles_per_row, point.relative_db};
+}
+
+// Writes `picture_response:` as the preset name, or as its curves.
+void EmitPictureResponse(YAML::Emitter& out,
+                         const PictureResponseParameters& response) {
+  if (!response.enabled) {
+    return;
+  }
+  out << YAML::Key << "picture_response" << YAML::Value;
+  if (response.preset == PictureResponsePreset::kDomesday) {
+    out << "domesday";
+    return;
+  }
+  out << YAML::BeginMap;
+  if (!response.horizontal_db.empty()) {
+    EmitPointPairs(out, "horizontal_db", response.horizontal_db,
+                   ResponseFields);
+  }
+  if (!response.vertical_db.empty()) {
+    EmitPointPairs(out, "vertical_db", response.vertical_db,
+                   VerticalResponseFields);
   }
   out << YAML::EndMap;
 }
@@ -685,6 +746,7 @@ void EmitSection(YAML::Emitter& out, const Section& section) {
   EmitHorizontalResample(out, section.horizontal_resample);
   EmitChromaLineSign(out, section.chroma_line_sign);
   EmitLumaBandwidth(out, section.luma_bandwidth);
+  EmitPictureResponse(out, section.picture_response);
   EmitOsd(out, section.osd);
   EmitNoise(out, section.noise);
   EmitDropouts(out, section.dropouts);
@@ -711,6 +773,7 @@ std::string YamlProjectEmitter::EmitString(const Project& project) const {
                 project.cvbs_presets.video_standard_preset);
   EmitChannel(out, project.channel);
   EmitChromaError(out, project.chroma_error);
+  EmitLineTiming(out, project.line_timing);
 
   out << YAML::Key << "sections" << YAML::Value << YAML::BeginSeq;
   for (const Section& section : project.sections) {

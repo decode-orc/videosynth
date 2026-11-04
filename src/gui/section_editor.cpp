@@ -38,6 +38,7 @@
 
 #include "asset_roots.h"
 #include "chroma_line_sign_editor.h"
+#include "curve_points_editor.h"
 #include "form_field_width.h"
 #include "project_templates.h"
 #include "section_block_presenters.h"
@@ -138,6 +139,7 @@ void SectionEditor::BuildUi() {
   layout->addWidget(BuildLaserdiscGroup());
   layout->addWidget(BuildPictureGroup());
   layout->addWidget(BuildLumaBandwidthGroup());
+  layout->addWidget(BuildPictureResponseGroup());
   layout->addWidget(BuildOsdGroup());
   layout->addWidget(BuildNoiseGroup());
   layout->addWidget(BuildDropoutsGroup());
@@ -565,6 +567,77 @@ QWidget* SectionEditor::BuildLumaBandwidthGroup() {
     }
   });
   return luma_bandwidth_group_;
+}
+
+QWidget* SectionEditor::BuildPictureResponseGroup() {
+  picture_response_group_ = new QGroupBox(tr("Picture response"), content_);
+  picture_response_group_->setCheckable(true);
+  picture_response_group_->setToolTip(
+      tr("Softens the picture luma horizontally and vertically like a "
+         "camera and PAL production chain, before the luma bandwidth limit. "
+         "Included in the picture truth. Sync, blanking, VBI, VITS, chroma "
+         "and on-screen text are not filtered."));
+  auto* outer = new QVBoxLayout(picture_response_group_);
+  outer->setContentsMargins(0, 0, 0, 0);
+  auto* body = new QWidget(picture_response_group_);
+  auto* body_layout = new QVBoxLayout(body);
+  auto* form = new QFormLayout();
+
+  picture_response_mode_combo_ = new QComboBox(body);
+  picture_response_mode_combo_->addItem(
+      tr("Domesday (programme mastered for LaserVision)"),
+      static_cast<int>(PictureResponsePreset::kDomesday));
+  picture_response_mode_combo_->addItem(
+      tr("Custom curves"), static_cast<int>(PictureResponsePreset::kCustom));
+  picture_response_mode_combo_->setToolTip(
+      tr("The domesday preset is the BBC Domesday disc's measured response; "
+         "custom curves start from it."));
+  form->addRow(tr("Response:"), picture_response_mode_combo_);
+  body_layout->addLayout(form);
+
+  picture_response_curves_ = new QWidget(body);
+  auto* curves_layout = new QVBoxLayout(picture_response_curves_);
+  curves_layout->setContentsMargins(0, 0, 0, 0);
+  curves_layout->addWidget(
+      new QLabel(tr("Horizontal response:"), picture_response_curves_));
+  picture_response_horizontal_editor_ = new CurvePointsEditor(
+      CurveAxis{tr("Frequency"), 0.0, 0.0, 2, 0.1, tr(" MHz")},
+      CurveAxis{tr("Response"), editor_limits::kPictureResponseDbMin,
+                editor_limits::kPictureResponseDbMax, 1, 0.5, tr(" dB")},
+      0.5, CurvePoint{0.0, 0.0}, picture_response_curves_);
+  curves_layout->addWidget(picture_response_horizontal_editor_);
+  curves_layout->addWidget(
+      new QLabel(tr("Vertical response (cycles per frame row):"),
+                 picture_response_curves_));
+  picture_response_vertical_editor_ = new CurvePointsEditor(
+      CurveAxis{tr("Frequency"), 0.0,
+                editor_limits::kPictureResponseVerticalMaxCyclesPerRow, 3, 0.01,
+                tr(" c/row")},
+      CurveAxis{tr("Response"), editor_limits::kPictureResponseDbMin,
+                editor_limits::kPictureResponseDbMax, 1, 0.5, tr(" dB")},
+      0.05, CurvePoint{0.0, 0.0}, picture_response_curves_);
+  picture_response_vertical_editor_->SetXRange(
+      0.0, editor_limits::kPictureResponseVerticalMaxCyclesPerRow);
+  curves_layout->addWidget(picture_response_vertical_editor_);
+  body_layout->addWidget(picture_response_curves_);
+  outer->addWidget(body);
+
+  const auto commit = [this] {
+    if (!updating_) {
+      CommitSection();
+    }
+  };
+  connect(picture_response_group_, &QGroupBox::toggled, body,
+          &QWidget::setVisible);
+  connect(picture_response_group_, &QGroupBox::toggled, this, commit);
+  body->setVisible(picture_response_group_->isChecked());
+  connect(picture_response_mode_combo_, &QComboBox::currentIndexChanged, this,
+          commit);
+  connect(picture_response_horizontal_editor_, &CurvePointsEditor::CurveEdited,
+          this, commit);
+  connect(picture_response_vertical_editor_, &CurvePointsEditor::CurveEdited,
+          this, commit);
+  return picture_response_group_;
 }
 
 QWidget* SectionEditor::BuildPictureGroup() {
@@ -1091,6 +1164,23 @@ void SectionEditor::LoadFromDocument() {
   UpdateLumaCutoffRange();
   luma_cutoff_spin_->setValue(section.luma_bandwidth.cutoff_mhz);
 
+  // Picture response. A disabled block shows the preset it would enable with.
+  const PictureResponseParameters& response = section.picture_response;
+  picture_response_group_->setChecked(response.enabled);
+  picture_response_mode_combo_->setCurrentIndex(
+      picture_response_mode_combo_->findData(static_cast<int>(
+          response.enabled ? response.preset
+                           : PictureResponsePreset::kDomesday)));
+  picture_response_horizontal_editor_->SetXRange(
+      0.0,
+      NoiseSpectrumMaxFrequencyMhz(project.cvbs_presets.video_standard_preset));
+  picture_response_horizontal_editor_->SetPoints(
+      ToCurvePoints(response.horizontal_db));
+  picture_response_vertical_editor_->SetPoints(
+      VerticalResponseToCurvePoints(response.vertical_db));
+  picture_response_curves_->setVisible(
+      response.enabled && response.preset == PictureResponsePreset::kCustom);
+
   // Picture mapping. A project that cannot use chroma_line_sign keeps the
   // table usable only to remove regions it already carries.
   horizontal_resample_combo_->setCurrentIndex(
@@ -1265,6 +1355,27 @@ Section SectionEditor::SectionFromWidgets() const {
     }
   } else {
     SetLumaBandwidthEnabled(&section, false);
+  }
+
+  // Picture response block. A freshly ticked group takes the preset; a mode
+  // change goes through the presenter, which seeds custom curves.
+  if (picture_response_group_->isChecked()) {
+    if (!section.picture_response.enabled) {
+      SetPictureResponseEnabled(&section, true);
+    } else {
+      const auto preset = static_cast<PictureResponsePreset>(
+          picture_response_mode_combo_->currentData().toInt());
+      if (preset != section.picture_response.preset) {
+        SetPictureResponsePreset(&section, preset);
+      } else if (preset == PictureResponsePreset::kCustom) {
+        section.picture_response.horizontal_db =
+            ToResponsePoints(picture_response_horizontal_editor_->points());
+        section.picture_response.vertical_db = CurvePointsToVerticalResponse(
+            picture_response_vertical_editor_->points());
+      }
+    }
+  } else {
+    SetPictureResponseEnabled(&section, false);
   }
 
   section.horizontal_resample = static_cast<HorizontalResample>(
@@ -1503,6 +1614,10 @@ void SectionEditor::RevealField(IssueField field) {
       group = luma_bandwidth_group_;
       focus = luma_cutoff_spin_;
       break;
+    case IssueField::kPictureResponse:
+      group = picture_response_group_;
+      focus = picture_response_mode_combo_;
+      break;
     case IssueField::kCadence:
       group = cadence_group_;
       focus = cadence_pattern_combo_;
@@ -1514,6 +1629,7 @@ void SectionEditor::RevealField(IssueField field) {
     case IssueField::kNone:
     case IssueField::kChannel:
     case IssueField::kChromaError:
+    case IssueField::kLineTiming:
     case IssueField::kLaserdiscChannel:
     default:
       return;

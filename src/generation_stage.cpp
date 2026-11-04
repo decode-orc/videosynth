@@ -39,6 +39,7 @@
 #include "videosynth/luma_bandwidth_filter.h"
 #include "videosynth/osd_renderer.h"
 #include "videosynth/osd_token_resolver.h"
+#include "videosynth/picture_response_filter.h"
 #include "videosynth/picture_truth.h"
 #include "videosynth/progressive_frame_source.h"
 #include "videosynth/secam_chroma_encoder.h"
@@ -938,6 +939,15 @@ struct GenerationStage::SynthesisResources {
   std::vector<SampleFixed> line_luma;
   std::vector<SampleFixed> filtered_line_luma;
 
+  // Picture response of the section most recently synthesised by this
+  // worker, redesigned only when a section brings in different settings; the
+  // horizontally shaped line, and the per-field-source luma planes (rows x
+  // painted width) the vertical part filters through.
+  std::unique_ptr<PictureResponseFilter> picture_response;
+  std::vector<SampleFixed> response_line_luma;
+  std::vector<SampleFixed> response_plane_input;
+  std::array<std::vector<SampleFixed>, 2> response_planes;
+
   // The line's colour-difference axes handed to a quadrature encoder (Q20,
   // one entry per active-window sample), or, on a band-limited SECAM line,
   // its resampled Cb/Cr codes.
@@ -1199,6 +1209,8 @@ bool GenerationStage::SynthesisResourceCache::Build(
                         0);
   out->filtered_line_luma.assign(
       static_cast<std::size_t>(out->active_window_samples), 0);
+  out->response_line_luma.assign(
+      static_cast<std::size_t>(out->active_window_samples), 0);
   out->line_u_axis.assign(static_cast<std::size_t>(out->active_window_samples),
                           0);
   out->line_v_axis.assign(static_cast<std::size_t>(out->active_window_samples),
@@ -1305,6 +1317,7 @@ class GenerationStage::TemplateCache {
       SlotKey key{section.source,
                   section.type,
                   section.luma_bandwidth,
+                  section.picture_response,
                   section.horizontal_resample,
                   section.chroma_line_sign,
                   field_source_frames,
@@ -1353,6 +1366,7 @@ class GenerationStage::TemplateCache {
     std::string source;
     std::string section_type;
     LumaBandwidthParameters luma_bandwidth;
+    PictureResponseParameters picture_response;
     HorizontalResample horizontal_resample = HorizontalResample::kNearest;
     std::vector<ChromaLineSignRegion> chroma_line_sign;
     // Source frame of field 1 and field 2.
@@ -1364,6 +1378,7 @@ class GenerationStage::TemplateCache {
              sequence_phase == other.sequence_phase && source == other.source &&
              section_type == other.section_type &&
              luma_bandwidth == other.luma_bandwidth &&
+             picture_response == other.picture_response &&
              horizontal_resample == other.horizontal_resample &&
              chroma_line_sign == other.chroma_line_sign;
     }
@@ -1687,6 +1702,88 @@ void GenerationStage::SynthesiseTemplate(
   std::vector<SampleFixed>& line_luma = resources.line_luma;
   std::vector<SampleFixed>& filtered_line_luma = resources.filtered_line_luma;
 
+  // The section's picture response, designed once per change of settings.
+  const PictureResponseFilter* picture_response = nullptr;
+  if (section.picture_response.enabled) {
+    if (resources.picture_response == nullptr ||
+        !resources.picture_response->Matches(section.picture_response,
+                                             synth.sample_rate_hz)) {
+      resources.picture_response = std::make_unique<PictureResponseFilter>(
+          section.picture_response, synth.sample_rate_hz);
+    }
+    picture_response = resources.picture_response.get();
+  }
+  const bool response_horizontal =
+      picture_response != nullptr && picture_response->has_horizontal();
+
+  // Builds the band-limited resampler for a source raster on first use or
+  // when the raster changes.
+  auto EnsureResampler = [&](const FrameSourceImage& source) {
+    if (resources.resampler == nullptr ||
+        !resources.resampler->Matches(active_window_samples,
+                                      source.active_width, source.active_x,
+                                      source.width)) {
+      resources.resampler = std::make_unique<BandlimitedHorizontalResampler>(
+          active_window_samples, source.active_width, source.active_x,
+          source.width);
+    }
+  };
+
+  // The vertical picture response acts on the rows of each progressive
+  // source picture before it is split into fields, as a camera's vertical
+  // aperture or a graphics flicker filter would. Each field's source picture
+  // is mapped onto the active window row by row exactly as the line loop
+  // below maps it, filtered down its columns with the picture's top and
+  // bottom rows repeated, and the line loop then takes each line's luma from
+  // its row of the plane. The plane covers the samples every line paints
+  // (the active window, cut short where the source raster ends) and the rows
+  // the source has (a row past its bottom is never painted).
+  std::array<const SampleFixed*, 2> response_planes = {nullptr, nullptr};
+  int response_plane_width = 0;
+  if (picture_response != nullptr && picture_response->has_vertical()) {
+    response_plane_width = std::max(
+        0, std::min(active_window_samples, column_map.in_range_sample_count));
+    const auto plane_width = static_cast<std::size_t>(response_plane_width);
+    const int frame_rows = 2 * synth.active.active_lines_per_field;
+    std::vector<SampleFixed>& plane_input = resources.response_plane_input;
+    for (std::size_t slot = 0; slot < field_sources.size(); ++slot) {
+      if (slot > 0U && field_sources[slot] == field_sources[0]) {
+        response_planes[slot] = response_planes[0];
+        continue;
+      }
+      const FrameSourceImage& source = *field_sources[slot];
+      const auto rows = static_cast<std::size_t>(
+          std::clamp(source.height - source.active_y, 0, frame_rows));
+      plane_input.resize(rows * plane_width);
+      std::vector<SampleFixed>& plane = resources.response_planes[slot];
+      plane.resize(rows * plane_width);
+      for (std::size_t row = 0; row < rows && plane_width > 0U; ++row) {
+        const int source_row = source.active_y + static_cast<int>(row);
+        const YCbCr444Pixel* const pixels = &source.PixelAt(0, source_row);
+        SampleFixed* const destination =
+            plane_input.data() + (row * plane_width);
+        if (section.horizontal_resample == HorizontalResample::kBandlimited) {
+          EnsureResampler(source);
+          std::vector<SampleFixed>& row_luma = resources.row_luma;
+          row_luma.resize(static_cast<std::size_t>(source.width));
+          for (int column = 0; column < source.width; ++column) {
+            row_luma[static_cast<std::size_t>(column)] =
+                LumaFixedFromCode(pixels[column].y);
+          }
+          resources.resampler->Apply(row_luma.data(), line_luma.data());
+          std::copy_n(line_luma.begin(), plane_width, destination);
+        } else {
+          for (std::size_t x = 0; x < plane_width; ++x) {
+            destination[x] = LumaFixedFromCode(pixels[column_map.pixel_x[x]].y);
+          }
+        }
+      }
+      picture_response->ApplyVertical(plane_input.data(), rows, plane_width,
+                                      plane.data());
+      response_planes[slot] = plane.data();
+    }
+  }
+
   // A progressive picture's even rows (0, 2, ...) belong to the upper field:
   // field 1 on 625-line systems (its picture opens on line 23, above field
   // 2's line 336), field 2 on 525-line systems (its picture opens on line
@@ -1910,7 +2007,10 @@ void GenerationStage::SynthesiseTemplate(
         const bool bandlimited =
             section.horizontal_resample == HorizontalResample::kBandlimited &&
             painted_sample_count > 0;
-        const bool collect_luma = luma_filter != nullptr || bandlimited;
+        const bool collect_luma = luma_filter != nullptr || bandlimited ||
+                                  picture_response != nullptr;
+        const SampleFixed* const response_plane =
+            response_planes[line.field_index_1based == 1 ? 0U : 1U];
         std::vector<std::int32_t>& line_u_axis = resources.line_u_axis;
         std::vector<std::int32_t>& line_v_axis = resources.line_v_axis;
 
@@ -1919,15 +2019,7 @@ void GenerationStage::SynthesiseTemplate(
           // resampled onto the active window. SECAM carries Cb/Cr codes
           // through the resampler rather than quadrature axes.
           const int width = source_frame.width;
-          if (resources.resampler == nullptr ||
-              !resources.resampler->Matches(active_window_samples,
-                                            source_frame.active_width,
-                                            source_frame.active_x, width)) {
-            resources.resampler =
-                std::make_unique<BandlimitedHorizontalResampler>(
-                    active_window_samples, source_frame.active_width,
-                    source_frame.active_x, width);
-          }
+          EnsureResampler(source_frame);
           std::vector<SampleFixed>& row_luma = resources.row_luma;
           std::vector<std::int32_t>& row_u_axis = resources.row_u_axis;
           std::vector<std::int32_t>& row_v_axis = resources.row_v_axis;
@@ -2040,12 +2132,29 @@ void GenerationStage::SynthesiseTemplate(
           }
         }
 
-        // A band-limited or resampled line paints its luma once it is
-        // complete, under the same blanking-level guard.
+        // A vertically shaped line takes its luma from its row of the
+        // filtered plane (built from the same mapping as above).
+        if (response_plane != nullptr && painted_sample_count > 0) {
+          const int plane_row = source_row - source_frame.active_y;
+          std::copy_n(
+              response_plane + (static_cast<std::size_t>(plane_row) *
+                                static_cast<std::size_t>(response_plane_width)),
+              painted_sample_count, line_luma.begin());
+        }
+
+        // A band-limited, resampled or shaped line paints its luma once it
+        // is complete, under the same blanking-level guard. The picture
+        // response (the source chain) comes before the luma bandwidth limit.
         if (collect_luma && painted_sample_count > 0) {
           const SampleFixed* painted_luma = line_luma.data();
+          if (response_horizontal) {
+            picture_response->ApplyHorizontal(
+                painted_luma, static_cast<std::size_t>(painted_sample_count),
+                resources.response_line_luma.data());
+            painted_luma = resources.response_line_luma.data();
+          }
           if (luma_filter != nullptr) {
-            luma_filter->Apply(line_luma.data(),
+            luma_filter->Apply(painted_luma,
                                static_cast<std::size_t>(painted_sample_count),
                                filtered_line_luma.data());
             painted_luma = filtered_line_luma.data();
@@ -2107,10 +2216,10 @@ void GenerationStage::SynthesiseTemplate(
 
         if (truth != nullptr && secam_encoder == nullptr) {
           // The truth row is the progressive row the line was drawn from.
-          // Y is read back from the painted line (after the luma bandwidth
-          // limit) and U/V are the encoder's filtered axes, exactly as
-          // modulated, with the V-switch removed. Samples past the end of a
-          // half-picture line carry no picture and stay zero.
+          // Y is read back from the painted line (after the picture response
+          // and the luma bandwidth limit) and U/V are the encoder's filtered
+          // axes, exactly as modulated, with the V-switch removed. Samples past
+          // the end of a half-picture line carry no picture and stay zero.
           const int truth_row =
               (2 * field_line) +
               ((line.field_index_1based == upper_field_index_1based) ? 0 : 1);

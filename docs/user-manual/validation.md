@@ -112,10 +112,24 @@ These apply only to a project with a [`laserdisc:`](../reference/laserdisc.md) b
 - `chroma_error:` on a SECAM project is an error, as is `crosstalk.alternate_with_switch: true` on NTSC.
 - A non-numeric value, a non-boolean `include_burst`, an unknown key, an empty `chroma_error:` block (one with only `include_burst` counts as empty), or an empty `line_jitter:`, `differential:` or `crosstalk:` block is a parse error.
 
+### Line timing
+
+- `line_ns`, `field_ns` and `slope_ns` in 0.0–50.0 ns; `line_correlation` in 0.0–0.99; the same for `shared`. Values that are not finite are errors.
+- `shared:` without a `seed` is an error: the pressing layer must be identical in every capture.
+- `include_burst: true` on a SECAM project is an error.
+- A non-numeric value, a non-integer seed, a non-boolean `include_burst`, an unknown key, an empty `line_timing:` block (one with only `line_correlation`, `seed` or `include_burst` counts as empty), an empty `shared:` block, or a top-level `seed` with no capture figure is a parse error.
+
 ### Luma bandwidth
 
 - `luma_bandwidth.transition_mhz` in 0.1–2.0; `luma_bandwidth.cutoff_mhz` from 0.5 MHz up to 2 f_sc less half the transition.
 - `luma_bandwidth` without `cutoff_mhz`, a non-numeric value or an unknown key is a parse error.
+
+### Picture response
+
+- `picture_response.horizontal_db`: frequencies from 0 MHz to 2 f_sc, strictly ascending; levels −60 to +20 dB.
+- `picture_response.vertical_db`: frequencies from 0 to 0.5 cycles per frame row, strictly ascending; levels −60 to +20 dB.
+- A `picture_response` map with neither curve is an error.
+- A preset name other than `domesday`, a curve that is not a list of `[x, dB]` numeric pairs, or an unknown key is a parse error.
 
 ### Picture mapping
 
