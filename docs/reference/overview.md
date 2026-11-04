@@ -4,7 +4,7 @@ A videosynth project is a single YAML file. This reference documents it block by
 
 ## Top-level structure
 
-There are exactly eight top-level blocks. Any other top-level key is a parse error.
+There are exactly nine top-level blocks. Any other top-level key is a parse error.
 
 ```yaml
 project:          # Identity — name, version, description
@@ -14,6 +14,7 @@ line_injections:  # Project-wide VITS set
 laserdisc:        # LaserDisc only — disc format, pilot/VBI burst, EFM audio, LaserVision channel
 channel:          # Pressing impairments — timing offset, edge smear
 chroma_error:     # Capture chroma error — gain, phase, jitter, differential, crosstalk
+line_timing:      # Per-line timing error after time-base correction — capture and pressing
 sections:         # The ordered timeline
 ```
 
@@ -28,6 +29,7 @@ Everything specific to LaserDisc is in the `laserdisc:` block, and in the `laser
 | `laserdisc` | No | [laserdisc](laserdisc.md), with its [LaserVision channel](laserdisc-channel.md) |
 | `channel` | No | [channel](channel.md) |
 | `chroma_error` | No | [chroma_error](chroma-error.md) |
+| `line_timing` | No | [line_timing](line-timing.md) |
 | `sections` | Yes | [sections](sections.md) |
 
 ## Section blocks
@@ -149,6 +151,20 @@ chroma_error:
     u_to_v:
     alternate_with_switch:
   include_burst:
+
+line_timing:
+  line_ns:
+  line_correlation:
+  field_ns:
+  slope_ns:
+  seed:
+  include_burst:
+  shared:
+    line_ns:
+    line_correlation:
+    field_ns:
+    slope_ns:
+    seed:
 
 sections:
   - name:

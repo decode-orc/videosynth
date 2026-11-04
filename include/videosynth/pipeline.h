@@ -17,6 +17,7 @@
 #include "videosynth/chroma_error_stage.h"
 #include "videosynth/dropout_injection_stage.h"
 #include "videosynth/interfaces.h"
+#include "videosynth/line_timing_stage.h"
 #include "videosynth/noise_injection_stage.h"
 #include "videosynth/picture_truth_writer.h"
 
@@ -35,7 +36,8 @@ namespace videosynth {
 // When RunOptions::threads resolves to more than one worker, the pipeline
 // internally spawns a FrameSynthesisPool for the run: frame synthesis
 // (IGenerationStage::GenerateFrameBatch, ChannelStage::ApplyChannel,
-// ChromaErrorStage::ApplyChromaError, NoiseInjectionStage::InjectNoise,
+// ChromaErrorStage::ApplyChromaError, LineTimingStage::ApplyLineTiming,
+// NoiseInjectionStage::InjectNoise,
 // DropoutInjectionStage::ComputeFrameDropouts) executes concurrently on pool
 // workers, while output, sidecar-row commits, audio, and observer callbacks
 // stay on the run thread in frame order. Output is byte-identical to the
@@ -59,7 +61,7 @@ class VideoSynthPipeline {
 
   // Orchestrates the full pipeline from a project file:
   //   parse -> RunProject (validate -> generate -> channel -> chroma error ->
-  //   noise -> dropout -> output).
+  //   line timing -> noise -> dropout -> output).
   //
   // Args:
   //   options: Contains project path and runtime configuration.
@@ -75,13 +77,14 @@ class VideoSynthPipeline {
            CancellationToken* cancellation = nullptr);
 
   // Orchestrates the pipeline for an already-parsed project:
-  //   validate -> generate -> channel -> chroma error -> noise -> dropout ->
-  //   output.
+  //   validate -> generate -> channel -> chroma error -> line timing ->
+  //   noise -> dropout -> output.
   //
-  // The channel and chroma error stages are owned by the pipeline rather than
-  // injected: each is immutable during a run and a no-op unless the project
-  // declares its block (`channel:`, `chroma_error:`). The chroma error stage
-  // draws its unseeded-jitter base seed when the pipeline is constructed.
+  // The channel, chroma error and line timing stages are owned by the
+  // pipeline rather than injected: each is immutable during a run and a no-op
+  // unless the project declares its block (`channel:`, `chroma_error:`,
+  // `line_timing:`). The chroma error and line timing stages draw their
+  // unseeded base seeds when the pipeline is constructed.
   //
   // Relative paths inside the project (section sources, output targets) are
   // used as-is; callers must resolve them before invoking this method.
@@ -116,6 +119,7 @@ class VideoSynthPipeline {
   AudioTrackGenerator* audio_generator_;
   ChannelStage channel_;
   ChromaErrorStage chroma_error_;
+  LineTimingStage line_timing_;
   // Writes output.truth beside the video output; used only from the thread
   // that runs the pipeline.
   PictureTruthWriter truth_writer_;

@@ -1,4 +1,4 @@
-# Impairments — noise, dropouts, pressings, chroma error and luma bandwidth
+# Impairments — noise, dropouts, pressings, chroma error, line timing and luma bandwidth
 
 A clean synthetic signal proves that a decoder works. A deliberately degraded one proves how it fails. videosynth can add controlled amounts of noise and dropout to any section, with reproducible seeds, so a decoder or restoration tool can be exercised against a known level of damage.
 
@@ -252,8 +252,8 @@ Everything in `channel:` and `laserdisc.channel:` belongs to the pressing, so ev
 
 | Belongs to | Keys | Same across captures of one pressing? |
 |------------|------|----------------------------------------|
-| The pressing | `channel:`, `laserdisc.channel:`, `noise.shared`, dropouts with `anchor: disc` | Yes |
-| One capture | capture `noise_db`/`noise_spread_db`/`noise_seed`/`spectrum`, section-anchored `dropouts`, `chroma_error`, `luma_bandwidth` | No: a new seed (or player) for every capture |
+| The pressing | `channel:`, `laserdisc.channel:`, `noise.shared`, `line_timing.shared`, dropouts with `anchor: disc` | Yes |
+| One capture | capture `noise_db`/`noise_spread_db`/`noise_seed`/`spectrum`, section-anchored `dropouts`, `chroma_error`, the `line_timing` capture layer, `luma_bandwidth` | No: a new seed (or player) for every capture |
 
 The repository's [pressing sets](../misc/example-projects.md#pressings-and-captures) follow this pattern. There are two pressings per standard, offset by one whole sample, a third PAL pressing that adds the FM beat, an edge smear and a 0.15-sample offset, and a fourth PAL pressing with unflagged, disc-anchored pressing defects. Each has six derived captures, one of which starts later and one of which replays a range. No two pressings share a capture seed. See [channel](../reference/channel.md) and [LaserVision channel](../reference/laserdisc-channel.md) for the full reference.
 
@@ -278,6 +278,28 @@ chroma_error:
 The chroma error belongs to one **capture**, not the pressing: different players reading one disc each have their own, so captures of one pressing can differ in hue and saturation while their pressing's [channel](../reference/channel.md) impairments stay identical. Per-line jitter averages away across captures; a constant error does not. The pressing table in [Pressing or capture](#pressing-or-capture) puts `chroma_error` with the capture keys.
 
 The stage runs after the channel and before noise. See [chroma_error](../reference/chroma-error.md) for the full reference.
+
+## Line timing error
+
+A time-base corrector removes almost all of a player's timing error, but not quite: on a real capture each picture line is still displaced by a few nanoseconds, by a different amount on every line, field and frame. A 2D decoder sees a jittered luma edge as line-alternating energy in the chroma band, so a decoder tuned on a jitter-free signal mis-handles real edges. The project-level `line_timing:` block models the residual:
+
+```yaml
+line_timing:
+  line_ns: 4.9          # per line, within its field
+  line_correlation: 0.6 # line to line, within a field
+  field_ns: 3.1         # common to a whole field
+  slope_ns: 3.4         # between the line's two halves
+  seed: 7
+```
+
+- **Mostly a shift of each whole line.** Every picture line moves by its own amount. Neighbouring lines of a field move together (a first-order process with `line_correlation` from line to line), so the memory is short: at 0.6 it has nearly gone after four lines. The two fields are independent.
+- **A field offset.** Each field also takes its own small overall shift.
+- **A velocity error.** `slope_ns` makes the shift grow along the line, so the line's two halves differ.
+- **The picture moves, the line does not.** Only the active picture of picture lines moves; sync, the burst, the VBI and VITS lines stay where they are, because on real captures the picture moves against a burst-locked line. `include_burst: true` moves each picture line's burst with it instead, for decoders that reference every line to its own burst.
+- **Part of it is on the disc.** A `shared:` layer, with its own figures and a fixed seed, is drawn by disc position and is identical in every capture of the pressing, as the pressing noise is. The block's own figures are the capture's part, drawn afresh for every capture.
+- **The truth is the unjittered picture**: what a perfect time-base corrector would give.
+
+The figures above are those measured on a Domesday capture, held stills compared frame by frame. The stage runs after the chroma error and before noise, so the noise is not shifted. Every figure at zero (or no block) leaves the output bit-identical. See [line_timing](../reference/line-timing.md) for the full reference.
 
 ## Luma bandwidth
 

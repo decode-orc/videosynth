@@ -6,6 +6,7 @@ nav:
   - line-injections.md
   - channel.md
   - chroma-error.md
+  - line-timing.md
   - sections.md
   - section-noise.md
   - section-dropouts.md

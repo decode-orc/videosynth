@@ -28,6 +28,7 @@
 #include "videosynth/fixed_point.h"
 #include "videosynth/generation_stage.h"
 #include "videosynth/interfaces.h"
+#include "videosynth/line_timing_stage.h"
 #include "videosynth/model.h"
 #include "videosynth/noise_injection_stage.h"
 #include "videosynth/progressive_frame_source.h"
@@ -123,6 +124,7 @@ class PreviewFrameService : public QObject {
     IGenerationStage* generation = nullptr;
     const ChannelStage* channel = nullptr;
     const ChromaErrorStage* chroma_error = nullptr;
+    const LineTimingStage* line_timing = nullptr;
     const NoiseInjectionStage* noise = nullptr;
     const DropoutInjectionStage* dropouts = nullptr;
     const IProgressiveFrameProvider* source_provider = nullptr;
@@ -139,8 +141,9 @@ class PreviewFrameService : public QObject {
   static constexpr int kDefaultCacheCapacity = 4;
 
   // synthesizer: callable executed on the worker thread for each frame; when
-  // empty, the default (GenerateFrameBatch + channel and chroma error
-  // stages + optional noise/dropout stages + progressive source decode) is
+  // empty, the default (GenerateFrameBatch + channel, chroma error and line
+  // timing stages + optional noise/dropout stages + progressive source
+  // decode) is
   // used.
   explicit PreviewFrameService(SynthesizeFrameFn synthesizer = {},
                                int cache_capacity = kDefaultCacheCapacity,
@@ -204,6 +207,7 @@ class PreviewFrameService : public QObject {
     GenerationStage generation;
     ChannelStage channel;
     ChromaErrorStage chroma_error;
+    LineTimingStage line_timing;
     NoiseInjectionStage noise{nullptr};
     DropoutInjectionStage dropouts{nullptr};
     ProgressiveFrameSource source_provider;

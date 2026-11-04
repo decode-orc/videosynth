@@ -471,6 +471,56 @@ TEST(ProjectSettingsPresenterTest, ChromaErrorEnableHelpersSeedValidBlocks) {
   }
 }
 
+TEST(ProjectSettingsPresenterTest, LineTimingEnableHelpersSeedValidBlocks) {
+  for (const Standard standard :
+       {Standard::kPal, Standard::kNtsc, Standard::kPalM}) {
+    SCOPED_TRACE(StandardToString(standard));
+    Project project = MakeProject(standard);
+    SetLineTimingEnabled(&project.line_timing, true);
+    EXPECT_TRUE(project.line_timing.capture.enabled);
+    EXPECT_EQ(project.line_timing.capture.line_ns, 4.9);
+    EXPECT_EQ(project.line_timing.capture.line_correlation, 0.6);
+    EXPECT_FALSE(project.line_timing.shared.enabled);
+    EXPECT_TRUE(IsValid(project));
+    EXPECT_EQ(RoundTrip(project), project);
+
+    SetSharedLineTimingEnabled(&project.line_timing, true);
+    EXPECT_TRUE(project.line_timing.shared.enabled);
+    EXPECT_TRUE(project.line_timing.shared.seed_specified);
+    EXPECT_TRUE(IsValid(project));
+    EXPECT_EQ(RoundTrip(project), project);
+
+    // Re-enabling keeps edited values.
+    project.line_timing.capture.slope_ns = 1.0;
+    project.line_timing.shared.field_ns = 0.5;
+    SetLineTimingEnabled(&project.line_timing, true);
+    SetSharedLineTimingEnabled(&project.line_timing, true);
+    EXPECT_EQ(project.line_timing.capture.slope_ns, 1.0);
+    EXPECT_EQ(project.line_timing.shared.field_ns, 0.5);
+
+    SetSharedLineTimingEnabled(&project.line_timing, false);
+    EXPECT_EQ(project.line_timing.shared, LineTimingLayer{});
+    SetLineTimingEnabled(&project.line_timing, false);
+    EXPECT_EQ(project.line_timing, LineTimingParameters{});
+  }
+}
+
+TEST(ProjectSettingsPresenterTest, LineTimingBurstFollowsStandard) {
+  LineTimingParameters line_timing;
+  SetLineTimingEnabled(&line_timing, true);
+  line_timing.include_burst = true;
+  EXPECT_TRUE(NormalizeLineTimingForStandard(line_timing, Standard::kNtsc)
+                  .include_burst);
+  const LineTimingParameters secam =
+      NormalizeLineTimingForStandard(line_timing, Standard::kSecam);
+  EXPECT_FALSE(secam.include_burst);
+  EXPECT_EQ(secam.capture, line_timing.capture);
+  EXPECT_TRUE(BuildProjectSettingsFormState(MakeProject(Standard::kPal))
+                  .line_timing_burst_editable);
+  EXPECT_FALSE(BuildProjectSettingsFormState(MakeProject(Standard::kSecam))
+                   .line_timing_burst_editable);
+}
+
 TEST(ProjectSettingsPresenterTest, NormalizeLaserdiscClearsForeignFeatures) {
   LaserdiscParameters laserdisc = MakeLaserdiscParameters();
   laserdisc.pilot_burst = true;

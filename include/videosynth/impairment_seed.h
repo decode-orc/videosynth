@@ -22,6 +22,8 @@ constexpr std::uint64_t kSharedLevelNoiseSeedDomain = 0x50524553534C564CULL;
 constexpr std::uint64_t kChromaJitterSeedDomain = 0x4348524F4D414A54ULL;
 constexpr std::uint64_t kRandomDropoutSeedDomain = 0x52414E444F4D444FULL;
 constexpr std::uint64_t kScratchDropoutSeedDomain = 0x5343524154434844ULL;
+constexpr std::uint64_t kLineTimingSeedDomain = 0x4C494E4554494D45ULL;
+constexpr std::uint64_t kSharedLineTimingSeedDomain = 0x50524C4E54494D45ULL;
 
 // splitmix64 finaliser: a bijective 64-bit mix with full avalanche.
 constexpr std::uint64_t SplitMix64(std::uint64_t value) {

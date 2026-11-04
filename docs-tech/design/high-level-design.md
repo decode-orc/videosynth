@@ -61,6 +61,7 @@
 - **Per-section noise injection**: two-component Gaussian noise model (floor + proportional) targeting orc-gui Black PSNR and White SNR metrics, with an optional spectrum shape and an optional shared (pressing) layer keyed by disc position.
 - **Pressing channel impairments**: a project-level `channel:` block applied to whole frames between generation and noise: the PAL FM-beat herringbone, a readout edge smear and a band-limited sub-sample timing offset.
 - **Capture chroma error**: a project-level `chroma_error:` block applying a chroma gain and phase error, with optional per-line Gaussian jitter, to picture chroma only, after the channel and before noise.
+- **Line timing error**: a project-level `line_timing:` block shifting each picture line's active window by the residual timing error a time-base corrector leaves (per-line AR(1) shift, field offset and velocity slope), with a capture layer and an optional disc-keyed pressing layer, after the chroma error and before noise.
 - **Per-section dropout injection**: physical-tape and optical-disc dropout simulation (random surface dropouts and persistent scratch dropouts) with automatic sidecar generation conformant to the [Dropout Extension Format](../cvbs-file-format-specification/docs/extensions/dropout-extension-format.md) (schema version 5). Each type can be unflagged (applied, but absent from the sidecar) and disc-anchored (keyed by disc position, a pressing defect).
 - **Per-section luma bandwidth limit**: an optional Kaiser-windowed-sinc low-pass on the active picture luma, applied as it is painted.
 - **Per-section picture mapping**: an optional band-limited (polyphase Kaiser-windowed-sinc) source-to-4fsc horizontal mapping, and PAL/PAL-M `chroma_line_sign` regions whose U or V follows the V-switch (PAL decoder-stress elements).
@@ -168,16 +169,17 @@ At `4fsc`, NTSC frame cadence is orthogonal (`910 x 525 = 477,750` samples/frame
 - The current implementation uses a sampled-domain split: frame-scoped CVBS-domain Y/C synthesis directly on the `4fsc` lattice, followed by composite quantisation and file output. This remains consistent with composite-signal decomposition in [SMPTE 170M-2004](../analogue-video-specifications/docs/video_formats/SMPTE-170M-2004/SMPTE-170M-2004.md) §3, §7-§10 and [ITU-R BT.1700](../analogue-video-specifications/docs/video_formats/BT-1700-E/BT-1700-E.md) Part A/Part B, but it is not a continuous-time then sampled split.
 - Independent luma/chroma generation with later composition maps to luminance/chrominance model definitions in [SMPTE 170M-2004](../analogue-video-specifications/docs/video_formats/SMPTE-170M-2004/SMPTE-170M-2004.md) §6-§10 and [ITU-R BT.470-6](../analogue-video-specifications/docs/video_formats/BT-470-6-1998/BT-470-6-1998.md), Table 2 item 2.5.
 
-VideoSynth currently follows a **six-stage sampled-domain architecture**:
+VideoSynth currently follows a **seven-stage sampled-domain architecture**:
 
 1. **[Generation Stage](#generation-stage)**: Synthesizes **4fsc-discrete fixed-point mV representations** of **luma (Y)** and **chroma (C)** for complete frame batches.
 2. **Channel Stage** (`ChannelStage`): Applies the optional project-level `channel:` impairments of the pressing to whole frames, in order: the PAL FM-beat herringbone (`FmBeatModel`), added to picture luma; the readout edge smear (`ApplyEdgeSmear`), a one-pole low-pass of a fraction of Y and C; and the sub-sample timing offset (`TimingOffsetFilter`), a band-limited circular delay of Y and C. A no-op, leaving the buffers bit-identical, when the block is absent or every configured impairment is the identity.
 3. **Chroma Error Stage** (`ChromaErrorStage`): Applies the optional project-level `chroma_error:` gain and phase error of one capture to picture chroma (the active window of active picture lines; burst, VITS and VBI lines untouched), using a Hilbert-transformer quadrature: `C ← g·(C·cos θ − Ĉ·sin θ)`, with optional per-line Gaussian jitter of θ and g. A no-op, leaving the buffer bit-identical, when the block is absent or is the identity.
-4. **Noise Injection Stage** (`NoiseInjectionStage`): Applies optional per-section Gaussian noise to the fixed-point mV Y/C buffers before quantisation: a two-component capture layer targeting orc-gui Black PSNR and White SNR metrics, and a shared (pressing) layer keyed by disc position, constant-level with an optional level term that follows the pressing picture's luma. Either layer may be spectrally shaped.
-5. **Dropout Injection Stage** (`DropoutInjectionStage`): Applies optional per-section random and scratch dropout events to the fixed-point mV Y/C buffers after noise, and writes a conformant SQLite dropout sidecar (`<basename>.dropouts.meta`).
-6. **[Output Stage](#output-stage)**: Validates frame-span alignment, combines Y and C, quantises to the active digital interface code space, and formats the final CVBS output files.
+4. **Line Timing Stage** (`LineTimingStage`): Applies the optional project-level `line_timing:` per-line timing error left after time-base correction to the active window of picture lines (sync, burst, VBI and VITS lines untouched; with `include_burst`, each picture line's burst window in C as well). Each layer draws per field a Gaussian field offset plus two stationary AR(1) processes along the field's lines (shift and slope, correlation `line_correlation`); sample `n` is read at `n − d(n)`, `d(n) = shift + slope·(n − c)/(W/2)`, through a band-limited `VariableDelayInterpolator` (32-tap Kaiser-windowed sinc, 512 tabulated phases) on Y and C alike. The capture layer is keyed by (seed, output frame), the shared layer by (seed, disc frame) in its own seed domain; the two add. A no-op, leaving the buffers bit-identical, when the block is absent or every figure is zero. The picture truth stays the unjittered picture.
+5. **Noise Injection Stage** (`NoiseInjectionStage`): Applies optional per-section Gaussian noise to the fixed-point mV Y/C buffers before quantisation: a two-component capture layer targeting orc-gui Black PSNR and White SNR metrics, and a shared (pressing) layer keyed by disc position, constant-level with an optional level term that follows the pressing picture's luma. Either layer may be spectrally shaped.
+6. **Dropout Injection Stage** (`DropoutInjectionStage`): Applies optional per-section random and scratch dropout events to the fixed-point mV Y/C buffers after noise, and writes a conformant SQLite dropout sidecar (`<basename>.dropouts.meta`).
+7. **[Output Stage](#output-stage)**: Validates frame-span alignment, combines Y and C, quantises to the active digital interface code space, and formats the final CVBS output files.
 
-Alongside these six stages, an optional **Audio Track Generator** (`AudioTrackGenerator`) runs when at least one section declares an `audio:` channel pair. Per pair and section it either synthesises test-tone waveforms (`AudioSynthesizer`) or reads an audio file or the section video's soundtrack (`AudioMediaReader` over an `IAudioSampleSource`, implemented by `FfmpegAudioSampleSource`), frame-locked to the video, and streams one stereo 24-bit PCM RIFF/WAVE track per declared channel pair (0–7) to `<basename>_audio_<pair>.wav` (each via an `AudioWavWriter`). The generator is driven with the output-order frame sequence (each frame's section and source time from the schedule, via `AudioOutputFramesForSchedule`), so per-frame sample counts follow output position and every track stays sample-accurately aligned to the stored video frames. See [Section 7 `audio:`](#audio-sub-key-optional-per-section).
+Alongside these seven stages, an optional **Audio Track Generator** (`AudioTrackGenerator`) runs when at least one section declares an `audio:` channel pair. Per pair and section it either synthesises test-tone waveforms (`AudioSynthesizer`) or reads an audio file or the section video's soundtrack (`AudioMediaReader` over an `IAudioSampleSource`, implemented by `FfmpegAudioSampleSource`), frame-locked to the video, and streams one stereo 24-bit PCM RIFF/WAVE track per declared channel pair (0–7) to `<basename>_audio_<pair>.wav` (each via an `AudioWavWriter`). The generator is driven with the output-order frame sequence (each frame's section and source time from the schedule, via `AudioOutputFramesForSchedule`), so per-frame sample counts follow output position and every track stays sample-accurately aligned to the stored video frames. See [Section 7 `audio:`](#audio-sub-key-optional-per-section).
 
 When `laserdisc.efm_audio` selects one of those channel pairs, the same generator additionally produces that pair at 44 100 Hz (tones synthesised directly, file and video audio read a second time at that rate) and streams it through the `videosynth_efm` module (`AudioEfmWriter`) as a LaserDisc digital audio EFM channel stream written to `<basename>.efm` with its own `<basename>.efm.meta` sidecar. The pair's 48 kHz WAV track is unaffected. See [LaserDisc Digital Audio (EFM) Output](#laserdisc-digital-audio-efm-output).
 
@@ -865,7 +867,7 @@ For **NTSC (525-line system)**, the vertical blanking interval (VBI) is defined 
 
 ### **Current Implementation Status**
 
-The parser (`src/yaml_project_parser.cpp`), validator (`src/project_validator.cpp`), emitter (`src/yaml_project_emitter.cpp`) and runtime implement the project-file surface below. The project file has exactly eight top-level blocks — `project`, `cvbs_presets`, `output`, `line_injections`, `laserdisc`, `channel`, `chroma_error` and `sections` — and any other top-level key is a parse error. Every block validates its key set, so an unrecognised key anywhere is a parse error naming the key and its block.
+The parser (`src/yaml_project_parser.cpp`), validator (`src/project_validator.cpp`), emitter (`src/yaml_project_emitter.cpp`) and runtime implement the project-file surface below. The project file has exactly nine top-level blocks — `project`, `cvbs_presets`, `output`, `line_injections`, `laserdisc`, `channel`, `chroma_error`, `line_timing` and `sections` — and any other top-level key is a parse error. Every block validates its key set, so an unrecognised key anywhere is a parse error naming the key and its block.
 
 - Implemented `cvbs_presets` keys: `video_standard_preset`, `sample_encoding_preset`, `signal_state_preset`, `ntsc_black_setup_ire` (both System M standards, NTSC and PAL-M) and `secam_field_identification`. `video_standard_preset: SECAM` and `secam_field_identification` (default `true`) are parsed, emitted, validated, and implemented; SECAM requires `signal_state_preset: STANDARD_STABLE_UNLOCKED` (the default when the key is omitted). See [SECAM Chroma Encoding Model](#secam-chroma-encoding-model).
 - Implemented `output` keys: `video_path`, `signal_type` (`"composite"` or `"yc"`; defaults to `"composite"`) and `truth`. The metadata sidecar is not configured in YAML: it is always colocated with the video output and its path is derived from `output.video_path` (`.cvbs`/`.cvbsy` → `.meta`). `output.truth` is parsed, emitted (only when `true`), validated (error on SECAM, warning with OSD overlays) and implemented. See [Picture Truth Output](#picture-truth-output).
@@ -873,13 +875,14 @@ The parser (`src/yaml_project_parser.cpp`), validator (`src/project_validator.cp
 - The project-level `laserdisc:` block is parsed into `LaserdiscParameters` on `Project`: the project-wide `disc_type` (`CAV`/`CLV`), `pilot_burst` (PAL: a 3.75 MHz (240 × f_H) sinusoidal burst at ±300 mV superimposed on every sync pulse in the Y channel), `vbi_burst` (NTSC: the colour burst kept on the equalizing and broad sync lines of the vertical interval), `efm_audio` (LaserDisc digital audio for one channel pair) and `channel` (the LaserVision pressing and replay channel: `fm_beat`, `group_delay`, `response_db`, `response_by_picture`, `field2_offset`). All of it is parsed, emitted, validated and implemented. See [`laserdisc:`](#laserdisc-block-optional-project-level).
 - The project-level `channel:` block (`timing_offset_samples`, `edge_smear`) is parsed, emitted, validated and applied by the Channel Stage. See [`channel:`](#channel-block-optional-project-level).
 - The project-level `chroma_error:` block (`gain`, `phase_deg`, `line_jitter`, `differential`, `crosstalk`, `include_burst`) is parsed, emitted, validated and applied by the Chroma Error Stage. See [`chroma_error:`](#chroma_error-block-optional-project-level).
+- The project-level `line_timing:` block (`line_ns`, `line_correlation`, `field_ns`, `slope_ns`, `seed`, `include_burst`, `shared`) is parsed, emitted, validated and applied by the Line Timing Stage. See [`line_timing:`](#line_timing-block-optional-project-level).
 - The `project:` block fields `name`, `version`, and `description` are parsed and retained on the in-memory `Project` model, so they survive load/save round-trips.
 - Implemented section fields: `name`, `type`, `source`, `duration_frames`, `duration_repeat`, `start_frame`, `end_frame`, `cadence` (2:3 pulldown; see [2:3 Pulldown Sections](#progressive-source-to-two-field-frame-conversion)), `laserdisc` (`area` and biphase `codes`; see [Laserdisc Biphase Encoding](#laserdisc-biphase-encoding)), `horizontal_resample` (`nearest` default, `bandlimited`), `chroma_line_sign` (PAL/PAL-M), `luma_bandwidth`, `picture_response` (preset `domesday` or `horizontal_db`/`vertical_db` curves), `osd`, `noise`, `dropouts`, and `audio` (channel pairs carrying tones, `file:` audio or `video_audio:`).
 - A section's `laserdisc.area` is held as `Section::section_type`, and its `laserdisc.codes` list as a `Section::LineInjection` of type `laserdisc` whose `codes` are the per-section biphase codes (picture_number, chapter_number, lead_in/out, etc.) that legitimately differ between lead-in, programme, and lead-out. A section's own `line_injections:` list accepts `type` and `target_lines` only; its one recognised type, `vitc`, is parsed and then rejected by the validator as not implemented (see [VITC](#vitc-vertical-interval-timecode)).
 - VITS line injections have a generation-stage orchestration path and are applied only on their targeted frame lines.
 - Built-in VITS catalog entries carry full waveform-definition primitive/composite trees for every supported `vits_type`, so the default runtime path can render all supported PAL and NTSC VITS patterns.
 - LaserDisc keys are accepted only in the `laserdisc` blocks. `cvbs_presets.pal_laserdisc_pilot_burst`, `cvbs_presets.ntsc_laserdisc_vbi_burst`, `output.efm_audio`, `line_injections.disc_type`, `channel.fm_beat`, `sections[].section_type` and a section `line_injections` entry with `type: laserdisc` are parse errors whose message names the replacement key (`ReportMovedKeys` in the parser), e.g. "cvbs_presets.pal_laserdisc_pilot_burst has moved to laserdisc.pilot_burst." `scripts/migrate_laserdisc_keys.py` rewrites such files in place.
-- A YAML project **emitter** (`YamlProjectEmitter` in `videosynth_core`) serialises an in-memory `Project` back to this schema. It writes fields in the canonical order shown below and emits only explicitly-set optional blocks — at project level `line_injections:`, `laserdisc:`, `channel:` and `chroma_error:`; per section `cadence:`, `laserdisc:`, `line_injections:`, `horizontal_resample:` (only `bandlimited`), `chroma_line_sign:`, `luma_bandwidth:`, `picture_response:`, `osd:`, `noise:`, `dropouts:` and `audio:` — so emitted files stay minimal and diffable. Emit → parse is lossless: a saved file parses back to an equal `Project` (the one exception is a `duration_repeat` alongside an integer `duration_frames`, which has no effect and is not written), which is the contract that keeps GUI-saved projects loadable by the CLI and vice versa.
+- A YAML project **emitter** (`YamlProjectEmitter` in `videosynth_core`) serialises an in-memory `Project` back to this schema. It writes fields in the canonical order shown below and emits only explicitly-set optional blocks — at project level `line_injections:`, `laserdisc:`, `channel:`, `chroma_error:` and `line_timing:`; per section `cadence:`, `laserdisc:`, `line_injections:`, `horizontal_resample:` (only `bandlimited`), `chroma_line_sign:`, `luma_bandwidth:`, `picture_response:`, `osd:`, `noise:`, `dropouts:` and `audio:` — so emitted files stay minimal and diffable. Emit → parse is lossless: a saved file parses back to an equal `Project` (the one exception is a `duration_repeat` alongside an integer `duration_frames`, which has no effect and is not written), which is the contract that keeps GUI-saved projects loadable by the CLI and vice versa.
 
 The rest of Section 7 describes implemented behaviour. The only designed-but-unimplemented project-file content is the section-level `vitc` line injection, whose intended fields are given in [Section 8.2](#vitc-vertical-interval-timecode).
 
@@ -940,6 +943,15 @@ chroma_error:                  # Optional; one capture's chroma gain/phase error
   crosstalk: { v_to_u: 0.3, alternate_with_switch: true }  # U/V mixing [-0.5, 0.5]; alternation PAL/PAL-M only
   include_burst: false         # Apply the error to the burst as well; default: false
 
+line_timing:                   # Optional; per-line timing error left after time-base correction
+  line_ns: 4.9                 # Within-field r.m.s. shift per line, ns [0, 50]
+  line_correlation: 0.6        # AR(1) correlation line to line within a field [0, 0.99]
+  field_ns: 3.1                # R.m.s. offset common to a field, ns [0, 50]
+  slope_ns: 3.4                # R.m.s. difference between the line's halves, ns [0, 50]
+  seed: 7                      # Capture seed; absent = run-specific
+  include_burst: false         # Move each picture line's burst too (not SECAM); default: false
+  shared: { line_ns: 3.0, field_ns: 1.5, slope_ns: 2.0, seed: 7001 }  # Pressing layer; seed required
+
 sections:
   - name: "Progressive Source with Laserdisc Codes"
     type: progressive
@@ -978,7 +990,7 @@ sections:
             amplitude: 0.5     # Peak amplitude as a fraction of full scale [0.0, 1.0]
 ```
 
-The `cadence` line is commented out because 2:3 pulldown applies to 525-line standards only. Keys appear in the emitter's canonical order — top level `project`, `cvbs_presets`, `output`, `line_injections`, `laserdisc`, `channel`, `chroma_error`, `sections`; within a section `name`, `type`, `source`, `duration_frames`, `duration_repeat`, `start_frame`, `end_frame`, `cadence`, `laserdisc`, `line_injections`, `horizontal_resample`, `chroma_line_sign`, `luma_bandwidth`, `picture_response`, `osd`, `noise`, `dropouts`, `audio`. The parser does not depend on order.
+The `cadence` line is commented out because 2:3 pulldown applies to 525-line standards only. Keys appear in the emitter's canonical order — top level `project`, `cvbs_presets`, `output`, `line_injections`, `laserdisc`, `channel`, `chroma_error`, `line_timing`, `sections`; within a section `name`, `type`, `source`, `duration_frames`, `duration_repeat`, `start_frame`, `end_frame`, `cadence`, `laserdisc`, `line_injections`, `horizontal_resample`, `chroma_line_sign`, `luma_bandwidth`, `picture_response`, `osd`, `noise`, `dropouts`, `audio`. The parser does not depend on order.
 
 #### **Asset Roots & Path Resolution**
 
@@ -1125,6 +1137,27 @@ Rules:
 - θ and g are the constants plus, with jitter, per-line Gaussian deviations. The jitter RNG is `std::mt19937_64` seeded with `DeriveImpairmentSeed(seed, kChromaJitterSeedDomain, output_frame_index)`; each picture line draws two unit normals in frame order (phase, then gain) whether or not each deviation is set. Chroma error is a capture property, so it is keyed by output position, not disc position.
 - C is not clamped; the output stage quantises it.
 - The stage runs after the channel stage (pressing impairments see error-free chroma) and before noise.
+
+#### **`line_timing:` Block (Optional, Project-Level)**
+
+The `line_timing:` block models the per-line timing error of the active picture that a time-base corrector leaves (decode-orc/videosynth#19). Its own keys are the capture layer, drawn afresh by every capture; `shared:` is the pressing layer, recorded on the disc and identical in every capture of the pressing.
+
+| Key | Type | Required | Range | Description |
+|-----|------|----------|-------|-------------|
+| `line_ns` | float | One of `line_ns`/`field_ns`/`slope_ns`/`shared` | [0, 50] | Within-field r.m.s. shift of each line, in ns. Default 0. |
+| `line_correlation` | float | No | [0, 0.99] | AR(1) correlation of the shift and slope processes, line to line within a field. Default 0. |
+| `field_ns` | float | As `line_ns` | [0, 50] | R.m.s. offset common to a field, in ns. Default 0. |
+| `slope_ns` | float | As `line_ns` | [0, 50] | R.m.s. difference between the shifts of the line's two halves (velocity error), in ns. Default 0. |
+| `seed` | int | No | any int64 | Capture seed. If absent, a seed drawn when the pipeline is constructed is used. Needs a capture figure. |
+| `include_burst` | bool | No | `true`/`false` | Move each picture line's burst window (C) with the line. Not SECAM. Default `false`. |
+| `shared` | map | No | — | Pressing layer: `line_ns`, `line_correlation`, `field_ns`, `slope_ns` (one figure required) and a required `seed`. |
+
+Rules:
+- Block absent, or every figure zero → no processing; output bit-identical. An empty block (only `line_correlation`, `seed` or `include_burst` counts as empty), an empty `shared:`, a top-level `seed` without a capture figure, an unknown key, a non-numeric figure, a non-integer seed or a non-boolean `include_burst` is a parse error; out-of-range or non-finite figures, `shared:` without `seed`, and `include_burst` on SECAM are validation errors.
+- Model (`DrawLineTimingErrors`): per frame, per field (field 1 first), one unit normal for the field offset `F = field_ns·e`, then two per frame line of the field in line order. Shift and slope are stationary AR(1) processes over every line of the field, `x[0] = σe[0]`, `x[k] = r·x[k−1] + √(1−r²)·σ·e[k]`; the line's shift is `F + x[k]`. Every draw is made whether or not its figure is set.
+- Application: inside each picture line window (`BuildPictureLineWindows`), Y and C are replaced by `VariableDelayInterpolator::At(source, n − d(n))`, `d(n) = shift + slope·(n − c)/(W/2)` in samples, with `c` the centre and `W` the width of a full active line (`active_window_start/end_samples`). The interpolator is a 32-tap Kaiser-windowed sinc (β = 8, as `TimingOffsetFilter`), tabulated at 512 fractional phases and interpolated linearly between them, normalised to unit DC; integer positions are exact. Reads beyond the frame clamp to its ends. Y is clamped to the composite bounds; C is not.
+- Keying: capture layer `DeriveImpairmentSeed(seed or run base seed, kLineTimingSeedDomain, output frame)`; pressing layer `DeriveImpairmentSeed(shared.seed, kSharedLineTimingSeedDomain, disc_frame_index)`. The two layers' errors add.
+- The picture truth is taken in generation, so it is the unjittered picture.
 
 #### **`noise:` Sub-Key (Optional, Per-Section)**
 
@@ -2050,7 +2083,7 @@ The runtime uses a **central pipeline module** to process sections and combine t
 
 ### **Pipeline Entry Points and Concurrency**
 
-- `VideoSynthPipeline::Run(options, observer, cancellation)` parses the YAML project file and delegates to `RunProject`. `VideoSynthPipeline::RunProject(project, options, observer, cancellation)` runs the pipeline for an already-parsed in-memory `Project` (validate → generate → channel → chroma error → noise → dropout → output); relative paths in the project are used as-is and must be resolved by the caller. The CLI uses `Run`; front-ends that hold an in-memory project (e.g. a GUI) use `RunProject`.
+- `VideoSynthPipeline::Run(options, observer, cancellation)` parses the YAML project file and delegates to `RunProject`. `VideoSynthPipeline::RunProject(project, options, observer, cancellation)` runs the pipeline for an already-parsed in-memory `Project` (validate → generate → channel → chroma error → line timing → noise → dropout → output); relative paths in the project are used as-is and must be resolved by the caller. The CLI uses `Run`; front-ends that hold an in-memory project (e.g. a GUI) use `RunProject`.
 - `observer` (optional, nullable) is an `IPipelineObserver` receiving stage transitions (`validate`, `generate`, `finalize`), per-batch frame progress (`frames_completed / frames_total`), validation warnings, and a terminal `PipelineRunStatus` (`kSucceeded` / `kCancelled` / `kFailed`) reported exactly once. Callbacks run synchronously on the pipeline's executing thread.
 - `cancellation` (optional, nullable) is a thread-safe one-shot `CancellationToken` polled between frame batches. On cancellation the pipeline aborts all in-progress artefacts — video/chroma/metadata via `IOutputStage::AbortWrite`, the WAV tracks and any EFM stream via `AudioTrackGenerator::Abort`, and the dropout sidecar via `DropoutInjectionStage::Abort` — so a cancelled run leaves no partially-written output files, reports `kCancelled` (not an error), and returns `false`.
 - A pipeline run is driven from one *run thread*, which may be a worker thread; there is no main-thread affinity. A pipeline instance must not run concurrently with itself, because the single-owner session state (the output stage's open files, the dropout sidecar session, the WAV/EFM writers) is not synchronised. `ILogger`, `IProjectParser`, and `IProjectValidator` implementations are thread-safe.
@@ -2111,7 +2144,16 @@ Current implementation note:
   3. For each picture line in frame order: draw the line's phase and gain deviations; form Ĉ by convolving the window's samples with the Hilbert kernel (zero-extended at the window edges); write `g·(C·cos θ − Ĉ·sin θ)` rounded to the fixed-point step.
 - The stage is owned by `VideoSynthPipeline`; it draws its unseeded-jitter base seed from `std::random_device` when the pipeline is constructed and is otherwise immutable, so it runs on the pool workers and output is byte-identical for any `--threads`. `PreviewFrameService` applies it unconditionally with the channel stage.
 
-#### **5. Noise Injection Stage**
+#### **5. Line Timing Stage**
+
+- **Input**: Fixed-point Y/C mV batches from the chroma error stage; the project's `line_timing:` block, project VITS lines and the schedule's disc frame indices.
+- **Output**: In-place modified Y/C buffers; untouched when the block is absent or every figure is zero.
+- **Steps**:
+  1. Once per call: build the picture-line windows (and, with `include_burst`, the burst windows of the picture lines), the line offsets and the full-line centre and width.
+  2. For each frame: draw the capture and pressing errors of every frame line (`LineTimingStage::FrameErrors`) and sum them; copy Y, then C, and rewrite each picture window (C also each burst window with `include_burst`) from the copy at `n − d(n)`.
+- The stage is owned by `VideoSynthPipeline`; it draws its unseeded base seed from `std::random_device` when the pipeline is constructed and is otherwise immutable, so it runs on the pool workers and output is byte-identical for any `--threads`. `PreviewFrameService` applies it with the chroma error stage. Cost when active is about 64 multiply-adds per picture sample per channel (two tabulated kernels).
+
+#### **6. Noise Injection Stage**
 
 - **Input**: `4fsc`-discrete fixed-point Y/C mV batches from the generation stage; project noise parameters per section.
 - **Output**: In-place modified Y/C mV buffers with additive Gaussian noise applied to sections that have a capture layer (`noise.enabled`) or a shared layer (`noise.shared.enabled`).
@@ -2128,7 +2170,7 @@ Current implementation note:
   5. Sum the two layers' fixed-point noise values. On Y/C output (`output.signal_type: yc`) add the sum to both Y and C (correlated noise), so each file carries the configured level; on composite output add it to Y only, since the composite sample is Y + C and adding it to both would double the noise (+6 dB). Y samples are clamped to the legal fixed-point mV composite range for the standard; C samples are not, since zero-centred saturated chroma legitimately exceeds that range — the output stage clamps Y + C and the chroma file.
 - **Spectrum shaping** (`NoiseSpectrumFilter`): a 255-tap linear-phase FIR designed by frequency sampling of the interpolated table, a direct inverse real DFT, a Hann window and normalisation to Σh² = 1. Filters are designed once per distinct (sample rate, table) and cached behind a mutex; convolution is direct, so there is no FFT dependency. The cost is paid only by sections that configure a spectrum.
 
-#### **6. Dropout Injection Stage**
+#### **7. Dropout Injection Stage**
 
 - **Input**: In-place fixed-point Y/C mV batches (after noise); project dropout parameters per section.
 - **Output**: In-place modified Y/C mV buffers with random and/or scratch dropouts applied; `<basename>.dropouts.meta` SQLite sidecar populated.
@@ -2144,7 +2186,7 @@ Current implementation note:
   4. On `Finalize`, commit the transaction and close the database handle.
   5. If no section has dropout injection enabled, the sidecar is not created.
 
-#### **7. Output Stage**
+#### **8. Output Stage**
 
 - **Input**: `4fsc`-discrete Y and C signal batches from the generation stage.
 - **Output**: CVBS file (video + metadata).
@@ -2202,6 +2244,7 @@ The current validator enforces a narrower subset than the full design intent in 
 - Implemented: top-level `laserdisc:` block validation (`disc_type` value, pilot/VBI burst standard restrictions, EFM audio, LaserVision channel ranges and standard restrictions, SECAM rejection, and a section `laserdisc:` block without the top-level block) and full laserdisc biphase validation including `laserdisc.area`/code_type matrix enforcement (a section with `codes` must set `area`), IEC value range constraints (`picture_number`/`fm_picture_number` `start_value` against the standard's maximum — the start value only, not the incremented count — `chapter` 0–79, and the `users_code` X₁ 0–7 and D = `0xD` nibbles; the CLV clocks take no parameters), CAV minimum duration **warnings** (lead-in ≥ 938 frames, lead-out ≥ 1250 frames; skipped for `duration_frames: "all"`), a CAV-only minimum chapter length **warning** (`ValidateChapterLengths`: a chapter run shorter than 30 frames; runs containing a `duration_frames: "all"` section are skipped, and CLV discs are not checked), the NTSC/PAL-M VIRS mandatory presence check (a `virs` entry in the project-level `line_injections.vits` when `laserdisc.disc_type` is set), and VITS/biphase reserved-range line conflict detection.
 - Implemented: project-level `channel:` validation (`timing_offset_samples` in [−8.0, 8.0] and finite).
 - Implemented: project-level `chroma_error:` validation (gain, phase and jitter ranges, finiteness, SECAM rejection).
+- Implemented: project-level `line_timing:` validation (figure and correlation ranges, finiteness, required pressing seed, `include_burst` rejected on SECAM).
 - Implemented: per-section noise parameter validation (range, spread floor, mutual dependency, spectrum tables, shared-layer level and seed), dropout validation (scale range, an error for a `dropouts:` block that enables neither type, and a seed for `anchor: disc`), luma bandwidth validation (cutoff and transition ranges), `chroma_line_sign` validation (PAL/PAL-M only, regions inside the raster and following the switch on at least one component), `output.truth` validation (not SECAM; a warning with OSD overlays), and audio validation (including an error when a tone sets both `ramp:` and `frequency`).
 - Implemented: disc-structure section ordering. When any section's `laserdisc.area` is `lead_in` or `lead_out`, the section sequence must be `[lead_in] programme_area... [lead_out]`: at most one `lead_in` (first) and one `lead_out` (last), no section may precede the `lead_in` or follow the `lead_out`, and every section after a `lead_in` or before a `lead_out` must be `programme_area`. Out-of-order sections would break monotonic picture-number and time-code generation (IEC 60856/60857). The GUI surfaces these errors through the shared validator in the validation issues dock.
 - Not yet implemented in the validator/runtime pair: VITC and custom per-line content runtime paths.
@@ -2265,7 +2308,11 @@ The rule set below remains the intended validation contract for VITC and custom 
   - `gain` in **[0.5, 1.5]**, `phase_deg` in **[−180.0, 180.0]**, `line_jitter.phase_deg` in **[0.0, 10.0]**, `line_jitter.gain` in **[0.0, 0.1]**, `differential` levels in **[−50, 150]** IRE strictly ascending with gains in **[0.5, 1.5]** and phases in **[−30, 30]**, `crosstalk.v_to_u`/`u_to_v` in **[−0.5, 0.5]**, all finite (error otherwise).
   - `chroma_error:` on a SECAM project is an error, as is `crosstalk.alternate_with_switch: true` on NTSC.
   - An empty `chroma_error:`, `line_jitter:`, `differential:` or `crosstalk:` block, an unknown key, a non-numeric value or a non-boolean `include_burst`/`alternate_with_switch` is a parse error.
-7. **Dropout Parameters** (per-section `dropouts:` block):
+7. **Line Timing Parameters** (project-level `line_timing:` block):
+  - `line_ns`, `field_ns` and `slope_ns` in **[0, 50]** ns and `line_correlation` in **[0, 0.99]**, for the capture layer and `shared`, all finite (error otherwise).
+  - `shared:` without `seed` is an error; `include_burst: true` on SECAM is an error.
+  - An empty `line_timing:` or `shared:` block, a top-level `seed` without a capture figure, an unknown key, a non-numeric value, a non-integer seed or a non-boolean `include_burst` is a parse error.
+8. **Dropout Parameters** (per-section `dropouts:` block):
   - `random.scale` must be in **[0, 20]** (error if outside this range; `0` means disabled).
   - `scratch.scale` must be in **[0, 20]** (error if outside this range; `0` means disabled).
   - A `dropouts:` block where both `random.scale` and `scratch.scale` are `0` (or both sub-blocks are absent) is a **validation error** — omit the `dropouts:` key entirely to disable.
@@ -2275,11 +2322,11 @@ The rule set below remains the intended validation contract for VITC and custom 
   - **Luma bandwidth** (per-section `luma_bandwidth:` block): `transition_mhz` in **[0.1, 2.0]**; `cutoff_mhz` in **[0.5, 2 f_sc − transition_mhz/2]**, where 2 f_sc is the 4fsc Nyquist frequency (error otherwise). A missing `cutoff_mhz`, an unknown key or a non-numeric value is a parse error.
   - **Chroma line sign** (per-section `chroma_line_sign:` list): PAL and PAL-M only (error otherwise); every region must have a positive width and height, lie inside the 720×576 (PAL) or 720×486 (PAL-M) source raster and set `u` or `v` to `follow_switch` (errors). A non-list value, a missing `region` or coordinate, a non-integer coordinate, an unknown mode or key is a parse error. `horizontal_resample` other than `nearest`/`bandlimited` is a parse error.
   - **Picture truth** (`output.truth`): an error on SECAM; a warning when any section has OSD overlays (the truth excludes them).
-8. **LaserDisc** (top-level `laserdisc:` block and section `laserdisc:` blocks):
+9. **LaserDisc** (top-level `laserdisc:` block and section `laserdisc:` blocks):
   - An empty block or an unknown key is a parse error; so is any of the LaserDisc keys placed in another block (`cvbs_presets.pal_laserdisc_pilot_burst`, `cvbs_presets.ntsc_laserdisc_vbi_burst`, `output.efm_audio`, `line_injections.disc_type`, `channel.fm_beat`, `sections[].section_type`, a section `line_injections` entry with `type: laserdisc`), with a message naming the replacement.
   - `disc_type` must be `CAV` or `CLV`; it is required when any section carries `codes`. A section with `codes` must set `laserdisc.area`. A section `laserdisc:` block without the top-level block is an error. The whole block, or any section `laserdisc:` block, on SECAM is an error.
   - `laserdisc.channel`: `fm_beat` and `group_delay.preset: iec60856_nominal` are 625-line PAL only; `fm_beat.carrier_black_hz` in **[6.9e6, 7.3e6]**, `fm_beat.level_db` in **[−60, 0]**, `group_delay.scale` in **[−2, 2]**, `group_delay.points_ns` MHz strictly ascending in [0, 4fsc Nyquist] with delays in **[−1000, 1000]** ns, `response_db` (and each `response_by_picture` entry's) MHz strictly ascending in [0, 4fsc Nyquist] with levels in **[−60, +20]** dB, `field2_offset.x_samples` in **[−8, 8]**, `field2_offset.y_lines` in **[−4, 4]** (errors). `response_db` with `response_by_picture`, fewer than two `response_by_picture` entries, or pictures below 1 or not ascending are errors.
-9. **EFM Digital Audio** (`laserdisc.efm_audio:` block):
+10. **EFM Digital Audio** (`laserdisc.efm_audio:` block):
   - `pair` must be in **[0, 7]** (error if outside this range).
   - `video_standard_preset` must be `PAL`, `NTSC` or `PAL_M` — SECAM has no LaserDisc digital audio specification (error otherwise).
   - If no section declares the selected `pair`, a **warning** is emitted: no `.efm` file is written.

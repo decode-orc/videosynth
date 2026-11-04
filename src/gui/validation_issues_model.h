@@ -32,6 +32,7 @@ enum class IssueField {
   kPictureResponse,
   kChannel,
   kChromaError,
+  kLineTiming,
   kLaserdiscChannel,
   kCadence,
   kPicture,

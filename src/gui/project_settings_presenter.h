@@ -60,6 +60,9 @@ inline constexpr int kResponsePictureMin = 1;
 inline constexpr int kResponsePictureMax = 999999;
 inline constexpr double kField2OffsetMaxSamples = 8.0;
 inline constexpr double kField2OffsetMaxLines = 4.0;
+// Per-line timing error (ValidateLineTimingParameters).
+inline constexpr double kLineTimingMaxNs = 50.0;
+inline constexpr double kLineTimingCorrelationMax = 0.99;
 }  // namespace project_editor_limits
 
 // Outcome of the project-level LaserDisc digital audio (EFM) selection.
@@ -131,6 +134,8 @@ struct ProjectSettingsFormState {
   // chroma_error models a quadrature (PAL/NTSC) chroma path, so it is not
   // offered for SECAM.
   bool chroma_error_editable = true;
+  // line_timing.include_burst moves the colour burst, which SECAM lacks.
+  bool line_timing_burst_editable = true;
 
   // True when signal_type is "yc" and video_path must carry a ".cvbsy" suffix.
   bool video_path_requires_luma_suffix = false;
@@ -184,6 +189,11 @@ LaserdiscParameters NormalizeLaserdiscForStandard(LaserdiscParameters laserdisc,
 ChromaErrorParameters NormalizeChromaErrorForStandard(
     ChromaErrorParameters chroma_error, Standard standard);
 
+// Clears line_timing.include_burst for SECAM, which has no colour burst.
+// Returns the adjusted block.
+LineTimingParameters NormalizeLineTimingForStandard(
+    LineTimingParameters line_timing, Standard standard);
+
 // Enable/disable helpers for the project-level channel, laserdisc and chroma
 // error blocks. Disabling resets the block (or sub-block) to its default so
 // the emitter drops it; enabling seeds validator-clean defaults and keeps any
@@ -198,6 +208,14 @@ void SetChromaJitterEnabled(ChromaErrorParameters* chroma_error, bool enabled);
 void SetDifferentialEnabled(ChromaErrorParameters* chroma_error, bool enabled);
 // Crosstalk: enabling seeds a small symmetric U/V leak.
 void SetCrosstalkEnabled(ChromaErrorParameters* chroma_error, bool enabled);
+// Line timing: enabling the block with neither layer present seeds the
+// capture layer with figures measured on a real capture (4.9 ns per line,
+// correlation 0.6, 3.1 ns per field, 3.4 ns slope).
+void SetLineTimingEnabled(LineTimingParameters* line_timing, bool enabled);
+// The pressing layer: enabling seeds a smaller recorded part with a fixed
+// seed (validation requires one) and enables the block.
+void SetSharedLineTimingEnabled(LineTimingParameters* line_timing,
+                                bool enabled);
 
 void SetLaserdiscEnabled(LaserdiscParameters* laserdisc, bool enabled);
 void SetLaserdiscChannelEnabled(LaserdiscParameters* laserdisc, bool enabled);

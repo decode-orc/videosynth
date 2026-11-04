@@ -6,7 +6,7 @@ Common validation errors and what to do about each.
 
 ### `Top-level YAML contains unsupported field: 'x'`
 
-Only eight top-level blocks exist: `project`, `cvbs_presets`, `output`, `line_injections`, `laserdisc`, `channel`, `chroma_error` and `sections`. Check for a typo, or for a key that belongs one level deeper.
+Only nine top-level blocks exist: `project`, `cvbs_presets`, `output`, `line_injections`, `laserdisc`, `channel`, `chroma_error`, `line_timing` and `sections`. Check for a typo, or for a key that belongs one level deeper.
 
 The same message shape appears for every block — `section contains unsupported field: 'duration_frame'`, `cvbs_presets contains unsupported field: 'field_order'`. Unknown keys are always errors, never silently ignored.
 
@@ -295,6 +295,26 @@ NTSC has no V-switch for the crosstalk to alternate with. Leave `alternate_with_
 ### `chroma_error is not supported for SECAM`
 
 SECAM carries its colour as frequency-modulated subcarriers, with no quadrature chroma to rotate. Remove the `chroma_error:` block from SECAM projects.
+
+### `line_timing block must set at least one of: line_ns, field_ns, slope_ns, shared`
+
+An empty `line_timing:` block configures nothing. Omit the block for a perfectly time-base-corrected picture. `line_correlation`, `seed` and `include_burst` alone configure nothing either: add one of the figures, or a `shared:` layer. `shared:` must likewise set its `line_ns`, `field_ns` or `slope_ns`.
+
+### `line_timing.seed seeds the capture layer, which sets none of: line_ns, field_ns, slope_ns`
+
+The top-level `seed` belongs to the capture layer. With only a `shared:` layer, put the seed inside `shared:`, or remove it.
+
+### `Line timing validation error: … must be in the range …`
+
+The figures are r.m.s. values in ns. A real capture after time-base correction measures a few ns (about a tenth of a 4fsc sample); 50 ns is close to a whole sample. `line_correlation` must stay below 1 for the process to be stationary. See [line_timing](../reference/line-timing.md).
+
+### `Line timing validation error: shared.seed is required`
+
+The pressing layer is the part recorded on the disc, so every capture of the pressing must draw the same values. Give `shared:` a fixed `seed`.
+
+### `Line timing validation error: include_burst needs a colour burst; SECAM has none`
+
+SECAM carries no colour burst for `include_burst` to move. Leave it out on SECAM projects; the rest of the block applies.
 
 ### `chroma_line_sign requires a PAL or PAL-M project`
 

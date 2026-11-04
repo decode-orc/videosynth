@@ -1603,6 +1603,64 @@ void ValidateChromaErrorParameters(const videosynth::Project& project,
   }
 }
 
+// Range checks for one layer of the per-line timing error.
+void ValidateLineTimingLayer(const videosynth::LineTimingLayer& layer,
+                             const std::string& prefix,
+                             videosynth::ValidationResult* result) {
+  struct RangeCheck {
+    const char* key;
+    double value;
+    double max;
+    const char* range;
+  };
+  // Measured residuals after time-base correction are a few ns (about a
+  // tenth of a 4fsc sample); 50 ns is close to a whole sample, well past a
+  // working TBC. The correlation must stay below 1 for a stationary process.
+  const RangeCheck checks[] = {
+      {"line_ns", layer.line_ns, 50.0, "[0.0, 50.0]"},
+      {"line_correlation", layer.line_correlation, 0.99, "[0.0, 0.99]"},
+      {"field_ns", layer.field_ns, 50.0, "[0.0, 50.0]"},
+      {"slope_ns", layer.slope_ns, 50.0, "[0.0, 50.0]"},
+  };
+  for (const RangeCheck& check : checks) {
+    if (!std::isfinite(check.value) || check.value < 0.0 ||
+        check.value > check.max) {
+      result->is_valid = false;
+      result->errors.push_back("Line timing validation error: " + prefix +
+                               check.key + " must be in the range " +
+                               check.range + "; got " +
+                               std::to_string(check.value) + ".");
+    }
+  }
+}
+
+// Project-wide per-line timing error of the active picture.
+void ValidateLineTimingParameters(const videosynth::Project& project,
+                                  videosynth::ValidationResult* result) {
+  const videosynth::LineTimingParameters& line_timing = project.line_timing;
+  if (!line_timing.enabled) {
+    return;
+  }
+  ValidateLineTimingLayer(line_timing.capture, "", result);
+  if (line_timing.shared.enabled) {
+    ValidateLineTimingLayer(line_timing.shared, "shared.", result);
+    if (!line_timing.shared.seed_specified) {
+      result->is_valid = false;
+      result->errors.push_back(
+          "Line timing validation error: shared.seed is required; the "
+          "pressing layer must be identical in every capture of the "
+          "pressing.");
+    }
+  }
+  if (line_timing.include_burst && project.cvbs_presets.video_standard_preset ==
+                                       videosynth::Standard::kSecam) {
+    result->is_valid = false;
+    result->errors.push_back(
+        "Line timing validation error: include_burst needs a colour burst; "
+        "SECAM has none.");
+  }
+}
+
 void ValidateNoiseParameters(const videosynth::Section& section,
                              const videosynth::Project& project,
                              const std::set<int>& project_vits_lines,
@@ -2847,6 +2905,7 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
   ValidateChannelParameters(project, &result);
   ValidateLaserdiscParameters(project, &result);
   ValidateChromaErrorParameters(project, &result);
+  ValidateLineTimingParameters(project, &result);
 
   if (project.cvbs_presets.video_standard_preset != Standard::kNtsc &&
       project.cvbs_presets.video_standard_preset != Standard::kPalM &&

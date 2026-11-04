@@ -1381,6 +1381,115 @@ bool ParseChromaError(const YAML::Node& root, Project* project,
   return true;
 }
 
+// Parses one layer of `line_timing:` (the capture keys of the block itself,
+// or its `shared:` block). Keys outside `layer_keys` are not consumed here.
+bool ParseLineTimingLayer(const YAML::Node& node, const std::string& context,
+                          LineTimingLayer* layer,
+                          std::vector<std::string>* errors) {
+  const struct {
+    const char* key;
+    double* value;
+  } figures[] = {{"line_ns", &layer->line_ns},
+                 {"line_correlation", &layer->line_correlation},
+                 {"field_ns", &layer->field_ns},
+                 {"slope_ns", &layer->slope_ns}};
+  for (const auto& figure : figures) {
+    if (node[figure.key]) {
+      if (!ParseNumber(node, figure.key, context, figure.value, errors)) {
+        return false;
+      }
+      layer->enabled = true;
+    }
+  }
+  if (node["seed"]) {
+    try {
+      layer->seed = node["seed"].as<int64_t>();
+    } catch (const YAML::Exception&) {
+      errors->push_back(context + ".seed must be an integer.");
+      return false;
+    }
+    layer->seed_specified = true;
+  }
+  return true;
+}
+
+// Parses the project-wide `line_timing:` block: the per-line timing error of
+// the active picture left after time-base correction.
+bool ParseLineTiming(const YAML::Node& root, Project* project,
+                     std::vector<std::string>* errors) {
+  if (!root["line_timing"]) {
+    return true;
+  }
+
+  const YAML::Node node = root["line_timing"];
+  if (!node.IsMap()) {
+    errors->push_back("Top-level 'line_timing' must be a map/object.");
+    return false;
+  }
+
+  const std::set<std::string> keys = {
+      "line_ns", "line_correlation", "field_ns", "slope_ns",
+      "seed",    "include_burst",    "shared"};
+  ValidateAllowedKeys(node, keys, "line_timing", errors);
+  if (!errors->empty()) {
+    return false;
+  }
+  if (!node["line_ns"] && !node["field_ns"] && !node["slope_ns"] &&
+      !node["shared"]) {
+    errors->push_back(
+        "line_timing block must set at least one of: line_ns, field_ns, "
+        "slope_ns, shared.");
+    return false;
+  }
+
+  LineTimingParameters& line_timing = project->line_timing;
+  if (!ParseLineTimingLayer(node, "line_timing", &line_timing.capture,
+                            errors)) {
+    return false;
+  }
+  if (line_timing.capture.seed_specified && !line_timing.capture.enabled) {
+    errors->push_back(
+        "line_timing.seed seeds the capture layer, which sets none of: "
+        "line_ns, field_ns, slope_ns.");
+    return false;
+  }
+  if (node["include_burst"]) {
+    try {
+      line_timing.include_burst = node["include_burst"].as<bool>();
+    } catch (const YAML::Exception&) {
+      errors->push_back("line_timing.include_burst must be true or false.");
+      return false;
+    }
+  }
+
+  if (node["shared"]) {
+    const YAML::Node shared = node["shared"];
+    const std::string context = "line_timing.shared";
+    if (!shared.IsMap()) {
+      errors->push_back(context + " must be a map/object.");
+      return false;
+    }
+    ValidateAllowedKeys(
+        shared, {"line_ns", "line_correlation", "field_ns", "slope_ns", "seed"},
+        context, errors);
+    if (!errors->empty()) {
+      return false;
+    }
+    if (!shared["line_ns"] && !shared["field_ns"] && !shared["slope_ns"]) {
+      errors->push_back(context +
+                        " must set at least one of: line_ns, field_ns, "
+                        "slope_ns.");
+      return false;
+    }
+    if (!ParseLineTimingLayer(shared, context, &line_timing.shared, errors)) {
+      return false;
+    }
+    line_timing.shared.enabled = true;
+  }
+  line_timing.enabled = true;
+  return true;
+}
+
 // Parses the project-wide `line_injections:` block: the VITS test-signal set
 // and its placement policy.
 bool ParseProjectLineInjections(const YAML::Node& root, Project* project,
@@ -1609,8 +1718,9 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
     }
 
     const std::set<std::string> root_keys = {
-        "project",   "cvbs_presets", "output",       "line_injections",
-        "laserdisc", "channel",      "chroma_error", "sections"};
+        "project",         "cvbs_presets", "output",
+        "line_injections", "laserdisc",    "channel",
+        "chroma_error",    "line_timing",  "sections"};
     ValidateAllowedKeys(root, root_keys, "Top-level YAML", &result.errors);
     if (!result.errors.empty()) {
       return result;
@@ -1718,6 +1828,10 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
     }
 
     if (!ParseChromaError(root, &result.project, &result.errors)) {
+      return result;
+    }
+
+    if (!ParseLineTiming(root, &result.project, &result.errors)) {
       return result;
     }
 

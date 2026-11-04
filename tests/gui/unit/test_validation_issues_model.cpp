@@ -219,6 +219,13 @@ TEST(ValidationIssuesModelTest, ImpairmentIssuesNavigateToTheirField) {
          p->chroma_error.gain = 2.0;
        },
        -1, IssueField::kChromaError},
+      {"line timing",
+       [](Project* p) {
+         p->line_timing.enabled = true;
+         p->line_timing.capture.enabled = true;
+         p->line_timing.capture.line_ns = 80.0;
+       },
+       -1, IssueField::kLineTiming},
   };
   for (const Case& test_case : cases) {
     SCOPED_TRACE(test_case.label);

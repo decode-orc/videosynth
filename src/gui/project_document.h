@@ -115,6 +115,7 @@ class ProjectDocument : public QObject {
   bool SetLaserdisc(const LaserdiscParameters& laserdisc);
   bool SetChannel(const ChannelParameters& channel);
   bool SetChromaError(const ChromaErrorParameters& chroma_error);
+  bool SetLineTiming(const LineTimingParameters& line_timing);
 
   // Inserts at `index`, or appends when index == -1 or index == count.
   bool InsertSection(int index, Section section);

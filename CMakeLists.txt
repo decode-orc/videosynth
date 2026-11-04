@@ -170,6 +170,8 @@ add_library(videosynth_core
     src/replay_channel_filter.cpp
     src/field_offset_filter.cpp
     src/chroma_error_stage.cpp
+    src/line_timing_stage.cpp
+    src/variable_delay_interpolator.cpp
     src/edge_smear_filter.cpp
     src/luma_bandwidth_filter.cpp
     src/picture_response_filter.cpp

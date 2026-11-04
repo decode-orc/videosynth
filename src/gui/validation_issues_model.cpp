@@ -51,6 +51,9 @@ IssueField ClassifyIssueField(const std::string& message) {
   if (StartsWith(message, "Chroma error validation error")) {
     return IssueField::kChromaError;
   }
+  if (StartsWith(message, "Line timing validation error")) {
+    return IssueField::kLineTiming;
+  }
   if (StartsWith(message, "Luma bandwidth validation error")) {
     return IssueField::kLumaBandwidth;
   }

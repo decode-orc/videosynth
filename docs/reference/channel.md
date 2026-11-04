@@ -71,9 +71,10 @@ The channel stage runs once per frame, between generation and noise:
 1. Generation
 2. **Channel**: the [LaserVision channel](laserdisc-channel.md) (FM beat, then group delay and replay response), then edge smear, then timing offset
 3. [Chroma error](chroma-error.md)
-4. Noise (capture layer, then shared layer)
-5. Dropouts
-6. Output
+4. [Line timing](line-timing.md)
+5. Noise (capture layer, then shared layer)
+6. Dropouts
+7. Output
 
 ## Rules
 

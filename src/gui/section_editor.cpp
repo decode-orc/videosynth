@@ -1629,6 +1629,7 @@ void SectionEditor::RevealField(IssueField field) {
     case IssueField::kNone:
     case IssueField::kChannel:
     case IssueField::kChromaError:
+    case IssueField::kLineTiming:
     case IssueField::kLaserdiscChannel:
     default:
       return;

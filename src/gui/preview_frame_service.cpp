@@ -65,6 +65,13 @@ bool SynthesizeWithPipelineStages(
   // random impairment, so it is previewed with the channel.
   context.chroma_error->ApplyChromaError(*context.project, *context.schedule,
                                          disc_frame, 1U, &out_frame->c_mv);
+  // The line timing error is the capture's time-base residual, previewed
+  // with the chroma error.
+  if (context.line_timing != nullptr) {
+    context.line_timing->ApplyLineTiming(*context.project, *context.schedule,
+                                         disc_frame, 1U, &out_frame->y_mv,
+                                         &out_frame->c_mv);
+  }
 
   if (options.apply_noise) {
     context.noise->InjectNoise(*context.project, *context.schedule, disc_frame,
@@ -270,6 +277,7 @@ void PreviewFrameService::StartWorker() {
     synthesis_context.generation = &context->generation;
     synthesis_context.channel = &context->channel;
     synthesis_context.chroma_error = &context->chroma_error;
+    synthesis_context.line_timing = &context->line_timing;
     synthesis_context.noise = &context->noise;
     synthesis_context.dropouts = &context->dropouts;
     synthesis_context.source_provider = &context->source_provider;

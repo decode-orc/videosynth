@@ -989,6 +989,53 @@ struct ChromaErrorParameters {
   bool include_burst = false;
 };
 
+// Default line_timing.line_correlation: an uncorrelated per-line error.
+constexpr double kLineTimingCorrelationDefault = 0.0;
+
+// One layer of the per-line timing error of the active picture: the residual
+// a time-base corrector leaves. Every figure is an r.m.s. in ns; zero leaves
+// that component out.
+//   offset(line) = field offset + within-field process, a first-order
+//                  (AR(1)) process along the field's lines;
+//   slope(line)  = a second AR(1) process with the same correlation: the
+//                  difference between the shifts of the line's two halves (a
+//                  velocity error, growing linearly along the line).
+struct LineTimingLayer {
+  // True when the layer is present: any of its keys was given (capture), or
+  // the `shared:` block was declared (pressing).
+  bool enabled = false;
+  // Within-field r.m.s. of each line's shift. Range [0, 50].
+  double line_ns = 0.0;
+  // Line-to-line correlation of the within-field and slope processes, along
+  // the lines of one field. Range [0, 0.99].
+  double line_correlation = kLineTimingCorrelationDefault;
+  // R.m.s. of the offset common to a whole field. Range [0, 50].
+  double field_ns = 0.0;
+  // R.m.s. difference between the shifts of the line's two halves. Range
+  // [0, 50].
+  double slope_ns = 0.0;
+  // Capture: when seed_specified is false, a random base seed captured when
+  // the stage is constructed is used instead, so each run draws differently.
+  // Pressing: required by validation, so every capture shares the draws.
+  bool seed_specified = false;
+  int64_t seed = 0;
+};
+
+// Per-line timing error of the active picture left after time-base
+// correction. The capture layer is keyed by output frame (one capture's
+// player and TBC); the shared layer is keyed by disc frame, so every capture
+// of one pressing carries the same recorded part. Sync, VBI and VITS lines
+// stay where they are; the burst moves only with include_burst.
+struct LineTimingParameters {
+  // Present when the project declares a `line_timing:` block.
+  bool enabled = false;
+  LineTimingLayer capture;
+  LineTimingLayer shared;
+  // Move each picture line's colour burst with the line, as a TBC that
+  // references the burst would see it.
+  bool include_burst = false;
+};
+
 struct Project {
   std::string name;
   std::string version;
@@ -1000,6 +1047,7 @@ struct Project {
   LaserdiscParameters laserdisc;
   ChannelParameters channel;
   ChromaErrorParameters chroma_error;
+  LineTimingParameters line_timing;
   std::vector<Section> sections;
 };
 
@@ -1272,12 +1320,26 @@ inline bool operator==(const ChromaErrorParameters& a,
          a.include_burst == b.include_burst;
 }
 
+inline bool operator==(const LineTimingLayer& a, const LineTimingLayer& b) {
+  return a.enabled == b.enabled && a.line_ns == b.line_ns &&
+         a.line_correlation == b.line_correlation && a.field_ns == b.field_ns &&
+         a.slope_ns == b.slope_ns && a.seed_specified == b.seed_specified &&
+         a.seed == b.seed;
+}
+
+inline bool operator==(const LineTimingParameters& a,
+                       const LineTimingParameters& b) {
+  return a.enabled == b.enabled && a.capture == b.capture &&
+         a.shared == b.shared && a.include_burst == b.include_burst;
+}
+
 inline bool operator==(const Project& a, const Project& b) {
   return a.name == b.name && a.version == b.version &&
          a.description == b.description && a.cvbs_presets == b.cvbs_presets &&
          a.output == b.output && a.line_injections == b.line_injections &&
          a.laserdisc == b.laserdisc && a.channel == b.channel &&
-         a.chroma_error == b.chroma_error && a.sections == b.sections;
+         a.chroma_error == b.chroma_error && a.line_timing == b.line_timing &&
+         a.sections == b.sections;
 }
 
 inline bool operator!=(const Project& a, const Project& b) { return !(a == b); }

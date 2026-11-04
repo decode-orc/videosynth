@@ -123,9 +123,10 @@ Each picture line always draws two values, phase then gain, whether or not each 
 1. Generation
 2. [LaserVision channel](laserdisc-channel.md) and [channel](channel.md)
 3. **Chroma error**
-4. Noise (capture layer, then shared layer)
-5. Dropouts
-6. Output
+4. [Line timing](line-timing.md)
+5. Noise (capture layer, then shared layer)
+6. Dropouts
+7. Output
 
 The chroma error runs after the channel, so pressing impairments are computed from error-free chroma, and before noise, so the noise is not rotated.
 

@@ -295,6 +295,18 @@ bool ProjectDocument::SetChromaError(
       QStringLiteral("Edit chroma error")));
 }
 
+bool ProjectDocument::SetLineTiming(const LineTimingParameters& line_timing) {
+  if (project_.line_timing == line_timing) {
+    return false;
+  }
+  return ApplyCommand(std::make_unique<SwapValueCommand<LineTimingParameters>>(
+      +[](Project& project) -> LineTimingParameters& {
+        return project.line_timing;
+      },
+      line_timing, DocumentChange::Kind::kProjectSettings,
+      QStringLiteral("Edit line timing")));
+}
+
 bool ProjectDocument::InsertSection(int index, Section section) {
   if (index == -1) {
     index = section_count();
