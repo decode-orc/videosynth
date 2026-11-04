@@ -369,6 +369,11 @@ TEST_F(ProjectDocumentTest, ImpairmentFieldEditsUndoAndRedo) {
       [](Section* s) { s->luma_bandwidth.enabled = true; },
       [](Section* s) { s->luma_bandwidth.cutoff_mhz = 3.0; },
       [](Section* s) { s->luma_bandwidth.transition_mhz = 0.8; },
+      [](Section* s) { s->picture_response.enabled = true; },
+      [](Section* s) {
+        s->picture_response.preset = PictureResponsePreset::kDomesday;
+      },
+      [](Section* s) { s->picture_response.vertical_db = {{0.25, -3.0}}; },
   };
   for (const Edit edit : edits) {
     ExpectSectionEditUndoesAndRedoes(&document_, edit);

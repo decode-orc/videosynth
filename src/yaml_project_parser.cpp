@@ -445,6 +445,86 @@ bool ParseLumaBandwidth(const YAML::Node& node,
   return true;
 }
 
+// Parses a `vertical_db:` curve: a sequence of [cycles_per_row, dB] pairs.
+// Value ranges and ordering are checked by the validator.
+bool ParseVerticalResponseCurve(const YAML::Node& curve_node,
+                                const std::string& context,
+                                std::vector<VerticalResponsePoint>* curve,
+                                std::vector<std::string>* errors) {
+  if (!curve_node.IsSequence()) {
+    errors->push_back(
+        context +
+        " must be a sequence of [cycles_per_row, relative_db] pairs.");
+    return false;
+  }
+  curve->clear();
+  for (const YAML::Node& point_node : curve_node) {
+    if (!point_node.IsSequence() || point_node.size() != 2U) {
+      errors->push_back(
+          context + " entries must be [cycles_per_row, relative_db] pairs.");
+      return false;
+    }
+    try {
+      curve->push_back(VerticalResponsePoint{point_node[0].as<double>(),
+                                             point_node[1].as<double>()});
+    } catch (const YAML::Exception&) {
+      errors->push_back(context + " entries must be numeric pairs.");
+      return false;
+    }
+  }
+  return true;
+}
+
+// Parses `section.picture_response:`: a preset name, or a map of
+// horizontal_db / vertical_db curves.
+bool ParsePictureResponse(const YAML::Node& node,
+                          PictureResponseParameters* response,
+                          std::vector<std::string>* errors) {
+  const std::string context = "section.picture_response";
+  *response = PictureResponseParameters{};
+  if (node.IsScalar()) {
+    const std::string name = node.as<std::string>("");
+    if (name != "domesday") {
+      errors->push_back(context +
+                        " must be the preset name 'domesday' or a map of "
+                        "horizontal_db / vertical_db curves; got '" +
+                        name + "'.");
+      return false;
+    }
+    response->preset = PictureResponsePreset::kDomesday;
+    response->enabled = true;
+    return true;
+  }
+  if (!node.IsMap()) {
+    errors->push_back(context +
+                      " must be a preset name or a map/object of curves.");
+    return false;
+  }
+  const std::set<std::string> keys = {"horizontal_db", "vertical_db"};
+  ValidateAllowedKeys(node, keys, context, errors);
+  if (!errors->empty()) {
+    return false;
+  }
+  if (!node["horizontal_db"] && !node["vertical_db"]) {
+    errors->push_back(context +
+                      " must set at least one of: horizontal_db, vertical_db.");
+    return false;
+  }
+  if (node["horizontal_db"] &&
+      !ParseNoiseSpectrum(node["horizontal_db"], context + ".horizontal_db",
+                          &response->horizontal_db, errors)) {
+    return false;
+  }
+  if (node["vertical_db"] &&
+      !ParseVerticalResponseCurve(node["vertical_db"], context + ".vertical_db",
+                                  &response->vertical_db, errors)) {
+    return false;
+  }
+  response->preset = PictureResponsePreset::kCustom;
+  response->enabled = true;
+  return true;
+}
+
 // Reads a string-valued key into *value. Returns false, with an error naming
 // the key, when the value is not a scalar.
 bool ParseScalarString(const YAML::Node& node, const std::string& key,
@@ -1663,6 +1743,7 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
                                                   "end_frame",
                                                   "cadence",
                                                   "luma_bandwidth",
+                                                  "picture_response",
                                                   "horizontal_resample",
                                                   "chroma_line_sign",
                                                   "noise",
@@ -1773,6 +1854,12 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
       if (section_node["luma_bandwidth"] &&
           !ParseLumaBandwidth(section_node["luma_bandwidth"],
                               &section.luma_bandwidth, &result.errors)) {
+        return result;
+      }
+
+      if (section_node["picture_response"] &&
+          !ParsePictureResponse(section_node["picture_response"],
+                                &section.picture_response, &result.errors)) {
         return result;
       }
 

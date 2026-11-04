@@ -322,6 +322,44 @@ struct LumaBandwidthParameters {
   double transition_mhz = kLumaBandwidthTransitionDefaultMhz;
 };
 
+// One breakpoint of a vertical picture response: a gain in dB at a vertical
+// frequency in cycles per frame row (0.5 is the row Nyquist frequency).
+// Breakpoints are joined by straight lines in dB against cycles/row; the end
+// values are held beyond the first and last points.
+struct VerticalResponsePoint {
+  // Valid range: [0.0, 0.5].
+  double cycles_per_row = 0.0;
+  // Valid range: [-60.0, +20.0].
+  double relative_db = 0.0;
+};
+
+// Where a section's picture response curves come from (YAML
+// `picture_response:` as a preset name, or as a map of curves).
+enum class PictureResponsePreset {
+  // The section's own horizontal_db / vertical_db curves.
+  kCustom,
+  // Programme material as mastered for LaserVision: the BBC Domesday
+  // camera and PAL chain measured against Test Card F.
+  kDomesday,
+};
+
+// Per-section picture response: a gentle, linear-phase, separable shaping of
+// the active picture luma that models the source chain (camera aperture,
+// caption generator, flicker filter). The vertical part acts on the rows of
+// each progressive source picture before it is split into fields; the
+// horizontal part acts on each line before the luma bandwidth limit. Both are
+// normalised to unit gain at zero frequency, so only the shape of a curve
+// matters. Sync, VBI, VITS, chroma and OSD are not filtered; the picture
+// truth carries the response.
+struct PictureResponseParameters {
+  bool enabled = false;
+  PictureResponsePreset preset = PictureResponsePreset::kCustom;
+  // kCustom only. An empty curve leaves that direction unfiltered; at least
+  // one must be set.
+  std::vector<NoiseSpectrumPoint> horizontal_db;
+  std::vector<VerticalResponsePoint> vertical_db;
+};
+
 // How the source raster's active width is mapped onto the 4fsc active window
 // (YAML `horizontal_resample:`). kNearest holds each source pixel for the
 // samples that fall inside it (a zero-order hold); kBandlimited interpolates
@@ -688,6 +726,7 @@ struct Section {
   bool end_frame_specified = false;
   CadenceParameters cadence = {};
   LumaBandwidthParameters luma_bandwidth = {};
+  PictureResponseParameters picture_response = {};
   HorizontalResample horizontal_resample = HorizontalResample::kNearest;
   std::vector<ChromaLineSignRegion> chroma_line_sign = {};
   NoiseParameters noise = {};
@@ -1038,6 +1077,17 @@ inline bool operator==(const LumaBandwidthParameters& a,
          a.transition_mhz == b.transition_mhz;
 }
 
+inline bool operator==(const VerticalResponsePoint& a,
+                       const VerticalResponsePoint& b) {
+  return a.cycles_per_row == b.cycles_per_row && a.relative_db == b.relative_db;
+}
+
+inline bool operator==(const PictureResponseParameters& a,
+                       const PictureResponseParameters& b) {
+  return a.enabled == b.enabled && a.preset == b.preset &&
+         a.horizontal_db == b.horizontal_db && a.vertical_db == b.vertical_db;
+}
+
 inline bool operator==(const ChromaLineSignRegion& a,
                        const ChromaLineSignRegion& b) {
   return a.x == b.x && a.y == b.y && a.width == b.width &&
@@ -1121,6 +1171,7 @@ inline bool operator==(const Section& a, const Section& b) {
          a.start_frame == b.start_frame && a.end_frame == b.end_frame &&
          a.end_frame_specified == b.end_frame_specified &&
          a.cadence == b.cadence && a.luma_bandwidth == b.luma_bandwidth &&
+         a.picture_response == b.picture_response &&
          a.horizontal_resample == b.horizontal_resample &&
          a.chroma_line_sign == b.chroma_line_sign && a.noise == b.noise &&
          a.dropouts == b.dropouts && a.osd == b.osd &&

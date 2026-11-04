@@ -299,6 +299,9 @@ Players and transfers differ in how much luma detail they pass. A section's `lum
 
 The [band-limited sets](../misc/example-projects.md#band-limited-luma) play a multi-burst at three bandwidths on PAL, NTSC and PAL-M. See [sections](../reference/sections.md#luma_bandwidth) for the full reference.
 
+!!! note
+    `luma_bandwidth` models the player or transfer: a cutoff. The softness of the programme material itself (a camera's aperture, a caption generator, the production chain) is a gentle horizontal and vertical roll-off instead; use [`picture_response`](video-signal.md#picture-response) for that. A section can have both: the picture response is applied first.
+
 ## A worked example
 
 Modelling a disc that starts clean and degrades:

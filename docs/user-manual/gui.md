@@ -147,6 +147,8 @@ Unticking it clears the section's disc area and codes. See [Laserdisc discs](las
 
 **Luma bandwidth limit** — a low-pass on the picture luma, set by its **cutoff** (the −6 dB point) and **transition width**. The cutoff's upper limit follows the standard and the transition width. See [Luma bandwidth](impairments.md#luma-bandwidth).
 
+**Picture response** — a camera-chain softening of the picture luma. **Response** picks the **Domesday** preset (selected when the group is ticked) or **Custom curves**, which shows a horizontal (MHz, dB) and a vertical (cycles per frame row, dB) breakpoint table, seeded with the Domesday curves. See [Picture response](video-signal.md#picture-response).
+
 **On-screen display** — the overlay list, with text, position, scale and foreground/background luma per overlay. The available substitution tokens are listed beneath the text field.
 
 **Noise injection** — two independent layers. See [Impairments](impairments.md).
@@ -205,7 +207,7 @@ Frames are cached, so scrubbing back and forth is cheap. When a project edit inv
 
 Validation runs continuously in the background, debounced so typing does not trigger a run per keystroke. The Issues dock lists every error and warning; the status bar summarises as *Project valid* or *n error(s), m warning(s)*.
 
-Double-clicking an issue selects the section it relates to and scrolls to the group the issue names: cadence, luma bandwidth, picture mapping, the capture or shared noise layer, or random or scratch dropouts. For a project-level issue it opens **Edit Project…**, scrolled to the **Channel**, **Chroma error** or **LaserVision channel** group when the issue is about one of them.
+Double-clicking an issue selects the section it relates to and scrolls to the group the issue names: cadence, luma bandwidth, picture response, picture mapping, the capture or shared noise layer, or random or scratch dropouts. For a project-level issue it opens **Edit Project…**, scrolled to the **Channel**, **Chroma error** or **LaserVision channel** group when the issue is about one of them.
 
 Errors block generation. Warnings do not — they flag things that are legal but probably not what you meant, such as a scratch whose lifespan is longer than the section it lives in.
 

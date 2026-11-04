@@ -42,6 +42,7 @@ Each entry in `sections:` may carry these optional keys, listed in [canonical or
 | `horizontal_resample` | Source-pixel to 4fsc-sample mapping | [sections](sections.md#horizontal_resample) |
 | `chroma_line_sign` | Per-region PAL chroma line sign | [sections](sections.md#chroma_line_sign) |
 | `luma_bandwidth` | Low-pass on the picture luma | [sections](sections.md#luma_bandwidth) |
+| `picture_response` | Camera-chain softening of the picture luma | [sections](sections.md#picture_response) |
 | `osd` | On-screen display overlays | [osd](section-osd.md) |
 | `noise` | Gaussian noise injection | [noise](section-noise.md) |
 | `dropouts` | Random and scratch dropouts | [dropouts](section-dropouts.md) |

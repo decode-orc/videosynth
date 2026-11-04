@@ -33,6 +33,7 @@ sections:
 | `horizontal_resample` | string | No | `nearest`, `bandlimited` ([horizontal mapping](#horizontal_resample)) | `nearest` |
 | `chroma_line_sign` | list | No | [chroma line sign regions](#chroma_line_sign) (PAL and PAL-M) | absent |
 | `luma_bandwidth` | map | No | [luma bandwidth limit](#luma_bandwidth) | absent |
+| `picture_response` | string or map | No | `domesday`, or a map of [picture response](#picture_response) curves | absent |
 | `osd` | map | No | [osd](section-osd.md) | absent |
 | `noise` | map | No | [noise](section-noise.md) | absent |
 | `dropouts` | map | No | [dropouts](section-dropouts.md) | absent |
@@ -222,6 +223,50 @@ A low-pass on the section's picture luma, as from a player or transfer with a li
 
 Validation: `cutoff_mhz` outside its range, or `transition_mhz` outside 0.1–2.0, is an error. `luma_bandwidth` without `cutoff_mhz`, a non-numeric value or another key is a parse error.
 
+## `picture_response`
+
+A gentle horizontal and vertical softening of the section's picture luma, as from a camera, caption generator and production chain. Optional — omit it to keep the source picture as sharp as it is. Unlike [`luma_bandwidth`](#luma_bandwidth), which is a cutoff, the response is a curve: it can describe a 2 dB shelf that falls to −10 dB over a few MHz.
+
+Give either the name of a preset:
+
+```yaml
+- name: Map
+  type: progressive
+  source: "{bundled}/exr/720x576/OSM_TOWN.exr"
+  duration_frames: 4
+  picture_response: domesday
+```
+
+or your own curves:
+
+```yaml
+  picture_response:
+    horizontal_db: [[0, 0], [2.5, -2], [4.0, -2], [4.75, -8], [5.25, -10]]
+    vertical_db: [[0, 0], [0.2, 0], [0.28, -4], [0.375, -10]]
+```
+
+| Key | Type | Required | Range | Description |
+|-----|------|----------|-------|-------------|
+| `horizontal_db` | list of `[MHz, dB]` | One of the two | MHz 0 to 2 f_sc, strictly ascending; dB −60 to +20 | Response along each line |
+| `vertical_db` | list of `[cycles/row, dB]` | One of the two | 0 to 0.5 cycles per frame row, strictly ascending; dB −60 to +20 | Response down the picture's rows |
+
+Breakpoints are joined by straight lines in dB, and the first and last values are held below the first and above the last point. A direction without a curve is not filtered.
+
+| Preset | Response |
+|--------|----------|
+| `domesday` | Programme material as mastered for LaserVision: the BBC Domesday disc's Test Card F against the bundled `TESTCARD-F`. Horizontally flat to 2.25 MHz, about −2.2 dB from 2.75 to 3.75 MHz, then −3.1 dB at 4.25, −8.4 dB at 4.75, −9.9 dB at 5.25 and −11 dB from 5.75 MHz. Vertically flat to 0.2 cycles per row, −4.5 dB at 0.27, −5 dB at 0.34, −10 dB at 0.38 and −10.4 dB at 0.5. |
+
+- Both parts are linear-phase FIRs (127 taps horizontally, 31 rows vertically), frequency-sampled from the curve and Hann-windowed. They are normalised to unit gain at zero frequency, so flat areas and picture levels pass unchanged and only the shape of a curve matters.
+- The vertical part filters the rows of each progressive source picture before it is split into fields, as an interlaced camera's vertical aperture or a graphics flicker filter would. On a 2:3 [cadence](#cadence) each film frame is filtered on its own.
+- The horizontal part filters each active line across the active window after the source pixels are mapped to 4fsc samples, and before any [`luma_bandwidth`](#luma_bandwidth) limit.
+- Beyond the ends of a line, and above the top or below the bottom of the picture, the edge samples and rows are repeated, so the edges of the picture do not ring.
+- Only the luma is filtered. Sync, blanking, the VBI, the [VITS](vits-types.md) lines and the chroma are bit-identical to a section without the block, and [OSD](section-osd.md) text is drawn afterwards and stays sharp.
+- The [picture truth](output.md#truth) includes the response, so a decoder is never scored against detail that was never modulated.
+
+The `domesday` figures were measured on PAL; the curves are in MHz and cycles per row and apply unchanged to NTSC and PAL-M. Measured against the bundled `TESTCARD-F`, the preset's band ratios match the disc's within 0.5 dB in every horizontal band from 0.5 to 5.5 MHz and in the vertical bands 1/4–5/16, 3/8–7/16 and 7/16–1/2 cycles per row. The disc's 5/16–3/8 figure (−1.6 dB) rises above both of its neighbours, which no camera aperture does; the preset is a monotonic roll-off and gives about −8 dB there.
+
+Validation: an out-of-range or non-ascending breakpoint, or a map with neither curve, is an error. A preset name other than `domesday`, a curve that is not a list of numeric pairs, or another key is a parse error.
+
 ## Section sub-blocks
 
 Each has its own reference page:
@@ -247,4 +292,5 @@ All are optional, and only blocks that are explicitly set are written back out b
 - `cadence` rules (above).
 - `chroma_line_sign` only on PAL and PAL-M, with every region inside the raster and following the switch on at least one component.
 - `luma_bandwidth` within its ranges (above).
+- `picture_response` curves within their ranges, strictly ascending (above).
 - CAV lead-in and lead-out minimum durations (warnings; see [section `laserdisc`](section-laserdisc.md#area)).

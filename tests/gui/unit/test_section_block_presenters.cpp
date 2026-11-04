@@ -17,6 +17,7 @@
 #include "project_templates.h"
 #include "section_block_presenters.h"
 #include "videosynth/model.h"
+#include "videosynth/picture_response_filter.h"
 #include "videosynth/project_validator.h"
 #include "videosynth/yaml_project_emitter.h"
 #include "videosynth/yaml_project_parser.h"
@@ -375,6 +376,101 @@ TEST(SectionBlockPresenterTest, LumaBandwidthLimitsMirrorValidator) {
         editor_limits::kLumaBandwidthTransitionMaxMhz + 0.01;
     EXPECT_FALSE(ProjectIsValid(project, nullptr));
   }
+}
+
+TEST(SectionBlockPresenterTest, PictureResponseEnableSelectsTheDomesdayPreset) {
+  for (const Standard standard :
+       {Standard::kPal, Standard::kNtsc, Standard::kPalM}) {
+    SCOPED_TRACE(StandardToString(standard));
+    Project project = MakeValidProject();
+    project.cvbs_presets.video_standard_preset = standard;
+    Section& section = project.sections[0];
+    SetPictureResponseEnabled(&section, true);
+    EXPECT_TRUE(section.picture_response.enabled);
+    EXPECT_EQ(section.picture_response.preset,
+              PictureResponsePreset::kDomesday);
+    std::string error;
+    EXPECT_TRUE(ProjectIsValid(project, &error)) << error;
+    EXPECT_EQ(RoundTrip(project), project);
+    EXPECT_NE(EmitYaml(project).find("picture_response: domesday"),
+              std::string::npos);
+
+    SetPictureResponseEnabled(&section, false);
+    EXPECT_EQ(section.picture_response, PictureResponseParameters{});
+    EXPECT_EQ(EmitYaml(project).find("picture_response"), std::string::npos);
+  }
+}
+
+TEST(SectionBlockPresenterTest, PictureResponseCustomModeStartsFromThePreset) {
+  Project project = MakeValidProject();
+  Section& section = project.sections[0];
+  // A disabled block ignores mode changes.
+  SetPictureResponsePreset(&section, PictureResponsePreset::kCustom);
+  EXPECT_FALSE(section.picture_response.enabled);
+
+  SetPictureResponseEnabled(&section, true);
+  SetPictureResponsePreset(&section, PictureResponsePreset::kCustom);
+  EXPECT_EQ(section.picture_response.preset, PictureResponsePreset::kCustom);
+  EXPECT_EQ(section.picture_response.horizontal_db,
+            DomesdayHorizontalResponseDb());
+  EXPECT_EQ(section.picture_response.vertical_db, DomesdayVerticalResponseDb());
+  std::string error;
+  EXPECT_TRUE(ProjectIsValid(project, &error)) << error;
+  EXPECT_EQ(RoundTrip(project), project);
+
+  // Edited custom curves survive a repeated custom selection.
+  section.picture_response.vertical_db = {{0.0, 0.0}, {0.5, -6.0}};
+  SetPictureResponsePreset(&section, PictureResponsePreset::kCustom);
+  EXPECT_EQ(section.picture_response.vertical_db.size(), 2U);
+
+  SetPictureResponsePreset(&section, PictureResponsePreset::kDomesday);
+  EXPECT_TRUE(section.picture_response.horizontal_db.empty());
+  EXPECT_TRUE(section.picture_response.vertical_db.empty());
+}
+
+TEST(SectionBlockPresenterTest, PictureResponseLimitsMirrorValidator) {
+  Project project = MakeValidProject();
+  Section& section = project.sections[0];
+  SetPictureResponseEnabled(&section, true);
+  SetPictureResponsePreset(&section, PictureResponsePreset::kCustom);
+  PictureResponseParameters& response = section.picture_response;
+  const double nyquist_mhz = NoiseSpectrumMaxFrequencyMhz(Standard::kPal);
+  response.horizontal_db = {
+      {0.0, editor_limits::kPictureResponseDbMax},
+      {nyquist_mhz, editor_limits::kPictureResponseDbMin}};
+  response.vertical_db = {
+      {0.0, editor_limits::kPictureResponseDbMin},
+      {editor_limits::kPictureResponseVerticalMaxCyclesPerRow,
+       editor_limits::kPictureResponseDbMax}};
+  std::string error;
+  EXPECT_TRUE(ProjectIsValid(project, &error)) << error;
+  response.horizontal_db[1].frequency_mhz = nyquist_mhz + 0.01;
+  EXPECT_FALSE(ProjectIsValid(project, nullptr));
+  response.horizontal_db[1].frequency_mhz = nyquist_mhz;
+  response.vertical_db[1].cycles_per_row += 0.01;
+  EXPECT_FALSE(ProjectIsValid(project, nullptr));
+  response.vertical_db[1].cycles_per_row -= 0.01;
+  response.vertical_db[0].relative_db -= 0.5;
+  EXPECT_FALSE(ProjectIsValid(project, nullptr));
+}
+
+TEST(SectionBlockPresenterTest, VerticalResponseCurvePointsConvertBothWays) {
+  const std::vector<VerticalResponsePoint> points = {{0.1, -1.0}, {0.4, -9.5}};
+  const std::vector<CurvePoint> curve = VerticalResponseToCurvePoints(points);
+  ASSERT_EQ(curve.size(), 2U);
+  EXPECT_EQ(curve[1], (CurvePoint{0.4, -9.5}));
+  EXPECT_EQ(CurvePointsToVerticalResponse(curve), points);
+}
+
+TEST(SectionBlockPresenterTest, ApplySectionEditDeltaMirrorsPictureResponse) {
+  Section before;
+  Section after = before;
+  SetPictureResponseEnabled(&after, true);
+  Section target;
+  target.name = "Other";
+  const Section mirrored = ApplySectionEditDelta(before, after, target);
+  EXPECT_EQ(mirrored.picture_response, after.picture_response);
+  EXPECT_EQ(mirrored.name, "Other");
 }
 
 TEST(SectionBlockPresenterTest, ApplySectionEditDeltaMirrorsNoiseLayersApart) {

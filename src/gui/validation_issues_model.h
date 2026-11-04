@@ -29,6 +29,7 @@ enum class IssueField {
   kRandomDropouts,
   kScratchDropouts,
   kLumaBandwidth,
+  kPictureResponse,
   kChannel,
   kChromaError,
   kLaserdiscChannel,

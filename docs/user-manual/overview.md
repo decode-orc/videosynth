@@ -89,6 +89,7 @@ A frame template cache holds the parts of a frame that do not change between fra
 | *LaserDisc:* FM beat, group delay, replay response, field-2 offset | Project | [`laserdisc.channel`](../reference/laserdisc-channel.md) |
 | *LaserDisc:* disc area, biphase codes | Section | [`sections[].laserdisc`](../reference/section-laserdisc.md) |
 | Noise, dropouts, luma bandwidth | Section | [`noise`](../reference/section-noise.md), [`dropouts`](../reference/section-dropouts.md), [`luma_bandwidth`](../reference/sections.md#luma_bandwidth) |
+| Camera-chain picture softening | Section | [`picture_response`](../reference/sections.md#picture_response) |
 | Audio channel pairs | Section | [`audio`](../reference/section-audio.md) |
 | On-screen display overlays | Section | [`osd`](../reference/section-osd.md) |
 

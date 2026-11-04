@@ -2,8 +2,8 @@
  * File:        section_block_presenters.h
  * Module:      gui
  * Purpose:     Widget-free mapping layer for the optional per-section YAML
- *              blocks (audio, noise, dropouts, luma bandwidth, OSD,
- *              laserdisc)
+ *              blocks (audio, noise, dropouts, luma bandwidth, picture
+ *              response, OSD, laserdisc)
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "project_settings_presenter.h"
 #include "videosynth/interfaces.h"
 #include "videosynth/model.h"
 
@@ -50,6 +51,12 @@ inline constexpr int kDropoutScaleMax = 20;
 inline constexpr double kLumaBandwidthCutoffMinMhz = 0.5;
 inline constexpr double kLumaBandwidthTransitionMinMhz = 0.1;
 inline constexpr double kLumaBandwidthTransitionMaxMhz = 2.0;
+// Picture response: breakpoint bounds enforced by ValidatePictureResponse.
+// Horizontal frequencies run from 0 MHz to the 4fsc Nyquist frequency of the
+// project standard; vertical ones from 0 to 0.5 cycles per frame row.
+inline constexpr double kPictureResponseDbMin = -60.0;
+inline constexpr double kPictureResponseDbMax = 20.0;
+inline constexpr double kPictureResponseVerticalMaxCyclesPerRow = 0.5;
 // OSD: glyph scale range enforced by ValidateOsdConfig (fg/bg levels are
 // discrete enums chosen from dropdowns, so no numeric bounds).
 inline constexpr int kOsdScaleMin = 1;
@@ -136,6 +143,22 @@ void SetLumaBandwidthEnabled(Section* section, bool enabled);
 // Highest cutoff the luma bandwidth limit accepts for `standard` with the
 // given transition width: 2 f_sc less half the transition, in MHz.
 double LumaBandwidthMaxCutoffMhz(Standard standard, double transition_mhz);
+
+// Enabling the picture response selects the `domesday` preset; disabling
+// resets the block so it is not emitted.
+void SetPictureResponseEnabled(Section* section, bool enabled);
+// Switches an enabled picture response between the preset and custom curves.
+// Switching to custom with no curves yet seeds them with the preset's, so the
+// editor starts from a validator-clean, realistic response; switching back to
+// the preset clears the custom curves.
+void SetPictureResponsePreset(Section* section, PictureResponsePreset preset);
+
+// Conversions between vertical picture response breakpoints and the generic
+// curve editor's points (x is cycles per frame row).
+std::vector<CurvePoint> VerticalResponseToCurvePoints(
+    const std::vector<VerticalResponsePoint>& points);
+std::vector<VerticalResponsePoint> CurvePointsToVerticalResponse(
+    const std::vector<CurvePoint>& points);
 
 // A freshly-enabled audio channel (validator-clean fixed-frequency sine).
 AudioParameters MakeDefaultAudioChannel();

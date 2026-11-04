@@ -25,6 +25,9 @@
 #include "validation_issues_model.h"
 
 class QCheckBox;
+namespace videosynth::gui {
+class CurvePointsEditor;
+}  // namespace videosynth::gui
 class QComboBox;
 class QDoubleSpinBox;
 class QFormLayout;
@@ -43,11 +46,11 @@ namespace videosynth::gui {
 // the section and commit through ProjectDocument::SetSection; optional YAML
 // blocks are toggled through the section_block_presenters helpers so
 // disabled blocks never emit defaults. Every optional block (audio, luma
-// bandwidth, each noise layer, each dropout type, OSD, LaserDisc) sits
-// in a checkable group whose contents
-// are hidden until the box is ticked, so an unused block collapses to a
-// single title row instead of cluttering the form. Source probing runs on the
-// SourceProbeController worker and never blocks the UI.
+// bandwidth, picture response, each noise layer, each dropout type, OSD,
+// LaserDisc) sits in a checkable group whose contents are hidden until the box
+// is ticked, so an unused block collapses to a single title row instead of
+// cluttering the form. Source probing runs on the SourceProbeController worker
+// and never blocks the UI.
 //
 // Multi-select batch editing: when the sections list holds a multi-row
 // selection (SetSelectedSections), the editor still displays the current
@@ -86,6 +89,7 @@ class SectionEditor : public QWidget {
   QWidget* BuildProbeGroup();
   QWidget* BuildAudioGroup();
   QWidget* BuildLumaBandwidthGroup();
+  QWidget* BuildPictureResponseGroup();
   QWidget* BuildPictureGroup();
   QWidget* BuildNoiseGroup();
   QWidget* BuildDropoutsGroup();
@@ -240,6 +244,13 @@ class SectionEditor : public QWidget {
   QGroupBox* luma_bandwidth_group_ = nullptr;
   QDoubleSpinBox* luma_cutoff_spin_ = nullptr;
   QDoubleSpinBox* luma_transition_spin_ = nullptr;
+
+  // Picture response: preset or custom horizontal / vertical curves.
+  QGroupBox* picture_response_group_ = nullptr;
+  QComboBox* picture_response_mode_combo_ = nullptr;
+  QWidget* picture_response_curves_ = nullptr;
+  CurvePointsEditor* picture_response_horizontal_editor_ = nullptr;
+  CurvePointsEditor* picture_response_vertical_editor_ = nullptr;
 
   // Picture mapping: horizontal resampling and chroma_line_sign regions.
   QGroupBox* picture_group_ = nullptr;

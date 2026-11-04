@@ -312,6 +312,18 @@ A region with both `u` and `v` left `normal` has no effect. Set `v: follow_switc
 
 That is what the bar is for. A correct PAL delay-line decoder averages the alternating component to grey; colour or "Venetian blinds" in the bar point at the decoder's delay line or demodulator, and a 2D decoder that separates by position alone will leave it coloured.
 
+### `picture_response must be the preset name 'domesday' or a map of horizontal_db / vertical_db curves`
+
+The only preset is `domesday`. For any other response, give the curves as a map: `picture_response: {horizontal_db: [[MHz, dB], ...], vertical_db: [[cycles/row, dB], ...]}`. See [picture_response](../reference/sections.md#picture_response).
+
+### `Picture response validation error: … must be in the range …` / `strictly ascending`
+
+Horizontal frequencies run from 0 MHz to 2 f_sc (8.867 MHz PAL, 7.159 MHz NTSC, 7.151 MHz PAL-M); vertical ones from 0 to 0.5 cycles per frame row. Levels must lie between −60 and +20 dB, and each curve's frequencies must increase from point to point.
+
+### A softened still looks no different below 2 MHz
+
+That is intended. The response is normalised to unit gain at zero frequency, and the `domesday` preset is flat up to 2.25 MHz horizontally and 0.2 cycles per row vertically. It removes the fine detail that real programme pictures lack, not the coarse detail they have.
+
 ### `noise_spread_db requires noise_db to be specified`
 
 `noise_spread_db` is relative to the floor, so it needs one. Add `noise_db`.

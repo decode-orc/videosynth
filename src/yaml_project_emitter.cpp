@@ -470,6 +470,34 @@ void EmitLumaBandwidth(YAML::Emitter& out,
   out << YAML::EndMap;
 }
 
+std::pair<double, double> VerticalResponseFields(
+    const VerticalResponsePoint& point) {
+  return {point.cycles_per_row, point.relative_db};
+}
+
+// Writes `picture_response:` as the preset name, or as its curves.
+void EmitPictureResponse(YAML::Emitter& out,
+                         const PictureResponseParameters& response) {
+  if (!response.enabled) {
+    return;
+  }
+  out << YAML::Key << "picture_response" << YAML::Value;
+  if (response.preset == PictureResponsePreset::kDomesday) {
+    out << "domesday";
+    return;
+  }
+  out << YAML::BeginMap;
+  if (!response.horizontal_db.empty()) {
+    EmitPointPairs(out, "horizontal_db", response.horizontal_db,
+                   ResponseFields);
+  }
+  if (!response.vertical_db.empty()) {
+    EmitPointPairs(out, "vertical_db", response.vertical_db,
+                   VerticalResponseFields);
+  }
+  out << YAML::EndMap;
+}
+
 // Writes `horizontal_resample:` unless it is the nearest-pixel default.
 void EmitHorizontalResample(YAML::Emitter& out, HorizontalResample resample) {
   if (resample == HorizontalResample::kNearest) {
@@ -685,6 +713,7 @@ void EmitSection(YAML::Emitter& out, const Section& section) {
   EmitHorizontalResample(out, section.horizontal_resample);
   EmitChromaLineSign(out, section.chroma_line_sign);
   EmitLumaBandwidth(out, section.luma_bandwidth);
+  EmitPictureResponse(out, section.picture_response);
   EmitOsd(out, section.osd);
   EmitNoise(out, section.noise);
   EmitDropouts(out, section.dropouts);

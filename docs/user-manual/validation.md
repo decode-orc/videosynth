@@ -117,6 +117,13 @@ These apply only to a project with a [`laserdisc:`](../reference/laserdisc.md) b
 - `luma_bandwidth.transition_mhz` in 0.1–2.0; `luma_bandwidth.cutoff_mhz` from 0.5 MHz up to 2 f_sc less half the transition.
 - `luma_bandwidth` without `cutoff_mhz`, a non-numeric value or an unknown key is a parse error.
 
+### Picture response
+
+- `picture_response.horizontal_db`: frequencies from 0 MHz to 2 f_sc, strictly ascending; levels −60 to +20 dB.
+- `picture_response.vertical_db`: frequencies from 0 to 0.5 cycles per frame row, strictly ascending; levels −60 to +20 dB.
+- A `picture_response` map with neither curve is an error.
+- A preset name other than `domesday`, a curve that is not a list of `[x, dB]` numeric pairs, or an unknown key is a parse error.
+
 ### Picture mapping
 
 - `horizontal_resample` other than `nearest` or `bandlimited` is a parse error.

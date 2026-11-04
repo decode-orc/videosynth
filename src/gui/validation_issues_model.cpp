@@ -54,6 +54,9 @@ IssueField ClassifyIssueField(const std::string& message) {
   if (StartsWith(message, "Luma bandwidth validation error")) {
     return IssueField::kLumaBandwidth;
   }
+  if (StartsWith(message, "Picture response validation error")) {
+    return IssueField::kPictureResponse;
+  }
   if (StartsWith(message, "Picture validation error")) {
     return IssueField::kPicture;
   }

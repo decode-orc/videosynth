@@ -1792,6 +1792,52 @@ void ValidateLumaBandwidth(const videosynth::Section& section,
   }
 }
 
+std::pair<double, double> VerticalResponseCurveFields(
+    const videosynth::VerticalResponsePoint& point) {
+  return {point.cycles_per_row, point.relative_db};
+}
+
+// Checks a section's custom picture response curves. A preset carries its own
+// curves and needs no checks.
+void ValidatePictureResponse(const videosynth::Section& section,
+                             const videosynth::Project& project,
+                             videosynth::ValidationResult* result) {
+  const videosynth::PictureResponseParameters& response =
+      section.picture_response;
+  if (result == nullptr || !response.enabled ||
+      response.preset != videosynth::PictureResponsePreset::kCustom) {
+    return;
+  }
+  const std::string prefix =
+      "Picture response validation error in section '" + section.name + "': ";
+  if (response.horizontal_db.empty() && response.vertical_db.empty()) {
+    result->is_valid = false;
+    result->errors.push_back(
+        prefix +
+        "picture_response must set at least one of horizontal_db, "
+        "vertical_db.");
+    return;
+  }
+  const double nyquist_mhz =
+      videosynth::GetTimingConstants(project.cvbs_presets.video_standard_preset)
+          .sample_rate_4fsc_hz /
+      2.0e6;
+  // A source chain may fall far but should not boost detail by more than a
+  // modest aperture correction.
+  if (!response.horizontal_db.empty()) {
+    const CurveBounds bounds = {"frequency_mhz", 0.0,   nyquist_mhz,
+                                "relative_db",   -60.0, 20.0};
+    ValidateCurve(response.horizontal_db, prefix + "horizontal_db", bounds,
+                  ResponseCurveFields, result);
+  }
+  if (!response.vertical_db.empty()) {
+    const CurveBounds bounds = {"cycles_per_row", 0.0,   0.5,
+                                "relative_db",    -60.0, 20.0};
+    ValidateCurve(response.vertical_db, prefix + "vertical_db", bounds,
+                  VerticalResponseCurveFields, result);
+  }
+}
+
 // Source raster height for a standard: 576 rows on 625-line systems, 486 on
 // 525-line systems (the raster RasterMatchesStandard requires).
 int SourceRasterHeight(videosynth::Standard standard) {
@@ -2925,6 +2971,11 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
       }
 
       ValidateLumaBandwidth(section, project, &result);
+      if (!result.is_valid) {
+        break;
+      }
+
+      ValidatePictureResponse(section, project, &result);
       if (!result.is_valid) {
         break;
       }

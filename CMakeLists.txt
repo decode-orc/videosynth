@@ -172,6 +172,7 @@ add_library(videosynth_core
     src/chroma_error_stage.cpp
     src/edge_smear_filter.cpp
     src/luma_bandwidth_filter.cpp
+    src/picture_response_filter.cpp
     src/horizontal_resampler.cpp
     src/picture_truth_writer.cpp
     src/fm_beat_model.cpp

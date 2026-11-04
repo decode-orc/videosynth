@@ -147,7 +147,7 @@ NTSC only — enabling it on a PAL, PAL-M or SECAM project is a validation error
 
 ## Active picture
 
-Each active line takes one row of the source picture. The upper field (field 1 on 625-line systems, field 2 on 525-line) reads the even rows and the other field the odd rows. The 720 source pixels are mapped onto the 52 µs active window at 4fsc, the luma is painted as millivolts, and the two colour-difference components are low-pass filtered (33-tap Hamming-windowed 1.3 MHz for PAL and PAL-M, 17-tap 1.2 MHz for NTSC) and modulated onto the subcarrier. Two section keys change that path, and one output option records its result.
+Each active line takes one row of the source picture. The upper field (field 1 on 625-line systems, field 2 on 525-line) reads the even rows and the other field the odd rows. The 720 source pixels are mapped onto the 52 µs active window at 4fsc, the luma is painted as millivolts, and the two colour-difference components are low-pass filtered (33-tap Hamming-windowed 1.3 MHz for PAL and PAL-M, 17-tap 1.2 MHz for NTSC) and modulated onto the subcarrier. Three section keys change that path, and one output option records its result.
 
 ### Horizontal mapping
 
@@ -156,6 +156,24 @@ By default each 4fsc sample takes the nearest source pixel at or to its left —
 [`horizontal_resample: bandlimited`](../reference/sections.md#horizontal_resample) replaces the hold with a polyphase Kaiser-windowed sinc at the source Nyquist frequency. It removes those images and the hold's in-band droop, for luma and chroma alike, and leaves flat areas and edge positions where the hold puts them. Use it for still-image decoder testing, where the cross-colour a decoder produces should come from the picture and not from the mapping.
 
 A [`luma_bandwidth`](../reference/sections.md#luma_bandwidth) limit removes the images above its cutoff, but not the droop, and it does not touch the chroma.
+
+### Picture response
+
+Real programme pictures are softer than a sharp still. A camera's aperture, a caption generator and the production chain all roll off fine detail before it reaches the disc. On the BBC Domesday discs, luma above 3.5 MHz carries a tenth of the share that sharp stills such as the bundled maps and text card carry, and there is far less detail between rows. A still that stands in for programme material should be softened the same way, or a decoder is rewarded for recovering detail no disc has.
+
+[`picture_response`](../reference/sections.md#picture_response) gives a section that softening, horizontally and vertically:
+
+```yaml
+  - name: TownMap
+    type: progressive
+    source: "{bundled}/exr/720x576/OSM_TOWN.exr"
+    duration_frames: 25
+    picture_response: domesday
+```
+
+- `domesday` is the measured Domesday camera and PAL chain: about −2 dB from 2.5 to 4 MHz, falling to −10 dB by 5.25 MHz, and −10 dB above 3/8 cycle per frame row. Custom `horizontal_db` and `vertical_db` curves describe any other chain.
+- The vertical part acts on the progressive picture's rows before it is split into fields, as an interlaced camera would.
+- Only the picture luma is shaped, and the [picture truth](#picture-truth) includes it. Leave stress patterns (zone plates, multi-bursts, edges) without the block: testing the limits is their purpose.
 
 ### PAL decoder-stress regions
 
@@ -168,7 +186,7 @@ The switch sign belongs to the line and flips every frame for a given frame line
 
 ### Picture truth
 
-[`output.truth: true`](../reference/output.md#truth) writes the Y, U and V that went into the modulator — after the horizontal mapping, the luma bandwidth limit, the chroma low-pass and any chroma line sign regions, and before any impairment — as planar `float32` at 4fsc over the active window, with a SQLite sidecar like the other `.meta` files. A decoder's output can then be scored against exactly what was encoded rather than against a re-derivation of videosynth's filters, which could drift silently from them. PAL, NTSC and PAL-M only; OSD text is not included. See [Output files](outputs.md#picture-truth).
+[`output.truth: true`](../reference/output.md#truth) writes the Y, U and V that went into the modulator — after the horizontal mapping, the picture response, the luma bandwidth limit, the chroma low-pass and any chroma line sign regions, and before any impairment — as planar `float32` at 4fsc over the active window, with a SQLite sidecar like the other `.meta` files. A decoder's output can then be scored against exactly what was encoded rather than against a re-derivation of videosynth's filters, which could drift silently from them. PAL, NTSC and PAL-M only; OSD text is not included. See [Output files](outputs.md#picture-truth).
 
 ## Field and line structure
 
