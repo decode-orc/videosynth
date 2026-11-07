@@ -176,8 +176,12 @@ reports that Domesday sectors 143–179 decode from captures.
    offset, Q control, Q mode) that is mutually exclusive with `efm_audio`, and a
    per-section "carries EFM data" toggle.
    *Accept:* presenter unit tests.
-   *Status:* not done. The GUI keeps `efm_data` settings it loads (the
-   emitter round-trips them) but cannot edit them.
+   *Status:* done. The project settings **EFM data (AIV / LV-ROM)** group
+   edits every `efm_data` key; each EFM use disables the other's enable
+   control, and unticking it clears the section flags in the same undo step.
+   The section editor's LaserDisc group has **Carries EFM data**, with a note
+   for the PAL analogue-audio conflict. Validation issues about `efm_data`
+   navigate to these controls.
 3. **Real-disc acceptance (manual, outside CI).** Domesday Community North
    image (SHA-256 `08594e1d…a157`) → `.efm` → decode-orc → `vfs-verifier`,
    and a VP415e data read and picture check.

@@ -25,9 +25,12 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QSpinBox>
 #include <QStandardItem>
 #include <QStandardItemModel>
 #include <QVBoxLayout>
+#include <algorithm>
+#include <initializer_list>
 #include <utility>
 
 #include "asset_roots.h"
@@ -664,6 +667,7 @@ QWidget* ProjectSettingsEditor::BuildLaserdiscGroup() {
   form->addRow(QString(), efm_hint_);
   layout->addLayout(form);
 
+  layout->addWidget(BuildEfmDataGroup(body));
   layout->addWidget(BuildLaserdiscChannelGroup(body));
   outer->addWidget(body);
 
@@ -688,6 +692,86 @@ QWidget* ProjectSettingsEditor::BuildLaserdiscGroup() {
   connect(efm_check_, &QCheckBox::toggled, this, commit);
   connect(efm_pair_combo_, &QComboBox::activated, this, commit);
   return laserdisc_group_;
+}
+
+QWidget* ProjectSettingsEditor::BuildEfmDataGroup(QWidget* parent) {
+  namespace limits = project_editor_limits;
+  // LaserDisc EFM data (AIV / LV-ROM): a sector image encoded as ECMA-130
+  // Mode 1 sectors in the EFM channel, locked to the pictures of the sections
+  // that carry it.
+  efm_data_group_ = new QGroupBox(tr("EFM data (AIV / LV-ROM)"), parent);
+  efm_data_group_->setCheckable(true);
+  efm_data_group_->setToolTip(
+      tr("Encode a sector image (2048 bytes per sector) as CD-ROM Mode 1 "
+         "sectors in the EFM channel, as AIV discs such as Domesday carry. "
+         "A disc has one EFM channel, so this and digital audio exclude each "
+         "other. Each section chooses whether it carries the data."));
+  auto* outer = new QVBoxLayout(efm_data_group_);
+  outer->setContentsMargins(0, 0, 0, 0);
+  auto* body = new QWidget(efm_data_group_);
+  auto* form = new QFormLayout(body);
+
+  efm_data_image_edit_ = new QLineEdit(body);
+  efm_data_image_edit_->setToolTip(
+      tr("The sector image: the user data of consecutive sectors, 2048 bytes "
+         "each. A relative path is relative to the project file."));
+  efm_data_browse_button_ = new QPushButton(tr("Browse…"), body);
+  auto* image_row = new QHBoxLayout();
+  image_row->addWidget(efm_data_image_edit_, 1);
+  image_row->addWidget(efm_data_browse_button_);
+  form->addRow(tr("Sector image:"), image_row);
+
+  efm_data_first_address_spin_ = new QSpinBox(body);
+  efm_data_first_address_spin_->setRange(0, limits::kEfmDataMaxSectorAddress);
+  efm_data_first_address_spin_->setSuffix(tr(" sectors"));
+  efm_data_first_address_spin_->setToolTip(
+      tr("The sector address of the image's first sector (75 sectors per "
+         "second)."));
+  form->addRow(tr("First address:"), efm_data_first_address_spin_);
+
+  efm_data_offset_spin_ = new QSpinBox(body);
+  efm_data_offset_spin_->setRange(0, limits::kEfmDataMaxSectorAddress);
+  efm_data_offset_spin_->setSuffix(tr(" sectors"));
+  efm_data_offset_spin_->setToolTip(
+      tr("How far a picture's sector addresses run ahead of its time. The "
+         "AIV rule is 150 (2 s): on PAL, picture p carries sectors 3p + 150 "
+         "to 3p + 152."));
+  form->addRow(tr("Picture offset:"), efm_data_offset_spin_);
+
+  efm_data_q_control_combo_ = new QComboBox(body);
+  efm_data_q_control_combo_->setToolTip(
+      tr("The CONTROL field of the Q channel: a data track, with digital "
+         "copying prohibited or permitted."));
+  form->addRow(tr("Q control:"), efm_data_q_control_combo_);
+
+  efm_data_q_mode_combo_ = new QComboBox(body);
+  efm_data_q_mode_combo_->setToolTip(
+      tr("The Q-channel mode. IEC 60856/60857 Amd 2 specify mode 4 for "
+         "LaserDisc; AIV discs such as Domesday predate those amendments and "
+         "record mode 1."));
+  form->addRow(tr("Q mode:"), efm_data_q_mode_combo_);
+  outer->addWidget(body);
+
+  efm_data_hint_ = new QLabel(efm_data_group_);
+  efm_data_hint_->setWordWrap(true);
+  outer->addWidget(efm_data_hint_);
+
+  const auto commit = [this] {
+    if (!updating_) {
+      CommitLaserdisc();
+    }
+  };
+  connect(efm_data_group_, &QGroupBox::toggled, body, &QWidget::setVisible);
+  connect(efm_data_group_, &QGroupBox::toggled, this, commit);
+  body->setVisible(efm_data_group_->isChecked());
+  connect(efm_data_image_edit_, &QLineEdit::editingFinished, this, commit);
+  connect(efm_data_browse_button_, &QPushButton::clicked, this,
+          &ProjectSettingsEditor::OnBrowseEfmDataImage);
+  connect(efm_data_first_address_spin_, &QSpinBox::valueChanged, this, commit);
+  connect(efm_data_offset_spin_, &QSpinBox::valueChanged, this, commit);
+  connect(efm_data_q_control_combo_, &QComboBox::activated, this, commit);
+  connect(efm_data_q_mode_combo_, &QComboBox::activated, this, commit);
+  return efm_data_group_;
 }
 
 QWidget* ProjectSettingsEditor::BuildLaserdiscChannelGroup(QWidget* parent) {
@@ -916,6 +1000,38 @@ void ProjectSettingsEditor::LoadLaserdisc(const Project& project) {
       efm_pair_combo_->findData(laserdisc.efm_audio.pair);
   efm_pair_combo_->setCurrentIndex(efm_pair_index >= 0 ? efm_pair_index : 0);
   efm_check_->setChecked(laserdisc.efm_audio.enabled);
+
+  const EfmDataOutput& efm_data = laserdisc.efm_data;
+  efm_data_group_->setChecked(efm_data.enabled);
+  efm_data_image_edit_->setText(QString::fromStdString(efm_data.image));
+  efm_data_first_address_spin_->setValue(efm_data.first_address);
+  efm_data_offset_spin_->setValue(efm_data.picture_offset_sectors);
+  efm_data_q_control_combo_->clear();
+  for (const EfmDataQControl control : state.efm_data_q_control_options) {
+    efm_data_q_control_combo_->addItem(control == EfmDataQControl::kData
+                                           ? tr("Data, copy prohibited")
+                                           : tr("Data, copy permitted"),
+                                       static_cast<int>(control));
+  }
+  efm_data_q_control_combo_->setCurrentIndex(
+      std::max(0, efm_data_q_control_combo_->findData(
+                      static_cast<int>(efm_data.q_control))));
+  efm_data_q_mode_combo_->clear();
+  for (const int mode : state.efm_data_q_mode_options) {
+    efm_data_q_mode_combo_->addItem(
+        mode == kEfmDataQModeLaserdisc
+            ? tr("4 (LaserDisc, IEC 60856/60857 Amd 2)")
+            : tr("%1 (compact disc, pre-standard AIV)").arg(mode),
+        mode);
+  }
+  int q_mode_index = efm_data_q_mode_combo_->findData(efm_data.q_mode);
+  if (q_mode_index < 0) {
+    // Preserve a value the validator rejects so the issues dock can say why.
+    efm_data_q_mode_combo_->addItem(QString::number(efm_data.q_mode),
+                                    efm_data.q_mode);
+    q_mode_index = efm_data_q_mode_combo_->count() - 1;
+  }
+  efm_data_q_mode_combo_->setCurrentIndex(q_mode_index);
 
   const LaserdiscChannelParameters& channel = laserdisc.channel;
   ld_channel_group_->setChecked(channel.enabled);
@@ -1156,6 +1272,17 @@ void ProjectSettingsEditor::ApplyLaserdiscEnablement(
   efm_check_->setEnabled(state.efm_output_editable || efm_check_->isChecked());
   efm_pair_combo_->setEnabled(state.efm_pair_editable);
   efm_hint_->setText(EfmStatusText(state.efm_status));
+  efm_data_group_->setEnabled(state.efm_data_editable ||
+                              efm_data_group_->isChecked());
+  for (QWidget* widget : std::initializer_list<QWidget*>{
+           efm_data_image_edit_, efm_data_browse_button_,
+           efm_data_first_address_spin_, efm_data_offset_spin_,
+           efm_data_q_control_combo_, efm_data_q_mode_combo_}) {
+    widget->setEnabled(state.efm_data_fields_editable);
+  }
+  const QString efm_data_text = EfmDataStatusText(state.efm_data_status);
+  efm_data_hint_->setText(efm_data_text);
+  efm_data_hint_->setVisible(!efm_data_text.isEmpty());
 
   fm_beat_group_->setEnabled(state.fm_beat_editable ||
                              fm_beat_group_->isChecked());
@@ -1194,6 +1321,34 @@ QString ProjectSettingsEditor::EfmStatusText(EfmOutputStatus status) const {
                 "track.")
           .arg(pair);
     case EfmOutputStatus::kDisabled:
+    default:
+      return {};
+  }
+}
+
+// Renders the presenter's EFM data outcome; the wording follows the
+// validator messages for the same conditions.
+QString ProjectSettingsEditor::EfmDataStatusText(EfmDataStatus status) const {
+  switch (status) {
+    case EfmDataStatus::kUnsupportedStandard:
+      return tr(
+          "LaserDisc EFM data is specified for PAL, NTSC and PAL-M only; no "
+          "“.efm” file is written for this standard.");
+    case EfmDataStatus::kConflictsWithAudio:
+      return tr(
+          "EFM data and digital audio cannot be used together; a disc has "
+          "one EFM channel.");
+    case EfmDataStatus::kNoImage:
+      return tr("Choose the sector image to encode.");
+    case EfmDataStatus::kNoSection:
+      return tr(
+          "No section carries EFM data yet, so the stream carries none. Tick "
+          "“Carries EFM data” in a section's LaserDisc group.");
+    case EfmDataStatus::kActive:
+      return tr(
+          "The sector image is written as an EFM stream (“.efm” plus its "
+          "“.efm.meta” sidecar) during the sections that carry EFM data.");
+    case EfmDataStatus::kDisabled:
     default:
       return {};
   }
@@ -1541,6 +1696,19 @@ void ProjectSettingsEditor::CommitLaserdisc() {
     laserdisc.efm_audio.enabled = efm_check_->isChecked();
     laserdisc.efm_audio.pair = efm_pair_combo_->currentData().toInt();
 
+    // A freshly ticked group keeps the defaults; the widgets still hold the
+    // disabled block's values.
+    SetEfmDataEnabled(&laserdisc, efm_data_group_->isChecked());
+    if (efm_data_group_->isChecked() && stored.efm_data.enabled) {
+      EfmDataOutput& efm_data = laserdisc.efm_data;
+      efm_data.image = efm_data_image_edit_->text().trimmed().toStdString();
+      efm_data.first_address = efm_data_first_address_spin_->value();
+      efm_data.picture_offset_sectors = efm_data_offset_spin_->value();
+      efm_data.q_control = static_cast<EfmDataQControl>(
+          efm_data_q_control_combo_->currentData().toInt());
+      efm_data.q_mode = efm_data_q_mode_combo_->currentData().toInt();
+    }
+
     // Freshly ticked sub-blocks take the presenter defaults; the widgets
     // still hold the disabled block's values.
     const LaserdiscChannelParameters& stored_channel = stored.channel;
@@ -1600,12 +1768,28 @@ void ProjectSettingsEditor::CommitLaserdisc() {
     changed = document_->SetLaserdisc(laserdisc);
     if (!laserdisc.enabled) {
       changed = ClearSectionLaserdiscBlocks() || changed;
+    } else if (!laserdisc.efm_data.enabled) {
+      // Sections may carry EFM data only while the project declares it.
+      changed = ClearSectionEfmDataFlags() || changed;
     }
   }
   committing_ = false;
   if (changed) {
     LoadFromDocument();
   }
+}
+
+bool ProjectSettingsEditor::ClearSectionEfmDataFlags() {
+  bool changed = false;
+  const int count = document_->section_count();
+  for (int index = 0; index < count; ++index) {
+    Section section =
+        document_->project().sections[static_cast<std::size_t>(index)];
+    if (ClearSectionEfmData(&section)) {
+      changed = document_->SetSection(index, std::move(section)) || changed;
+    }
+  }
+  return changed;
 }
 
 bool ProjectSettingsEditor::ClearSectionLaserdiscBlocks() {
@@ -1631,6 +1815,8 @@ QWidget* ProjectSettingsEditor::FieldGroup(IssueField field) const {
       return line_timing_group_;
     case IssueField::kLaserdiscChannel:
       return ld_channel_group_;
+    case IssueField::kEfmData:
+      return efm_data_group_;
     default:
       return nullptr;
   }
@@ -1646,6 +1832,8 @@ QWidget* ProjectSettingsEditor::FieldFocusWidget(IssueField field) const {
       return line_timing_capture_.line_ns;
     case IssueField::kLaserdiscChannel:
       return ld_channel_group_;
+    case IssueField::kEfmData:
+      return efm_data_image_edit_;
     default:
       return nullptr;
   }
@@ -1679,6 +1867,36 @@ void ProjectSettingsEditor::OnBrowseVideoPath() {
   }
   video_path_edit_->setText(path);
   CommitOutputTargets();
+}
+
+void ProjectSettingsEditor::OnBrowseEfmDataImage() {
+  const QString project_dir =
+      document_->file_path().isEmpty()
+          ? QDir::currentPath()
+          : QFileInfo(document_->file_path()).absolutePath();
+  QString start = project_dir;
+  const std::string current = efm_data_image_edit_->text().toStdString();
+  if (!current.empty()) {
+    start = QFileInfo(QString::fromStdString(videosynth::ResolveAssetPath(
+                          current, GuiAssetRoots(), project_dir.toStdString(),
+                          /*anchor_unset=*/true)))
+                .absolutePath();
+  }
+  const QString path = QFileDialog::getOpenFileName(
+      this, tr("EFM Data Sector Image"), start,
+      tr("Sector images (*.dat *.bin *.img *.iso);;All files (*)"));
+  if (path.isEmpty()) {
+    return;
+  }
+  // Store a file under the project directory project-relative, so the
+  // project stays portable; anything else is stored absolute.
+  const QString relative = QDir(project_dir).relativeFilePath(path);
+  efm_data_image_edit_->setText(
+      document_->file_path().isEmpty() ||
+              relative.startsWith(QStringLiteral(".."))
+          ? path
+          : relative);
+  CommitLaserdisc();
 }
 
 }  // namespace videosynth::gui

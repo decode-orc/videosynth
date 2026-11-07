@@ -67,6 +67,29 @@ EfmOutputStatus ClassifyEfmOutput(const Project& project) {
   return EfmOutputStatus::kActive;
 }
 
+// Classifies the EFM data selection in the order ValidateEfmDataOutput
+// reports its conditions.
+EfmDataStatus ClassifyEfmData(const Project& project) {
+  const EfmDataOutput& efm_data = project.laserdisc.efm_data;
+  if (!efm_data.enabled) {
+    return EfmDataStatus::kDisabled;
+  }
+  if (!StandardHasLaserdiscDigitalAudio(
+          project.cvbs_presets.video_standard_preset)) {
+    return EfmDataStatus::kUnsupportedStandard;
+  }
+  if (project.laserdisc.efm_audio.enabled) {
+    return EfmDataStatus::kConflictsWithAudio;
+  }
+  if (efm_data.image.empty()) {
+    return EfmDataStatus::kNoImage;
+  }
+  const bool any_section = std::any_of(
+      project.sections.begin(), project.sections.end(),
+      [](const Section& section) { return section.carries_efm_data; });
+  return any_section ? EfmDataStatus::kActive : EfmDataStatus::kNoSection;
+}
+
 // Freshly-enabled channel and chroma impairments: the values of the PAL
 // pressing C example, a visible but plausible pressing.
 constexpr double kDefaultEdgeSmearFraction = 0.12;
@@ -149,11 +172,21 @@ ProjectSettingsFormState BuildProjectSettingsFormState(const Project& project) {
   for (int pair = 0; pair < kMaxAudioChannelPairs; ++pair) {
     state.efm_pair_options.push_back(pair);
   }
-  state.efm_output_editable = StandardHasLaserdiscDigitalAudio(standard);
+  const bool has_efm_channel = StandardHasLaserdiscDigitalAudio(standard);
+  const LaserdiscParameters& laserdisc = project.laserdisc;
+  state.efm_output_editable = has_efm_channel && !laserdisc.efm_data.enabled;
   state.truth_editable = standard != Standard::kSecam;
-  state.efm_pair_editable =
-      state.efm_output_editable && project.laserdisc.efm_audio.enabled;
+  state.efm_pair_editable = has_efm_channel && laserdisc.efm_audio.enabled;
   state.efm_status = ClassifyEfmOutput(project);
+
+  state.efm_data_editable = has_efm_channel && !laserdisc.efm_audio.enabled;
+  state.efm_data_fields_editable =
+      has_efm_channel && laserdisc.efm_data.enabled;
+  state.efm_data_q_control_options = {EfmDataQControl::kData,
+                                      EfmDataQControl::kDataCopyPermitted};
+  state.efm_data_q_mode_options = {kEfmDataQModeLaserdisc,
+                                   kEfmDataQModeCompactDisc};
+  state.efm_data_status = ClassifyEfmData(project);
 
   return state;
 }
@@ -344,6 +377,15 @@ void SetLaserdiscEnabled(LaserdiscParameters* laserdisc, bool enabled) {
     return;
   }
   laserdisc->enabled = true;
+}
+
+void SetEfmDataEnabled(LaserdiscParameters* laserdisc, bool enabled) {
+  if (!enabled) {
+    laserdisc->efm_data = EfmDataOutput{};
+    return;
+  }
+  laserdisc->enabled = true;
+  laserdisc->efm_data.enabled = true;
 }
 
 void SetLaserdiscChannelEnabled(LaserdiscParameters* laserdisc, bool enabled) {

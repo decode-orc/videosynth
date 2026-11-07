@@ -296,6 +296,11 @@ class SectionEditor : public QWidget {
   // projects with a laserdisc block.
   QGroupBox* laserdisc_group_ = nullptr;
   QComboBox* disc_area_combo_ = nullptr;
+  // Whether the section's frames carry the EFM data channel; shown while the
+  // project declares laserdisc.efm_data (SectionEfmDataVisible). The hint
+  // explains the PAL conflict with analogue audio.
+  QCheckBox* efm_data_check_ = nullptr;
+  QLabel* efm_data_hint_ = nullptr;
   LineInjectionsEditor* injections_editor_ = nullptr;
 };
 

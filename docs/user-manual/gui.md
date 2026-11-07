@@ -83,13 +83,14 @@ Everything specific to LaserDisc is in one checkable **LaserDisc** group in the 
 - **Disc format** — *(none)*, *CAV* or *CLV*. Sections need a disc format before they can carry laserdisc codes.
 - **PAL pilot burst (IEC 60856 §9.1.2)** and **NTSC VBI burst (IEC 60857 §9.1.2)** — each enabled only on its own standard. See [LaserDisc signal options](video-signal.md#laserdisc-signal-options).
 - **Digital audio** — **Encode one channel pair as EFM**, with the **Pair** to encode. See [Audio](audio.md#laserdisc-efm-digital-audio).
+- **EFM data (AIV / LV-ROM)** — a checkable group for [`laserdisc.efm_data`](../reference/laserdisc.md#efm_data): the **Sector image** (stored relative to the project when it is inside the project folder), **First address**, **Picture offset** (150 by default), **Q control** and **Q mode**. Q mode defaults to *4 (LaserDisc, IEC 60856/60857 Amd 2)*; choose *1* for discs such as Domesday that predate those amendments. A line below the group says whether a stream will be written, and why not. A disc has one EFM channel, so **Digital audio** and **EFM data** cannot both be ticked. See [EFM data](laserdisc.md#efm-data).
 - **LaserVision channel (pressing)** — a checkable sub-group for the [LaserVision channel](../reference/laserdisc-channel.md), itself made of optional groups:
     - **FM beat (herringbone)** — carrier at black and level. PAL only.
     - **Group delay** — **Curve** *IEC 60856 nominal* (PAL only) or *Custom curve* (a frequency/delay table), and its **Scale**.
     - **Replay response** — **Response** *None*, *Fixed response* (a frequency/dB table) or *By disc position* (a response per picture number).
     - **Field-2 offset** — horizontal (samples) and vertical (lines).
 
-Unticking the **LaserDisc** group clears every section's disc area and codes in the same undo step. Changing the standard clears the parts the new one cannot carry: the whole group on SECAM, the pilot burst, FM beat and nominal group delay off PAL, and the VBI burst off NTSC.
+Unticking the **LaserDisc** group clears every section's disc area and codes in the same undo step, and unticking **EFM data** clears every section's **Carries EFM data**. Changing the standard clears the parts the new one cannot carry: the whole group on SECAM, the pilot burst, FM beat and nominal group delay off PAL, and the VBI burst off NTSC.
 
 Clicking **Create** asks where to save the project. The file is written as part of creation, so `{project}`-relative paths and the preview always have a real anchor.
 
@@ -140,9 +141,10 @@ Choosing *Video* removes the `cadence` block from the project file. Choosing an 
 **LaserDisc** — shown only when the project's [LaserDisc group](#laserdisc) is ticked. Ticking it for a section makes the section part of the disc — its [`laserdisc:` block](../reference/section-laserdisc.md) — and seeds a disc area with its recommended codes:
 
 - **Disc area** — *(none)*, `lead_in`, `programme_area` or `lead_out`. It decides which codes the section may carry.
+- **Carries EFM data** — shown when the project's **EFM data** group is ticked: the section's frames carry the EFM data channel. A section without it carries no EFM signal. On PAL a note explains that a section with audio channel pairs cannot also carry EFM data.
 - **Codes** — the laserdisc code checklist, filtered by the project's disc format and the section's disc area. The **…** button beside a programme status code opens the **Programme Status Code** dialog.
 
-Unticking it clears the section's disc area and codes. See [Laserdisc discs](laserdisc.md).
+Unticking it clears the section's disc area, codes and EFM data. See [Laserdisc discs](laserdisc.md).
 
 **Picture mapping** — **Horizontal resampling** chooses between **Nearest pixel** (the default zero-order hold) and **Band-limited** [interpolation](video-signal.md#horizontal-mapping). The **Chroma line sign** table lists the [decoder-stress regions](video-signal.md#pal-decoder-stress-regions): each row is a source rectangle (X, Y, Width, Height in pixels and rows) and how its **U** and **V** are carried (**Normal** or **Follow switch**). **Add region** places a 48×48 block after the last one; **Remove region** removes the selected row. The table is available for PAL and PAL-M projects; on other standards it stays enabled only while it holds regions, so they can be removed.
 

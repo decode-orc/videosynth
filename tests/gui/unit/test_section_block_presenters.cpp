@@ -1275,6 +1275,57 @@ TEST(SectionBlockPresentersTest, SectionLaserdiscBlockClears) {
   EXPECT_FALSE(SectionHasLaserdiscBlock(section));
 }
 
+TEST(SectionBlockPresentersTest, EfmDataIsPartOfTheSectionLaserdiscBlock) {
+  Section section;
+  section.carries_efm_data = true;
+  EXPECT_TRUE(SectionHasLaserdiscBlock(section));
+  EXPECT_TRUE(ClearSectionLaserdiscBlock(&section));
+  EXPECT_FALSE(section.carries_efm_data);
+
+  section.carries_efm_data = true;
+  EXPECT_TRUE(ClearSectionEfmData(&section));
+  EXPECT_FALSE(ClearSectionEfmData(&section));
+}
+
+TEST(SectionBlockPresentersTest, SectionEfmDataControlFollowsProject) {
+  Project project;
+  project.cvbs_presets.video_standard_preset = Standard::kPal;
+  Section section;
+  EXPECT_FALSE(SectionEfmDataVisible(project, section));
+  // A section still carrying the channel keeps the control so it can be
+  // cleared.
+  section.carries_efm_data = true;
+  EXPECT_TRUE(SectionEfmDataVisible(project, section));
+  section.carries_efm_data = false;
+  project.laserdisc.efm_data.enabled = true;
+  EXPECT_TRUE(SectionEfmDataVisible(project, section));
+}
+
+TEST(SectionBlockPresentersTest, PalEfmDataConflictsWithAnalogueAudio) {
+  Project project;
+  project.cvbs_presets.video_standard_preset = Standard::kPal;
+  Section section;
+  section.carries_efm_data = true;
+  EXPECT_FALSE(SectionEfmDataConflictsWithAudio(project, section));
+  section.audio_channel_pairs.emplace_back();
+  EXPECT_TRUE(SectionEfmDataConflictsWithAudio(project, section));
+  project.cvbs_presets.video_standard_preset = Standard::kNtsc;
+  EXPECT_FALSE(SectionEfmDataConflictsWithAudio(project, section));
+}
+
+TEST(SectionBlockPresentersTest, ApplySectionEditDeltaMirrorsEfmData) {
+  const Section before;
+  Section after = before;
+  after.carries_efm_data = true;
+  EXPECT_TRUE(ApplySectionEditDelta(before, after, Section{}).carries_efm_data);
+  Section target;
+  target.carries_efm_data = true;
+  // An unrelated edit leaves the target's flag alone.
+  Section renamed = before;
+  renamed.name = "Renamed";
+  EXPECT_TRUE(ApplySectionEditDelta(before, renamed, target).carries_efm_data);
+}
+
 TEST(SectionBlockPresentersTest, SectionLaserdiscGroupFollowsProjectBlock) {
   Project project;
   EXPECT_FALSE(SectionLaserdiscGroupVisible(project));

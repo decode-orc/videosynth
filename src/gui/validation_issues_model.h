@@ -34,6 +34,8 @@ enum class IssueField {
   kChromaError,
   kLineTiming,
   kLaserdiscChannel,
+  // laserdisc.efm_data, project-level or a section's EFM data flag.
+  kEfmData,
   kCadence,
   kPicture,
 };

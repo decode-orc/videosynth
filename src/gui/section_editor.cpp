@@ -1002,6 +1002,19 @@ QWidget* SectionEditor::BuildLaserdiscGroup() {
       tr("The disc area the section occupies: lead-in, programme area or "
          "lead-out. It decides which codes the section may carry."));
   form->addRow(tr("Disc area:"), disc_area_combo_);
+  efm_data_check_ = new QCheckBox(tr("Carries EFM data"), body);
+  efm_data_check_->setToolTip(
+      tr("The section's frames carry the project's EFM data channel (AIV "
+         "sectors locked to its pictures). Sections without it carry no EFM "
+         "signal."));
+  form->addRow(efm_data_check_);
+  efm_data_hint_ = new QLabel(
+      tr("On a PAL disc the EFM signal takes the place of the analogue sound "
+         "carriers, so a section that carries EFM data cannot also carry "
+         "audio channel pairs."),
+      body);
+  efm_data_hint_->setWordWrap(true);
+  form->addRow(efm_data_hint_);
   layout->addLayout(form);
 
   layout->addWidget(new QLabel(tr("Codes:"), body));
@@ -1011,6 +1024,8 @@ QWidget* SectionEditor::BuildLaserdiscGroup() {
   outer->addWidget(body);
 
   connect(disc_area_combo_, &QComboBox::activated, this,
+          &SectionEditor::CommitSection);
+  connect(efm_data_check_, &QCheckBox::toggled, this,
           &SectionEditor::CommitSection);
   connect(injections_editor_, &LineInjectionsEditor::InjectionsEdited, this,
           [this] {
@@ -1252,6 +1267,10 @@ void SectionEditor::LoadFromDocument() {
   // see it.
   laserdisc_group_->setVisible(SectionLaserdiscGroupVisible(project));
   laserdisc_group_->setChecked(SectionHasLaserdiscBlock(section));
+  efm_data_check_->setVisible(SectionEfmDataVisible(project, section));
+  efm_data_check_->setChecked(section.carries_efm_data);
+  efm_data_hint_->setVisible(
+      SectionEfmDataConflictsWithAudio(project, section));
   injections_editor_->SetContext(
       project.cvbs_presets.video_standard_preset, section.section_type,
       DiscTypeFromString(project.laserdisc.disc_type));
@@ -1486,9 +1505,11 @@ Section SectionEditor::SectionFromWidgets() const {
   if (laserdisc_group_->isChecked()) {
     section.section_type = SelectedDiscArea();
     section.line_injections = injections_editor_->injections();
+    section.carries_efm_data = efm_data_check_->isChecked();
   } else {
     section.section_type = SectionType::kUnknown;
     section.line_injections.clear();
+    section.carries_efm_data = false;
   }
 
   return section;
@@ -1625,6 +1646,10 @@ void SectionEditor::RevealField(IssueField field) {
     case IssueField::kPicture:
       group = picture_group_;
       focus = horizontal_resample_combo_;
+      break;
+    case IssueField::kEfmData:
+      group = laserdisc_group_;
+      focus = efm_data_check_;
       break;
     case IssueField::kNone:
     case IssueField::kChannel:
