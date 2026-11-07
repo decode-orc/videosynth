@@ -77,6 +77,31 @@ TEST(EfmTrackLayoutTest, MapsPalSectionsToTracksInOutputOrder) {
   EXPECT_TRUE(generator.Begin(layout.table));
 }
 
+TEST(EfmTrackLayoutTest, SingleProgrammeTrackMergesProgrammeSections) {
+  const std::vector<Section> sections = {
+      MakeSection("LeadIn", SectionType::kLeadIn),
+      MakeSection("Chapter0", SectionType::kProgrammeArea),
+      MakeSection("Chapter1", SectionType::kProgrammeArea),
+      MakeSection("Chapter2", SectionType::kProgrammeArea),
+      MakeSection("LeadOut", SectionType::kLeadOut),
+  };
+
+  EfmTrackLayout layout;
+  std::vector<std::string> errors;
+  EfmTrackLayoutOptions options;
+  options.single_programme_track = true;
+  ASSERT_TRUE(BuildEfmTrackLayout(Standard::kPal,
+                                  FrameList(sections, kPalFramesPerSection),
+                                  &layout, &errors, options))
+      << (errors.empty() ? "" : errors.front());
+
+  ASSERT_EQ(layout.table.entries.size(), 3U);
+  EXPECT_EQ(layout.table.entries[1].area, efm::SubcodeArea::kProgramme);
+  EXPECT_EQ(layout.table.entries[1].track_number, 1U);
+  EXPECT_EQ(layout.table.entries[1].section_count,
+            3U * kPalSubcodeSectionsPerRun);
+}
+
 TEST(EfmTrackLayoutTest, PauseCoversTheStartOfTheFirstTrack) {
   const std::vector<Section> sections = {
       MakeSection("LeadIn", SectionType::kLeadIn),

@@ -159,8 +159,9 @@ These apply only to a project with a [`laserdisc:`](../reference/laserdisc.md) b
 - `file`: `path` set, ending in `.wav` or `.flac`; the file exists, can be read, and has one or two channels.
 - `video_audio`: `stream` ≥ 0; the section source is a video, not an EXR still, and has an audio stream at that index.
 - EFM requires PAL, NTSC or PAL-M (not SECAM), at most 79 programme-area sections.
+- EFM data (`laserdisc.efm_data`): not together with `efm_audio`; `image` set; `first_address` and `picture_offset_sectors` in 0–449 999; `q_mode` 4 or 1; a section's `laserdisc.efm_data` needs the project-level block; a PAL section cannot declare both `efm_data` and an audio channel pair. The image must be a whole, non-zero number of 2 048-byte sectors, checked when generation starts.
 - `output.truth` requires PAL, NTSC or PAL-M (not SECAM); with OSD overlays in any section it is a warning, as the truth does not carry the text. A value other than `true` or `false` is a parse error.
-- *Warnings*: a non-repeating audio file shorter than its section (the rest is silent); EFM pair not declared by any section; a programme track under 4 s (6 s for the first); no lead-in, so no table of contents.
+- *Warnings*: a non-repeating audio file shorter than its section (the rest is silent); EFM pair not declared by any section; a programme track under 4 s (6 s for the first); no lead-in, so no table of contents; `laserdisc.efm_data` with no section declaring it. At generation, EFM data also warns about image sectors left out (on frames without EFM, or beyond the stream), left-out sectors that are not blank, sectors cut by a frame without EFM, and picture numbers that break the count from the anchor.
 - *Log notes* (information, not warnings): an audio file or soundtrack that is resampled to 48 kHz, and a soundtrack with more than two channels that is downmixed to stereo.
 
 Checks that read audio files or soundtrack streams run with the CLI, `--validate`, and generation in the GUI. The GUI's background validation, and **Project → Validate**, check only the structure, as they do for picture sources.

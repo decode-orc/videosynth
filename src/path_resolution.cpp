@@ -191,6 +191,10 @@ Project ResolveProjectPaths(Project project, const AssetRootMap& roots,
       }
     }
   }
+  if (project.laserdisc.efm_data.enabled) {
+    project.laserdisc.efm_data.image = ResolveAssetPath(
+        project.laserdisc.efm_data.image, roots, project_dir, anchor_unset);
+  }
   project.output.video_path = ResolveAssetPath(project.output.video_path, roots,
                                                project_dir, anchor_unset);
   project.output.metadata_path = ResolveAssetPath(

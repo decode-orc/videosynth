@@ -55,16 +55,6 @@ void WriteTime(QChannelPayload* payload, std::size_t first_byte,
   (*payload)[first_byte + 2] = ToBcd(time.frames);
 }
 
-// Common skeleton of both layouts: the control nibble and ADR = 4. All other
-// bytes, including the eight bits of the ZERO field, start at zero
-// (IEC 60908-1999, 17.5.1).
-QChannelPayload MakePayloadSkeleton() {
-  QChannelPayload payload{};
-  payload[kPayloadControlAdr] = static_cast<std::uint8_t>(
-      (kControlAudioNoPreEmphasisCopyProhibited << 4U) | kAdrMode4);
-  return payload;
-}
-
 }  // namespace
 
 SubcodeTime SubcodeTimeFromSections(std::size_t sections) {
@@ -143,8 +133,18 @@ std::uint16_t ComputeQChannelCrc(const QChannelPayload& payload) {
   return static_cast<std::uint16_t>(remainder ^ kQCrcInversionMask);
 }
 
+// Common skeleton of every layout: the control nibble and ADR of the track
+// table. All other bytes, including the eight bits of the ZERO field, start at
+// zero (IEC 60908-1999, 17.5.1).
+QChannelPayload SubcodeGenerator::MakePayloadSkeleton() const {
+  QChannelPayload payload{};
+  payload[kPayloadControlAdr] = control_adr_;
+  return payload;
+}
+
 bool SubcodeGenerator::Begin(const TrackTable& table) {
-  if (table.entries.empty()) {
+  if (table.entries.empty() || table.control > kMaxQNibble ||
+      table.adr > kMaxQNibble) {
     return false;
   }
 
@@ -242,6 +242,7 @@ bool SubcodeGenerator::Begin(const TrackTable& table) {
   }
 
   entries_ = table.entries;
+  control_adr_ = static_cast<std::uint8_t>(table.control << 4U | table.adr);
   toc_items_ = std::move(toc_items);
   start_flag_targets_ = std::move(start_flag_targets);
   section_count_ = next_start;
@@ -254,6 +255,8 @@ bool SubcodeGenerator::Begin(const TrackTable& table) {
 
 void SubcodeGenerator::Reset() {
   entries_.clear();
+  control_adr_ = static_cast<std::uint8_t>(
+      kControlAudioNoPreEmphasisCopyProhibited << 4U | kAdrMode4);
   toc_items_.clear();
   start_flag_targets_.clear();
   section_count_ = 0;

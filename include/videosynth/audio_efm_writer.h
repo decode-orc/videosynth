@@ -11,13 +11,12 @@
 #pragma once
 
 #include <cstdint>
-#include <fstream>
 #include <string>
 #include <vector>
 
 #include "videosynth/efm/efm_stream_encoder.h"
 #include "videosynth/efm/subcode_generator.h"
-#include "videosynth/efm/t_value_byte.h"
+#include "videosynth/efm_stream_file.h"
 #include "videosynth/interfaces.h"
 #include "videosynth/model.h"
 
@@ -95,38 +94,20 @@ class AudioEfmWriter {
 
   // Derives the EFM binary path from a CVBS output path: strips a trailing
   // ".cvbs" or ".cvbsy" suffix (if present) and appends ".efm".
-  static std::string DeriveAudioPath(const std::string& video_path);
+  static std::string DeriveAudioPath(const std::string& video_path) {
+    return EfmStreamFile::DeriveEfmPath(video_path);
+  }
 
   // Derives the EFM sidecar path from a CVBS output path: as DeriveAudioPath
   // but appending ".efm.meta".
-  static std::string DeriveSidecarPath(const std::string& video_path);
+  static std::string DeriveSidecarPath(const std::string& video_path) {
+    return EfmStreamFile::DeriveSidecarPath(video_path);
+  }
 
  private:
-  // Per-frame index row destined for the sidecar's efm_frame table.
-  struct FrameIndexRow {
-    std::uint64_t offset = 0;
-    std::uint64_t count = 0;
-  };
-
-  // Packs `t_values` into stream bytes and writes them to the open stream.
-  // Returns false and appends a message to errors when the stream fails.
-  bool WriteTValues(const std::vector<std::uint8_t>& t_values,
-                    std::vector<std::string>* errors);
-
-  // Creates the sidecar database and inserts one efm_frame row per appended
-  // frame. Returns false and appends a message to errors on any failure.
-  bool WriteSidecar(std::vector<std::string>* errors);
-
   ILogger* logger_;
-  std::ofstream stream_;
-  std::string audio_path_;
-  std::string sidecar_path_;
+  EfmStreamFile file_;
   efm::EfmStreamEncoder encoder_;
-  bool session_open_ = false;
-  std::uint64_t t_value_count_ = 0;
-  std::vector<FrameIndexRow> frame_index_;
-  // Reused across frames so packing costs no per-frame allocation.
-  std::vector<std::uint8_t> byte_buffer_;
 };
 
 }  // namespace videosynth

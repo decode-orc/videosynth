@@ -201,6 +201,7 @@ LaserdiscParameters NormalizeLaserdiscForStandard(LaserdiscParameters laserdisc,
   }
   if (!StandardHasLaserdiscDigitalAudio(standard)) {
     laserdisc.efm_audio = EfmAudioOutput{};
+    laserdisc.efm_data = EfmDataOutput{};
   }
   return laserdisc;
 }

@@ -733,6 +733,49 @@ struct Section {
   DropoutParameters dropouts = {};
   OsdConfig osd = {};
   std::vector<AudioChannelPair> audio_channel_pairs = {};
+  // True when the section's `laserdisc:` block declares `efm_data`: its frames
+  // carry the EFM data channel (see EfmDataOutput). Frames of other sections
+  // carry no EFM signal at all.
+  bool carries_efm_data = false;
+};
+
+// CONTROL nibble of the Q channel of an EFM data track (IEC 60908-1999, 17.5
+// / ECMA-130, 22.3.2).
+enum class EfmDataQControl {
+  // 0100: data track, digital copy prohibited.
+  kData,
+  // 0110: data track, digital copy permitted.
+  kDataCopyPermitted,
+};
+
+// Q-channel ADR (mode) values an EFM data track may record.
+// IEC 60856:1986 Amd 2, 13.5.1.1 / IEC 60857:1986 Amd 2, 13.6.1.1: LaserDisc
+// uses mode 4. IEC 60908-1999, 17.5: the compact-disc mode 1, recorded by AIV
+// discs mastered before those amendments.
+inline constexpr int kEfmDataQModeLaserdisc = 4;
+inline constexpr int kEfmDataQModeCompactDisc = 1;
+
+// Default offset between a picture's time and the header time of its data
+// sectors: 2 s of 75 sectors, the AIV placement rule (picture p carries image
+// sectors 3p + 150 to 3p + 152 on PAL).
+inline constexpr int kEfmDataDefaultPictureOffsetSectors = 150;
+
+// LaserDisc EFM data output (AIV / LV-ROM). When `enabled`, the sector image
+// at `image` (2 048 bytes per sector) is encoded as ECMA-130 Mode 1 sectors in
+// the EFM channel of every section that declares `laserdisc.efm_data`, written
+// as the same `<basename>.efm` / `.efm.meta` pair as EFM audio. Mutually
+// exclusive with EfmAudioOutput: a disc has one EFM channel.
+struct EfmDataOutput {
+  bool enabled = false;
+  // Path of the sector image (user data only, 2 048 bytes per sector).
+  std::string image;
+  // Sector Address carried by the image's first sector (ECMA-130 14.2).
+  int first_address = 0;
+  // Header time minus picture time, in sectors (75 per second).
+  int picture_offset_sectors = kEfmDataDefaultPictureOffsetSectors;
+  EfmDataQControl q_control = EfmDataQControl::kData;
+  // ADR of every Q block: kEfmDataQModeLaserdisc or kEfmDataQModeCompactDisc.
+  int q_mode = kEfmDataQModeLaserdisc;
 };
 
 // LaserDisc digital audio (EFM) output selection. When `enabled`, the single
@@ -910,6 +953,7 @@ struct LaserdiscParameters {
   // §9.1.2).
   bool vbi_burst = false;
   EfmAudioOutput efm_audio = {};
+  EfmDataOutput efm_data = {};
   LaserdiscChannelParameters channel;
 };
 
@@ -918,7 +962,8 @@ struct LaserdiscParameters {
 inline bool LaserdiscBlockPresent(const LaserdiscParameters& laserdisc) {
   return laserdisc.enabled || !laserdisc.disc_type.empty() ||
          laserdisc.pilot_burst || laserdisc.vbi_burst ||
-         laserdisc.efm_audio.enabled || laserdisc.channel.enabled;
+         laserdisc.efm_audio.enabled || laserdisc.efm_data.enabled ||
+         laserdisc.channel.enabled;
 }
 
 // Per-line Gaussian jitter of the chroma error. Values are standard
@@ -1223,11 +1268,19 @@ inline bool operator==(const Section& a, const Section& b) {
          a.horizontal_resample == b.horizontal_resample &&
          a.chroma_line_sign == b.chroma_line_sign && a.noise == b.noise &&
          a.dropouts == b.dropouts && a.osd == b.osd &&
-         a.audio_channel_pairs == b.audio_channel_pairs;
+         a.audio_channel_pairs == b.audio_channel_pairs &&
+         a.carries_efm_data == b.carries_efm_data;
 }
 
 inline bool operator==(const EfmAudioOutput& a, const EfmAudioOutput& b) {
   return a.enabled == b.enabled && a.pair == b.pair;
+}
+
+inline bool operator==(const EfmDataOutput& a, const EfmDataOutput& b) {
+  return a.enabled == b.enabled && a.image == b.image &&
+         a.first_address == b.first_address &&
+         a.picture_offset_sectors == b.picture_offset_sectors &&
+         a.q_control == b.q_control && a.q_mode == b.q_mode;
 }
 
 inline bool operator==(const OutputTargets& a, const OutputTargets& b) {
@@ -1285,7 +1338,8 @@ inline bool operator==(const LaserdiscParameters& a,
                        const LaserdiscParameters& b) {
   return a.enabled == b.enabled && a.disc_type == b.disc_type &&
          a.pilot_burst == b.pilot_burst && a.vbi_burst == b.vbi_burst &&
-         a.efm_audio == b.efm_audio && a.channel == b.channel;
+         a.efm_audio == b.efm_audio && a.efm_data == b.efm_data &&
+         a.channel == b.channel;
 }
 
 inline bool operator==(const LevelCurvePoint& a, const LevelCurvePoint& b) {

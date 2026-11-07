@@ -1266,6 +1266,92 @@ TEST(YamlProjectParserTest, ParsesEfmAudioOutputPair) {
   EXPECT_EQ(result.project.laserdisc.efm_audio.pair, 3);
 }
 
+TEST(YamlProjectParserTest, ParsesEfmDataWithDefaults) {
+  const std::string yaml = MakeProjectWithLaserdiscBlock(
+      "  efm_data:\n"
+      "    image: disc.dat\n");
+
+  YamlProjectParser parser;
+  const ParseResult result = parser.ParseString(yaml);
+
+  ASSERT_TRUE(result.ok) << (result.errors.empty() ? "" : result.errors[0]);
+  const EfmDataOutput& efm_data = result.project.laserdisc.efm_data;
+  EXPECT_TRUE(efm_data.enabled);
+  EXPECT_EQ(efm_data.image, "disc.dat");
+  EXPECT_EQ(efm_data.first_address, 0);
+  EXPECT_EQ(efm_data.picture_offset_sectors, 150);
+  EXPECT_EQ(efm_data.q_control, EfmDataQControl::kData);
+  EXPECT_EQ(efm_data.q_mode, kEfmDataQModeLaserdisc);
+}
+
+TEST(YamlProjectParserTest, ParsesEfmDataOverrides) {
+  const std::string yaml = MakeProjectWithLaserdiscBlock(
+      "  efm_data:\n"
+      "    image: disc.dat\n"
+      "    first_address: 12\n"
+      "    picture_offset_sectors: 75\n"
+      "    q_control: data_copy_permitted\n"
+      "    q_mode: 1\n");
+
+  YamlProjectParser parser;
+  const ParseResult result = parser.ParseString(yaml);
+
+  ASSERT_TRUE(result.ok) << (result.errors.empty() ? "" : result.errors[0]);
+  const EfmDataOutput& efm_data = result.project.laserdisc.efm_data;
+  EXPECT_EQ(efm_data.first_address, 12);
+  EXPECT_EQ(efm_data.picture_offset_sectors, 75);
+  EXPECT_EQ(efm_data.q_control, EfmDataQControl::kDataCopyPermitted);
+  EXPECT_EQ(efm_data.q_mode, kEfmDataQModeCompactDisc);
+}
+
+TEST(YamlProjectParserTest, RejectsEfmDataWithoutImageOrWithBadQControl) {
+  YamlProjectParser parser;
+  EXPECT_FALSE(
+      parser
+          .ParseString(MakeProjectWithLaserdiscBlock("  efm_data:\n"
+                                                     "    first_address: 0\n"))
+          .ok);
+  EXPECT_FALSE(
+      parser
+          .ParseString(MakeProjectWithLaserdiscBlock("  efm_data:\n"
+                                                     "    image: disc.dat\n"
+                                                     "    q_control: audio\n"))
+          .ok);
+  EXPECT_FALSE(
+      parser
+          .ParseString(MakeProjectWithLaserdiscBlock("  efm_data:\n"
+                                                     "    image: disc.dat\n"
+                                                     "    sectors: 3\n"))
+          .ok);
+}
+
+TEST(YamlProjectParserTest, ParsesSectionEfmDataFlag) {
+  const std::string yaml = MakeProjectWithLaserdiscBlock(
+                               "  efm_data:\n"
+                               "    image: disc.dat\n") +
+                           "    laserdisc:\n"
+                           "      efm_data: {}\n";
+
+  YamlProjectParser parser;
+  const ParseResult result = parser.ParseString(yaml);
+
+  ASSERT_TRUE(result.ok) << (result.errors.empty() ? "" : result.errors[0]);
+  ASSERT_EQ(result.project.sections.size(), 1U);
+  EXPECT_TRUE(result.project.sections[0].carries_efm_data);
+}
+
+TEST(YamlProjectParserTest, RejectsSectionEfmDataWithKeys) {
+  const std::string yaml = MakeProjectWithLaserdiscBlock(
+                               "  efm_data:\n"
+                               "    image: disc.dat\n") +
+                           "    laserdisc:\n"
+                           "      efm_data:\n"
+                           "        first: 3\n";
+
+  YamlProjectParser parser;
+  EXPECT_FALSE(parser.ParseString(yaml).ok);
+}
+
 TEST(YamlProjectParserTest, EfmAudioDisabledWhenLaserdiscBlockAbsent) {
   YamlProjectParser parser;
   const ParseResult result =
@@ -1458,7 +1544,7 @@ TEST(YamlProjectParserTest, RejectsMalformedSectionLaserdiscBlocks) {
     const char* error;
   } cases[] = {
       {"      {}\n",
-       "section.laserdisc must set at least one of: area, codes."},
+       "section.laserdisc must set at least one of: area, codes, efm_data."},
       {"      area: [lead_in]\n", "section.laserdisc.area must be a string."},
       {"      codes: picture_number\n",
        "section.laserdisc.codes must be a list/sequence."},

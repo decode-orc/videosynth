@@ -74,7 +74,8 @@ VideoSynthPipeline::VideoSynthPipeline(IProjectParser* parser,
       output_(output),
       logger_(logger),
       audio_generator_(audio_generator),
-      truth_writer_(logger) {}
+      truth_writer_(logger),
+      efm_data_writer_(logger) {}
 
 bool VideoSynthPipeline::Run(const RunOptions& options,
                              IPipelineObserver* observer,
@@ -203,6 +204,7 @@ bool VideoSynthPipeline::RunProject(const Project& project,
     std::vector<std::string> cleanup_errors;
     output_->FinalizeWrite(&cleanup_errors);
     truth_writer_.Abort();
+    efm_data_writer_.AbortWrite();
   };
 
   // Writes the truth of the frames just generated, in output order. Returns
@@ -246,6 +248,42 @@ bool VideoSynthPipeline::RunProject(const Project& project,
     }
   }
 
+  // Optional EFM data channel (laserdisc.efm_data): the sector image placed
+  // by the picture rule, written per stored frame in output order.
+  const bool efm_data_enabled = project.laserdisc.efm_data.enabled;
+  if (efm_data_enabled) {
+    std::vector<EfmDataFrame> efm_frames;
+    efm_frames.reserve(schedule.size());
+    for (const IGenerationStage::FrameScheduleItem& item : schedule) {
+      efm_frames.push_back({item.section, item.disc_picture_number});
+    }
+    std::vector<std::string> efm_errors;
+    if (!efm_data_writer_.BeginWrite(project, efm_frames, &efm_errors)) {
+      for (const std::string& error : efm_errors) {
+        logger_->Error(error);
+      }
+      efm_data_writer_.AbortWrite();
+      if (audio_enabled) {
+        audio_generator_->Abort();
+      }
+      CloseOutputSessionOnFailure();
+      return FinishRun(PipelineRunStatus::kFailed);
+    }
+  }
+
+  // Emits the next output frame's EFM data. Returns false and logs on
+  // failure.
+  auto EmitEfmDataFrame = [&]() -> bool {
+    std::vector<std::string> efm_errors;
+    if (!efm_data_writer_.AppendFrame(&efm_errors)) {
+      for (const std::string& error : efm_errors) {
+        logger_->Error(error);
+      }
+      return false;
+    }
+    return true;
+  };
+
   // Monotonic output-frame counter driving audio emission. Incremented for
   // every stored output frame in output order.
   std::size_t audio_output_index = 0U;
@@ -256,6 +294,7 @@ bool VideoSynthPipeline::RunProject(const Project& project,
   auto CancelRun = [&]() {
     output_->AbortWrite();
     truth_writer_.Abort();
+    efm_data_writer_.AbortWrite();
     if (audio_enabled) {
       audio_generator_->Abort();
     }
@@ -408,6 +447,11 @@ bool VideoSynthPipeline::RunProject(const Project& project,
         return false;
       }
 
+      if (efm_data_enabled && !EmitEfmDataFrame()) {
+        consumer_failed = true;
+        return false;
+      }
+
       NotifyProgress(disc_frame + 1U);
       if (disc_frame + 1U >= next_progress_mark ||
           disc_frame + 1U == total_disc_frames) {
@@ -519,6 +563,15 @@ bool VideoSynthPipeline::RunProject(const Project& project,
         }
       }
 
+      if (efm_data_enabled) {
+        for (std::size_t i = 0U; i < frames_this_batch; ++i) {
+          if (!EmitEfmDataFrame()) {
+            CloseOutputSessionOnFailure();
+            return FinishRun(PipelineRunStatus::kFailed);
+          }
+        }
+      }
+
       processed_frames += frames_this_batch;
       NotifyProgress(processed_frames);
       if (processed_frames >= next_progress_mark ||
@@ -554,6 +607,16 @@ bool VideoSynthPipeline::RunProject(const Project& project,
     std::vector<std::string> audio_errors;
     if (!audio_generator_->Finalize(&audio_errors)) {
       for (const std::string& error : audio_errors) {
+        logger_->Error(error);
+      }
+      return FinishRun(PipelineRunStatus::kFailed);
+    }
+  }
+
+  if (efm_data_enabled) {
+    std::vector<std::string> efm_errors;
+    if (!efm_data_writer_.FinalizeWrite(&efm_errors)) {
+      for (const std::string& error : efm_errors) {
         logger_->Error(error);
       }
       return FinishRun(PipelineRunStatus::kFailed);

@@ -216,7 +216,7 @@ void EmitLaserdisc(YAML::Emitter& out, const LaserdiscParameters& laserdisc,
   }
   const bool empty = laserdisc.disc_type.empty() && !laserdisc.pilot_burst &&
                      !laserdisc.vbi_burst && !laserdisc.efm_audio.enabled &&
-                     !laserdisc.channel.enabled;
+                     !laserdisc.efm_data.enabled && !laserdisc.channel.enabled;
   if (laserdisc.pilot_burst || (empty && standard == Standard::kPal)) {
     out << YAML::Key << "pilot_burst" << YAML::Value << laserdisc.pilot_burst;
   }
@@ -226,6 +226,27 @@ void EmitLaserdisc(YAML::Emitter& out, const LaserdiscParameters& laserdisc,
   if (laserdisc.efm_audio.enabled) {
     out << YAML::Key << "efm_audio" << YAML::Value << YAML::BeginMap;
     out << YAML::Key << "pair" << YAML::Value << laserdisc.efm_audio.pair;
+    out << YAML::EndMap;
+  }
+  if (laserdisc.efm_data.enabled) {
+    const EfmDataOutput& efm_data = laserdisc.efm_data;
+    out << YAML::Key << "efm_data" << YAML::Value << YAML::BeginMap;
+    out << YAML::Key << "image" << YAML::Value << efm_data.image;
+    if (efm_data.first_address != 0) {
+      out << YAML::Key << "first_address" << YAML::Value
+          << efm_data.first_address;
+    }
+    if (efm_data.picture_offset_sectors !=
+        kEfmDataDefaultPictureOffsetSectors) {
+      out << YAML::Key << "picture_offset_sectors" << YAML::Value
+          << efm_data.picture_offset_sectors;
+    }
+    if (efm_data.q_control != EfmDataQControl::kData) {
+      out << YAML::Key << "q_control" << YAML::Value << "data_copy_permitted";
+    }
+    if (efm_data.q_mode != kEfmDataQModeLaserdisc) {
+      out << YAML::Key << "q_mode" << YAML::Value << efm_data.q_mode;
+    }
     out << YAML::EndMap;
   }
   EmitLaserdiscChannel(out, laserdisc.channel);
@@ -340,7 +361,8 @@ void EmitSectionLaserdisc(YAML::Emitter& out, const Section& section) {
   for (const Section::LineInjection& injection : section.line_injections) {
     has_codes = has_codes || injection.type == "laserdisc";
   }
-  if (section.section_type == SectionType::kUnknown && !has_codes) {
+  if (section.section_type == SectionType::kUnknown && !has_codes &&
+      !section.carries_efm_data) {
     return;
   }
   out << YAML::Key << "laserdisc" << YAML::Value << YAML::BeginMap;
@@ -359,6 +381,10 @@ void EmitSectionLaserdisc(YAML::Emitter& out, const Section& section) {
       }
     }
     out << YAML::EndSeq;
+  }
+  if (section.carries_efm_data) {
+    out << YAML::Key << "efm_data" << YAML::Value << YAML::Flow
+        << YAML::BeginMap << YAML::EndMap;
   }
   out << YAML::EndMap;
 }

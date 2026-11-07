@@ -53,6 +53,20 @@ inline constexpr std::uint8_t kAdrMode4 = 0x4;
 // pre-emphasis and 0 X 0 X is copy prohibited.
 inline constexpr std::uint8_t kControlAudioNoPreEmphasisCopyProhibited = 0x0;
 
+// IEC 60908-1999, 17.5 / ECMA-130, 22.3.2: control 0 1 0 0 is a data track,
+// copy prohibited, and 0 1 1 0 a data track, copy permitted.
+inline constexpr std::uint8_t kControlDataCopyProhibited = 0x4;
+inline constexpr std::uint8_t kControlDataCopyPermitted = 0x6;
+
+// IEC 60908-1999, 17.5: "0001: ADR 1, mode 1 for DATA-Q", the compact-disc
+// mode that LaserDisc digital audio replaces with mode 4. Discs mastered
+// before IEC 60856:1986 Amd 2 / IEC 60857:1986 Amd 2, such as the Acorn
+// Interactive Video (AIV) discs, record mode 1.
+inline constexpr std::uint8_t kAdrMode1 = 0x1;
+
+// Largest value of the four-bit CONTROL and ADR fields.
+inline constexpr std::uint8_t kMaxQNibble = 0xF;
+
 // IEC 60908-1999, 17.5.1: TNO 00 marks the lead-in track and the hexadecimal
 // code AA the lead-out track.
 inline constexpr std::uint8_t kTrackNumberLeadIn = 0x00;
@@ -156,6 +170,13 @@ struct TrackTableEntry {
 struct TrackTable {
   std::vector<TrackTableEntry> entries;
   VideoSystem video_system = VideoSystem::kPal;
+  // CONTROL nibble of every Q block (IEC 60908-1999, 17.5). The default is two
+  // audio channels without pre-emphasis, copy prohibited.
+  std::uint8_t control = kControlAudioNoPreEmphasisCopyProhibited;
+  // ADR nibble of every Q block: mode 4 for LaserDisc (IEC 60856:1986 Amd 2,
+  // 13.5.1.1 / IEC 60857:1986 Amd 2, 13.6.1.1). The DATA-Q layout does not
+  // depend on it.
+  std::uint8_t adr = kAdrMode4;
 };
 
 // One item of the repetitive lead-in table of contents (IEC 60908-1999,
@@ -207,7 +228,8 @@ class SubcodeGenerator {
   // Adopts `table` and precomputes the table of contents. Returns false, and
   // leaves the generator unchanged, when the table is not a gapless ascending
   // tiling of lead-in, then programme, then lead-out entries, or when a
-  // programme track number is outside 1 to kMaxTrackNumber.
+  // programme track number is outside 1 to kMaxTrackNumber, or the control or
+  // ADR value does not fit its four-bit field.
   bool Begin(const TrackTable& table);
 
   // Writes the subcode section at absolute index `section_index` to `section`.
@@ -243,8 +265,13 @@ class SubcodeGenerator {
 
   const TrackTableEntry* EntryForSection(std::size_t section_index) const;
 
+  // The CONTROL|ADR byte opening every Q block.
+  QChannelPayload MakePayloadSkeleton() const;
+
   std::vector<TrackTableEntry> entries_;
   std::vector<TocItem> toc_items_;
+  std::uint8_t control_adr_ = static_cast<std::uint8_t>(
+      kControlAudioNoPreEmphasisCopyProhibited << 4U | kAdrMode4);
   // Sections at which a start flag ends, i.e. the first audio section of every
   // track and the first section of the lead-out (IEC 60908-1999, 17.4).
   std::vector<std::size_t> start_flag_targets_;

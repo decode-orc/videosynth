@@ -58,6 +58,24 @@ class EfmStreamEncoder {
                    const std::vector<std::int16_t>& right,
                    std::vector<std::uint8_t>* t_values);
 
+  // Appends whole F1 frames (e.g. the frames of a data sector, see
+  // data_sector.h), appending the T values of the channel frames they complete
+  // to `t_values`. Returns false when Begin has not succeeded, `t_values` is
+  // null, or stereo samples are pending in a partial frame.
+  bool PushF1Frames(const F1Frame* frames, std::size_t count,
+                    std::vector<std::uint8_t>* t_values);
+
+  // Interrupts the channel stream for `count` channel frames, as where a disc
+  // carries no EFM signal: emits the run still in progress, then advances the
+  // subcode timeline by `count` frames without emitting anything, and restarts
+  // the CIRC encoder, modulator and T-value encoder. A restarted CIRC encoder
+  // is identical to one that has encoded kCircPipelineLatencyFrames frames of
+  // silence, so the interleave across the gap is seamless; symbols of frames
+  // pushed in the last kCircDrainFrames before the gap are lost with it.
+  // Returns false when Begin has not succeeded, `t_values` is null, or stereo
+  // samples are pending in a partial frame.
+  bool SkipFrames(std::size_t count, std::vector<std::uint8_t>* t_values);
+
   // Pads the pending F1 frame with digital silence, flushes the CIRC pipeline
   // so every pushed sample is fully represented in the output, and emits the
   // final run length. Returns false when Begin has not succeeded or `t_values`

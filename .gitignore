@@ -141,3 +141,8 @@ flatpak-repo/
 # near here, but a bare "videosynth --project projects/..." writes in place.
 /projects/**/*.wav
 /projects/**/*.efm
+
+# Media from manual project runs whose {output} root is left at its default
+/tests/general-output/
+/tests/general-yc-output/
+/docs/examples/output/

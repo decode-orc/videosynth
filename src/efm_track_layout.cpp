@@ -55,7 +55,7 @@ struct SectionRun {
 // contributes one entry while every programme-area run becomes its own track.
 std::vector<SectionRun> BuildRuns(
     Standard standard, const std::vector<const Section*>& output_frame_sections,
-    std::size_t* total_samples) {
+    bool merge_programme_runs, std::size_t* total_samples) {
   std::vector<SectionRun> runs;
   std::size_t sample = 0;
   const Section* previous = nullptr;
@@ -65,7 +65,8 @@ std::vector<SectionRun> BuildRuns(
     const bool continues_run =
         !runs.empty() &&
         (section == previous ||
-         (area != efm::SubcodeArea::kProgramme && area == runs.back().area));
+         ((area != efm::SubcodeArea::kProgramme || merge_programme_runs) &&
+          area == runs.back().area));
     if (!continues_run) {
       runs.push_back(SectionRun{area, section, sample});
     }
@@ -81,7 +82,8 @@ std::vector<SectionRun> BuildRuns(
 
 bool BuildEfmTrackLayout(
     Standard standard, const std::vector<const Section*>& output_frame_sections,
-    EfmTrackLayout* layout, std::vector<std::string>* errors) {
+    EfmTrackLayout* layout, std::vector<std::string>* errors,
+    const EfmTrackLayoutOptions& options) {
   if (layout == nullptr || errors == nullptr) {
     return false;
   }
@@ -105,7 +107,8 @@ bool BuildEfmTrackLayout(
 
   std::size_t total_samples = 0;
   const std::vector<SectionRun> runs =
-      BuildRuns(standard, output_frame_sections, &total_samples);
+      BuildRuns(standard, output_frame_sections, options.single_programme_track,
+                &total_samples);
 
   // Subcode sections run at 75 Hz (IEC 60908-1999, 17.3); a trailing partial
   // section is not covered by the table and carries no P or Q data.

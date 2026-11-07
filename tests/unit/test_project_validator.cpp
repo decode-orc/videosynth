@@ -2166,6 +2166,99 @@ TEST(ProjectValidatorTest, NotesDownmixAndResampleOfAVideoSoundtrack) {
       ContainsMessage(logger.info, "resampled from 44100 Hz to 48000 Hz"));
 }
 
+// PAL project with a lead-in and a programme section both carrying EFM data.
+Project MakeEfmDataProject() {
+  Project project = MakeValidProject();
+  project.sections.clear();
+  Section lead_in = MakeEfmSection("LeadIn", SectionType::kLeadIn, 25);
+  lead_in.carries_efm_data = true;
+  project.sections.push_back(lead_in);
+  Section stills = MakeEfmSection("Stills", SectionType::kProgrammeArea, 200);
+  stills.carries_efm_data = true;
+  project.sections.push_back(stills);
+  project.laserdisc.enabled = true;
+  project.laserdisc.efm_data.enabled = true;
+  project.laserdisc.efm_data.image = "disc.dat";
+  return project;
+}
+
+TEST(ProjectValidatorTest, AcceptsEfmDataProject) {
+  ProjectValidator validator;
+  const ValidationResult result = validator.Validate(MakeEfmDataProject());
+  EXPECT_TRUE(result.is_valid)
+      << (result.errors.empty() ? "" : result.errors.front());
+  EXPECT_FALSE(ContainsMessage(result.warnings, "efm_data"));
+}
+
+TEST(ProjectValidatorTest, RejectsEfmDataTogetherWithEfmAudio) {
+  Project project = MakeEfmDataProject();
+  project.laserdisc.efm_audio.enabled = true;
+  ProjectValidator validator;
+  const ValidationResult result = validator.Validate(project);
+  EXPECT_FALSE(result.is_valid);
+  EXPECT_TRUE(ContainsMessage(result.errors, "one EFM channel"));
+}
+
+TEST(ProjectValidatorTest, RejectsSectionEfmDataWithoutProjectBlock) {
+  Project project = MakeEfmDataProject();
+  project.laserdisc.efm_data = EfmDataOutput{};
+  ProjectValidator validator;
+  const ValidationResult result = validator.Validate(project);
+  EXPECT_FALSE(result.is_valid);
+  EXPECT_TRUE(ContainsMessage(result.errors, "section.laserdisc.efm_data"));
+}
+
+TEST(ProjectValidatorTest, RejectsPalEfmDataSectionWithAnalogueAudio) {
+  Project project = MakeEfmDataProject();
+  AddActiveChannelPair(&project.sections[1], 0);
+  ProjectValidator validator;
+  const ValidationResult result = validator.Validate(project);
+  EXPECT_FALSE(result.is_valid);
+  EXPECT_TRUE(ContainsMessage(result.errors, "analogue sound"));
+}
+
+TEST(ProjectValidatorTest, RejectsEfmDataSettingsOutOfRange) {
+  ProjectValidator validator;
+
+  Project project = MakeEfmDataProject();
+  project.laserdisc.efm_data.first_address = -1;
+  EXPECT_TRUE(ContainsMessage(validator.Validate(project).errors,
+                              "efm_data.first_address"));
+
+  project = MakeEfmDataProject();
+  project.laserdisc.efm_data.picture_offset_sectors = 450000;
+  EXPECT_TRUE(ContainsMessage(validator.Validate(project).errors,
+                              "efm_data.picture_offset_sectors"));
+
+  project = MakeEfmDataProject();
+  project.laserdisc.efm_data.q_mode = 2;
+  EXPECT_TRUE(
+      ContainsMessage(validator.Validate(project).errors, "efm_data.q_mode"));
+
+  project = MakeEfmDataProject();
+  project.laserdisc.efm_data.image.clear();
+  EXPECT_TRUE(
+      ContainsMessage(validator.Validate(project).errors, "efm_data.image"));
+}
+
+TEST(ProjectValidatorTest, AcceptsCompactDiscQModeOverride) {
+  Project project = MakeEfmDataProject();
+  project.laserdisc.efm_data.q_mode = kEfmDataQModeCompactDisc;
+  ProjectValidator validator;
+  EXPECT_TRUE(validator.Validate(project).is_valid);
+}
+
+TEST(ProjectValidatorTest, WarnsWhenNoSectionCarriesEfmData) {
+  Project project = MakeEfmDataProject();
+  for (Section& section : project.sections) {
+    section.carries_efm_data = false;
+  }
+  ProjectValidator validator;
+  const ValidationResult result = validator.Validate(project);
+  EXPECT_TRUE(result.is_valid);
+  EXPECT_TRUE(ContainsMessage(result.warnings, "no section declares"));
+}
+
 TEST(ProjectValidatorTest, AcceptsEfmAudioWithDeclaredPairAndLeadIn) {
   ProjectValidator validator;
   const ValidationResult result = validator.Validate(MakeEfmProject());

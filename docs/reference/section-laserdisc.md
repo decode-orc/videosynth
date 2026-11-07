@@ -20,6 +20,7 @@ Where a section sits on the disc, and the biphase codes it carries. Optional —
 |-----|------|----------|-------------|
 | `area` | string | No | The disc area: `lead_in`, `programme_area` or `lead_out`; see [`area`](#area) |
 | `codes` | list | No | The biphase codes this section carries; see [`codes`](#codes) |
+| `efm_data` | map | No | `{}` — the section's frames carry the EFM data channel; see [`efm_data`](#efm_data) |
 
 The block must set at least one key. An empty block, or any other key, is a parse error.
 
@@ -51,6 +52,20 @@ Once any section is a `lead_in` or a `lead_out`, the whole sequence is checked (
 Violations are errors, not warnings: out-of-order sections would break monotonic picture-number and time-code generation (IEC 60856/60857).
 
 `area` also drives the [EFM](../user-manual/audio.md#laserdisc-efm-digital-audio) disc-area mapping — a lead-in carries the table of contents, each programme-area section is one EFM track, and the lead-out carries lead-out subcode. That mapping works whether or not the section carries codes, which is why an EFM-only project can have a short lead-in without the 938-frame warning a biphase CAV lead-in would get.
+
+## `efm_data`
+
+```yaml
+    laserdisc:
+      area: programme_area
+      efm_data: {}
+```
+
+Marks the section's frames as carrying the EFM data channel of the project's [`laserdisc.efm_data`](laserdisc.md#efm_data). The map takes no keys: which sectors a frame carries follows from the placement rule. Frames of sections without it carry no EFM signal at all.
+
+- It is a validation error without a project-level `laserdisc.efm_data`.
+- On PAL the EFM signal takes the place of the analogue sound carriers, so a section that declares `efm_data` and an `audio:` channel pair is a validation error.
+- A non-map value, or any key inside the map, is a parse error.
 
 ## `codes`
 
