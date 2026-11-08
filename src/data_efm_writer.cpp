@@ -26,16 +26,38 @@ bool IsBlankSector(const EfmSectorUserData& data) {
 }
 
 std::uint8_t ControlNibble(EfmDataQControl q_control) {
-  return q_control == EfmDataQControl::kDataCopyPermitted
-             ? efm::kControlDataCopyPermitted
-             : efm::kControlDataCopyProhibited;
+  switch (q_control) {
+    case EfmDataQControl::kDataCopyPermitted:
+      return efm::kControlDataCopyPermitted;
+    case EfmDataQControl::kAudio:
+      return efm::kControlAudioNoPreEmphasisCopyProhibited;
+    case EfmDataQControl::kData:
+      break;
+  }
+  return efm::kControlDataCopyProhibited;
+}
+
+// IEC 60908-1999, 17.5.1: the lead-in table of contents of a single track
+// holds track 01, A0, A1 and A2, each repeated three times. The EFM lead-in
+// must hold at least one such cycle.
+constexpr std::int64_t kSingleTrackTocSections =
+    4 * static_cast<std::int64_t>(efm::kTocItemRepeats);
+
+// Output frames needed to span `sections` subcode sections, rounded up.
+std::int64_t FramesForSections(Standard standard, std::int64_t sections) {
+  // IEC 60856:1986 Amd 2 (25 Hz) / IEC 60857:1986 Amd 2 (30000/1001 Hz).
+  const std::int64_t numerator = standard == Standard::kPal ? 25 : 30000;
+  const std::int64_t denominator = standard == Standard::kPal ? 1 : 1001;
+  const std::int64_t divisor =
+      static_cast<std::int64_t>(efm::kSubcodeSectionsPerSecond) * denominator;
+  return ((sections * numerator) + divisor - 1) / divisor;
 }
 
 }  // namespace
 
 bool BuildEfmDataTrackTable(const Project& project,
                             const std::vector<EfmDataFrame>& frames,
-                            efm::TrackTable* table,
+                            const EfmDataLayout& layout, efm::TrackTable* table,
                             std::vector<std::string>* errors) {
   if (table == nullptr || errors == nullptr) {
     return false;
@@ -47,6 +69,35 @@ bool BuildEfmDataTrackTable(const Project& project,
   }
   EfmTrackLayoutOptions options;
   options.single_programme_track = true;
+
+  // The programme area starts at Sector Address 0, so its Q absolute time
+  // equals the Sector Address and the 2 s pause before track 1 covers
+  // addresses 0 to 149; on an AIV disc that puts the start inside the video
+  // lead-in. The lead-in must leave room for the table of contents.
+  const Section* first = frames.empty() ? nullptr : frames.front().section;
+  if (first != nullptr && first->section_type == SectionType::kLeadIn) {
+    const std::int64_t zero_section = layout.zero_address_section();
+    if (zero_section < kSingleTrackTocSections) {
+      const Standard standard = project.cvbs_presets.video_standard_preset;
+      errors->push_back(
+          "EFM data: lead_in section '" + first->name +
+          "' is too short. Sector address 0, where the EFM programme area "
+          "and its 2 s pause start, falls " +
+          (zero_section < 0
+               ? std::to_string(-zero_section) +
+                     " subcode sections before the first output frame"
+               : "at subcode section " + std::to_string(zero_section)) +
+          ", but the EFM lead-in needs " +
+          std::to_string(kSingleTrackTocSections) +
+          " sections (one table of contents) before it. Lengthen the lead-in "
+          "by at least " +
+          std::to_string(FramesForSections(
+              standard, kSingleTrackTocSections - zero_section)) +
+          " frames or lower picture_offset_sectors.");
+      return false;
+    }
+    options.programme_start_section = zero_section;
+  }
   EfmTrackLayout track_layout;
   if (!BuildEfmTrackLayout(project.cvbs_presets.video_standard_preset, sections,
                            &track_layout, errors, options)) {
@@ -86,7 +137,7 @@ bool DataEfmWriter::BeginWrite(const Project& project,
     return false;
   }
   efm::TrackTable table;
-  if (!BuildEfmDataTrackTable(project, frames, &table, errors)) {
+  if (!BuildEfmDataTrackTable(project, frames, layout_, &table, errors)) {
     return false;
   }
   if (!encoder_.Begin(&layout_, table, image, errors)) {

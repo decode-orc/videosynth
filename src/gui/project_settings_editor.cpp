@@ -1008,10 +1008,13 @@ void ProjectSettingsEditor::LoadLaserdisc(const Project& project) {
   efm_data_offset_spin_->setValue(efm_data.picture_offset_sectors);
   efm_data_q_control_combo_->clear();
   for (const EfmDataQControl control : state.efm_data_q_control_options) {
-    efm_data_q_control_combo_->addItem(control == EfmDataQControl::kData
-                                           ? tr("Data, copy prohibited")
-                                           : tr("Data, copy permitted"),
-                                       static_cast<int>(control));
+    QString label = tr("Data, copy prohibited");
+    if (control == EfmDataQControl::kDataCopyPermitted) {
+      label = tr("Data, copy permitted");
+    } else if (control == EfmDataQControl::kAudio) {
+      label = tr("Audio (control 0)");
+    }
+    efm_data_q_control_combo_->addItem(label, static_cast<int>(control));
   }
   efm_data_q_control_combo_->setCurrentIndex(
       std::max(0, efm_data_q_control_combo_->findData(

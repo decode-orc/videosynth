@@ -755,6 +755,9 @@ enum class EfmDataQControl {
   kData,
   // 0110: data track, digital copy permitted.
   kDataCopyPermitted,
+  // 0000: two audio channels without pre-emphasis, copy prohibited, as some
+  // AIV pressings record on their data track.
+  kAudio,
 };
 
 // Q-channel ADR (mode) values an EFM data track may record.

@@ -43,12 +43,13 @@ enum class EfmDataSlotKind {
   kSilent,
   // Image sector `image_index`, with Sector Address `address`.
   kImageSector,
-  // A sector before the image in the lead-in (or before address 0): Mode 1,
-  // zero user data, header holding `address` (the time since the start of the
-  // stream) with (A0) added to MIN (ECMA-130 14.2).
+  // A sector before address 0, in the EFM lead-in: Mode 1, zero user data,
+  // header holding `address` (the time since the start of the stream) with
+  // (A0) added to MIN (ECMA-130 14.2).
   kLeadInFill,
-  // A sector outside the image elsewhere: Mode 0 (ECMA-130 14.1) with Sector
-  // Address `address`.
+  // A sector outside the image from address 0 on, in the programme area,
+  // even when its frame belongs to a lead_in section: Mode 0 (ECMA-130 14.1)
+  // with Sector Address `address`.
   kMode0Fill,
 };
 
@@ -76,8 +77,6 @@ struct EfmDataLayout {
   // Per subcode section: true when all of its 98 F1 frames lie in frames that
   // carry EFM.
   std::vector<bool> section_carried;
-  // Per subcode section: true when it starts in a lead_in section.
-  std::vector<bool> section_in_lead_in;
 
   std::int64_t address_offset = 0;
   std::int64_t first_address = 0;
@@ -107,6 +106,11 @@ struct EfmDataLayout {
   std::int64_t first_picture_mismatch_frame = -1;
 
   std::size_t section_count() const { return section_carried.size(); }
+
+  // The subcode section that carries Sector Address 0 (negative when it lies
+  // before the stream). The EFM programme area starts there, so its Q
+  // absolute time equals the Sector Address, as on the AIV discs.
+  std::int64_t zero_address_section() const { return -address_offset; }
 
   // What subcode section `section` carries.
   EfmDataSlot Slot(std::size_t section) const;

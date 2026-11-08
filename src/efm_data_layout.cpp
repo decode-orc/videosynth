@@ -68,7 +68,7 @@ EfmDataSlot EfmDataLayout::Slot(std::size_t section) const {
     slot.kind = EfmDataSlotKind::kImageSector;
     slot.image_index = static_cast<std::size_t>(image_index);
     slot.address = static_cast<std::size_t>(address);
-  } else if (address < 0 || (image_index < 0 && section_in_lead_in[section])) {
+  } else if (address < 0) {
     slot.kind = EfmDataSlotKind::kLeadInFill;
     slot.address = section;
   } else {
@@ -117,7 +117,6 @@ bool BuildEfmDataLayout(Standard standard,
   // pipeline is flushed there).
   const std::size_t section_count = total_f1 / kFramesPerSection;
   layout->section_carried.assign(section_count, false);
-  layout->section_in_lead_in.assign(section_count, false);
   std::vector<std::size_t> run_end(section_count, 0);
   constexpr std::size_t kStreamEnd = std::numeric_limits<std::size_t>::max();
   // The F1 index at which the carrying run containing each frame ends,
@@ -143,9 +142,6 @@ bool BuildEfmDataLayout(Standard standard,
       while (layout->frame_f1_start[k + 1] <= first) {
         ++k;
       }
-      const Section* section = frames[k].section;
-      layout->section_in_lead_in[s] =
-          section != nullptr && section->section_type == SectionType::kLeadIn;
       bool carried = true;
       std::size_t j = k;
       while (carried && layout->frame_f1_start[j] <= last) {

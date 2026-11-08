@@ -129,6 +129,20 @@ bool BuildEfmTrackLayout(
       return false;
     }
   }
+  // The programme area may start inside the lead-in (an EFM data stream
+  // anchored on sector address 0).
+  if (options.programme_start_section.has_value() && runs.size() > 1 &&
+      runs[0].area == efm::SubcodeArea::kLeadIn &&
+      runs[1].area == efm::SubcodeArea::kProgramme) {
+    const std::int64_t requested = *options.programme_start_section;
+    if (requested <= 0) {
+      errors->push_back("EFM lead-in section " + SectionLabel(runs[0].section) +
+                        " is too short: the programme area starts before it "
+                        "has occupied a subcode section (1/75 s).");
+      return false;
+    }
+    starts[1] = std::min(starts[1], static_cast<std::size_t>(requested));
+  }
   if (starts.back() >= total_sections) {
     errors->push_back("EFM audio section " + SectionLabel(runs.back().section) +
                       " is too short to occupy a subcode section (1/75 s).");

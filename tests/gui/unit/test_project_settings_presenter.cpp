@@ -335,7 +335,7 @@ TEST(ProjectSettingsPresenterTest, EfmDataIdleUntilEnabled) {
   ASSERT_EQ(state.efm_data_q_mode_options.size(), 2U);
   EXPECT_EQ(state.efm_data_q_mode_options[0], kEfmDataQModeLaserdisc);
   EXPECT_EQ(state.efm_data_q_mode_options[1], kEfmDataQModeCompactDisc);
-  EXPECT_EQ(state.efm_data_q_control_options.size(), 2U);
+  EXPECT_EQ(state.efm_data_q_control_options.size(), 3U);
 }
 
 TEST(ProjectSettingsPresenterTest, EfmDataStatusFollowsTheValidator) {

@@ -20,6 +20,7 @@
 #include "efm_channel_decoder.h"
 #include "videosynth/data_efm_writer.h"
 #include "videosynth/efm/data_sector.h"
+#include "videosynth/efm/subcode_generator.h"
 #include "videosynth/efm_data_encoder.h"
 
 namespace videosynth {
@@ -128,18 +129,18 @@ TEST(EfmDataEncoderTest, RoundTripRecoversEveryPlacedSector) {
   Project project;
   project.cvbs_presets.video_standard_preset = Standard::kPal;
   project.laserdisc.efm_data.enabled = true;
-  efm::TrackTable table;
   std::vector<std::string> errors;
-  ASSERT_TRUE(BuildEfmDataTrackTable(project, frames, &table, &errors))
-      << (errors.empty() ? "" : errors.front());
-  EXPECT_EQ(table.control, efm::kControlDataCopyProhibited);
-  EXPECT_EQ(table.adr, efm::kAdrMode4);
-
   EfmDataLayoutSettings settings;
   settings.image_sector_count = image.SectorCount();
   EfmDataLayout layout;
   ASSERT_TRUE(
       BuildEfmDataLayout(Standard::kPal, frames, settings, &layout, &errors));
+
+  efm::TrackTable table;
+  ASSERT_TRUE(BuildEfmDataTrackTable(project, frames, layout, &table, &errors))
+      << (errors.empty() ? "" : errors.front());
+  EXPECT_EQ(table.control, efm::kControlDataCopyProhibited);
+  EXPECT_EQ(table.adr, efm::kAdrMode4);
 
   EfmDataEncoder encoder;
   ASSERT_TRUE(encoder.Begin(&layout, table, &image, &errors));
@@ -213,14 +214,14 @@ TEST(EfmDataEncoderTest, FramesWithoutEfmYieldNoTValues) {
   MemoryEfmSectorImage image(MakeImage(10));
   Project project;
   project.cvbs_presets.video_standard_preset = Standard::kPal;
-  efm::TrackTable table;
   std::vector<std::string> errors;
-  ASSERT_TRUE(BuildEfmDataTrackTable(project, frames, &table, &errors));
   EfmDataLayoutSettings settings;
   settings.image_sector_count = image.SectorCount();
   EfmDataLayout layout;
   ASSERT_TRUE(
       BuildEfmDataLayout(Standard::kPal, frames, settings, &layout, &errors));
+  efm::TrackTable table;
+  ASSERT_TRUE(BuildEfmDataTrackTable(project, frames, layout, &table, &errors));
   EfmDataEncoder encoder;
   ASSERT_TRUE(encoder.Begin(&layout, table, &image, &errors));
 
@@ -250,13 +251,135 @@ TEST(EfmDataEncoderTest, TrackTableCarriesQControlAndMode) {
   project.cvbs_presets.video_standard_preset = Standard::kPal;
   project.laserdisc.efm_data.q_control = EfmDataQControl::kDataCopyPermitted;
   project.laserdisc.efm_data.q_mode = kEfmDataQModeCompactDisc;
-  efm::TrackTable table;
   std::vector<std::string> errors;
-  ASSERT_TRUE(BuildEfmDataTrackTable(project, frames, &table, &errors));
+  EfmDataLayout layout;
+  ASSERT_TRUE(BuildEfmDataLayout(Standard::kPal, frames, {}, &layout, &errors));
+  efm::TrackTable table;
+  ASSERT_TRUE(BuildEfmDataTrackTable(project, frames, layout, &table, &errors));
   EXPECT_EQ(table.control, efm::kControlDataCopyPermitted);
   EXPECT_EQ(table.adr, efm::kAdrMode1);
   ASSERT_EQ(table.entries.size(), 1U);
   EXPECT_EQ(table.entries[0].track_number, 1U);
+}
+
+// The Q fields of subcode section `index` of `table` (IEC 60908-1999,
+// 17.5.1): TNO, index (POINT in the lead-in) and the absolute time in
+// sections (zero in the lead-in, whose AMIN/ASEC/AFRAME are P times).
+struct QFields {
+  int track = -1;
+  int index = -1;
+  std::size_t absolute_sections = 0;
+};
+
+QFields DecodeQ(const efm::SubcodeGenerator& generator, std::size_t index) {
+  efm::SubcodeSection section;
+  EXPECT_TRUE(generator.GenerateSection(index, &section));
+  const efm::QChannelPayload payload = section.QPayload();
+  QFields fields;
+  fields.track = static_cast<int>(FromBcd(payload[1]));
+  fields.index = static_cast<int>(FromBcd(payload[2]));
+  fields.absolute_sections = (FromBcd(payload[7]) * 4500) +
+                             (FromBcd(payload[8]) * 75) + FromBcd(payload[9]);
+  return fields;
+}
+
+TEST(EfmDataEncoderTest, ProgrammeAreaStartsAtAddressZeroInsideTheLeadIn) {
+  // An AIV side: picture 1 carries addresses 153-155, so address 0 falls 51
+  // frames (153 sections) into the 60-frame lead-in, at section 27.
+  const Section lead_in = MakeSection("LeadIn", SectionType::kLeadIn, true);
+  const Section data = MakeSection("Data", SectionType::kProgrammeArea, true);
+  std::vector<EfmDataFrame> frames;
+  AddFrames(&lead_in, 60, 0, &frames);
+  AddFrames(&data, 20, 1, &frames);
+
+  Project project;
+  project.cvbs_presets.video_standard_preset = Standard::kPal;
+  std::vector<std::string> errors;
+  EfmDataLayoutSettings settings;
+  settings.image_sector_count = 100;
+  settings.first_address = 143;
+  EfmDataLayout layout;
+  ASSERT_TRUE(
+      BuildEfmDataLayout(Standard::kPal, frames, settings, &layout, &errors));
+  efm::TrackTable table;
+  ASSERT_TRUE(BuildEfmDataTrackTable(project, frames, layout, &table, &errors))
+      << (errors.empty() ? "" : errors.front());
+  ASSERT_EQ(table.entries.size(), 2U);
+  EXPECT_EQ(table.entries[0].area, efm::SubcodeArea::kLeadIn);
+  EXPECT_EQ(table.entries[0].section_count, 27U);
+  EXPECT_EQ(table.entries[1].start_section, 27U);
+
+  efm::SubcodeGenerator generator;
+  ASSERT_TRUE(generator.Begin(table));
+  EXPECT_EQ(DecodeQ(generator, 26).track, 0);
+  // The 2 s pause before track 1 covers addresses 0 to 149 ...
+  const QFields pause_start = DecodeQ(generator, 27);
+  EXPECT_EQ(pause_start.track, 1);
+  EXPECT_EQ(pause_start.index, 0);
+  EXPECT_EQ(pause_start.absolute_sections, 0U);
+  // ... and index 01 starts at 00:02:00 in the frame before picture 1.
+  const QFields track_start = DecodeQ(generator, 27 + 150);
+  EXPECT_EQ(track_start.index, 1);
+  EXPECT_EQ(track_start.absolute_sections, 150U);
+  // Q absolute time equals the Sector Address everywhere in the programme
+  // area, across the lead-in / programme boundary at section 180.
+  for (std::size_t s = 27; s < generator.SectionCount(); ++s) {
+    ASSERT_EQ(
+        static_cast<std::int64_t>(DecodeQ(generator, s).absolute_sections),
+        static_cast<std::int64_t>(s) + layout.address_offset)
+        << "section " << s;
+  }
+  // The image's first sector, address 143, sits in the lead-in frames.
+  EXPECT_EQ(layout.Slot(170).kind, EfmDataSlotKind::kImageSector);
+  EXPECT_EQ(layout.Slot(170).address, 143U);
+  EXPECT_GE(layout.frame_f1_start[60], 171U * efm::kFramesPerSubcodeSection);
+}
+
+TEST(EfmDataEncoderTest, RejectsALeadInTooShortForTheTableOfContents) {
+  // Address 0 falls 153 sections before picture 1, which a 10-frame (30
+  // section) lead-in cannot hold.
+  const Section lead_in = MakeSection("LeadIn", SectionType::kLeadIn, true);
+  const Section data = MakeSection("Data", SectionType::kProgrammeArea, true);
+  std::vector<EfmDataFrame> frames;
+  AddFrames(&lead_in, 10, 0, &frames);
+  AddFrames(&data, 10, 1, &frames);
+
+  Project project;
+  project.cvbs_presets.video_standard_preset = Standard::kPal;
+  std::vector<std::string> errors;
+  EfmDataLayout layout;
+  ASSERT_TRUE(BuildEfmDataLayout(Standard::kPal, frames, {}, &layout, &errors));
+  efm::TrackTable table;
+  EXPECT_FALSE(
+      BuildEfmDataTrackTable(project, frames, layout, &table, &errors));
+  ASSERT_EQ(errors.size(), 1U);
+  EXPECT_NE(errors.front().find("'LeadIn' is too short"), std::string::npos);
+  // 123 sections before the stream plus 12 for the table of contents.
+  EXPECT_NE(errors.front().find("by at least 45 frames"), std::string::npos);
+
+  // With picture_offset_sectors 0 address 0 lands at section 27, leaving
+  // room for the table of contents.
+  EfmDataLayoutSettings settings;
+  settings.picture_offset_sectors = 0;
+  ASSERT_TRUE(
+      BuildEfmDataLayout(Standard::kPal, frames, settings, &layout, &errors));
+  errors.clear();
+  EXPECT_TRUE(BuildEfmDataTrackTable(project, frames, layout, &table, &errors));
+}
+
+TEST(EfmDataEncoderTest, AudioQControlRecordsControlZero) {
+  const Section data = MakeSection("Data", SectionType::kProgrammeArea, true);
+  std::vector<EfmDataFrame> frames;
+  AddFrames(&data, 10, 1, &frames);
+  Project project;
+  project.cvbs_presets.video_standard_preset = Standard::kPal;
+  project.laserdisc.efm_data.q_control = EfmDataQControl::kAudio;
+  std::vector<std::string> errors;
+  EfmDataLayout layout;
+  ASSERT_TRUE(BuildEfmDataLayout(Standard::kPal, frames, {}, &layout, &errors));
+  efm::TrackTable table;
+  ASSERT_TRUE(BuildEfmDataTrackTable(project, frames, layout, &table, &errors));
+  EXPECT_EQ(table.control, efm::kControlAudioNoPreEmphasisCopyProhibited);
 }
 
 TEST(EfmDataEncoderTest, BeginRejectsAnImageThatDisagreesWithTheLayout) {

@@ -183,7 +183,8 @@ ProjectSettingsFormState BuildProjectSettingsFormState(const Project& project) {
   state.efm_data_fields_editable =
       has_efm_channel && laserdisc.efm_data.enabled;
   state.efm_data_q_control_options = {EfmDataQControl::kData,
-                                      EfmDataQControl::kDataCopyPermitted};
+                                      EfmDataQControl::kDataCopyPermitted,
+                                      EfmDataQControl::kAudio};
   state.efm_data_q_mode_options = {kEfmDataQModeLaserdisc,
                                    kEfmDataQModeCompactDisc};
   state.efm_data_status = ClassifyEfmData(project);

@@ -26,10 +26,15 @@
 namespace videosynth {
 
 // The subcode track table of an EFM data stream: one data track over the
-// whole programme area, with the project's Q control and Q mode (ADR).
+// whole programme area, with the project's Q control and Q mode (ADR). When
+// the stream opens with a lead_in section, the programme area starts at the
+// subcode section that `layout` gives Sector Address 0, so the Q absolute
+// time equals the Sector Address; the lead-in sections before it stay EFM
+// lead-in. Returns false and appends a message when that leaves the lead-in
+// less than one table-of-contents cycle.
 bool BuildEfmDataTrackTable(const Project& project,
                             const std::vector<EfmDataFrame>& frames,
-                            efm::TrackTable* table,
+                            const EfmDataLayout& layout, efm::TrackTable* table,
                             std::vector<std::string>* errors);
 
 // Drives an EfmDataEncoder per stored output frame and writes the result as

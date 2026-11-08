@@ -1206,10 +1206,13 @@ bool ParseEfmData(const YAML::Node& node, EfmDataOutput* efm_data,
       efm_data->q_control = EfmDataQControl::kData;
     } else if (q_control == "data_copy_permitted") {
       efm_data->q_control = EfmDataQControl::kDataCopyPermitted;
+    } else if (q_control == "audio") {
+      efm_data->q_control = EfmDataQControl::kAudio;
     } else {
       errors->push_back(context + ".q_control has unrecognised value '" +
                         q_control +
-                        "'. Expected one of: data, data_copy_permitted.");
+                        "'. Expected one of: data, data_copy_permitted, "
+                        "audio.");
       return false;
     }
   }

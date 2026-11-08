@@ -351,12 +351,12 @@ sections:
           video_audio: { stream: 0 }
 ```
 
-Where a sector lies against the picture numbers is part of the format, because AIV players find data by picture number and EFM time together. By default picture *p* carries image sectors 3*p* + 150 to 3*p* + 152 on PAL, so the image's first 153 sectors fall in the lead-in. Sections that do not declare `efm_data` carry no EFM signal, and the image sectors that fall on their pictures are left out. The run log says how many were left out, from which address, and warns if any of them is not blank. Before the image's first sector the stream carries lead-in sectors, which a decoder discards, and after its last it carries Mode 0 sectors, which decode as zero-filled sectors past the image's end.
+Where a sector lies against the picture numbers is part of the format, because AIV players find data by picture number and EFM time together. By default picture *p* carries image sectors 3*p* + 150 to 3*p* + 152 on PAL, so the image's first 153 sectors fall in the lead-in. The EFM programme area starts at sector 0, 51 frames before picture 1, so those sectors carry programme-area subcode as on a real AIV disc, and only the lead-in frames before it carry the table of contents. The lead-in therefore needs at least 55 frames on PAL. Sections that do not declare `efm_data` carry no EFM signal, and the image sectors that fall on their pictures are left out. The run log says how many were left out, from which address, and warns if any of them is not blank. Before sector 0 the stream carries lead-in sectors, which a decoder discards; between sector 0 and the image's first sector, and after its last, it carries Mode 0 sectors, which decode as zero-filled sectors.
 
 The `.efm` and `.efm.meta` files are written beside the video output, as for EFM audio. `efm_data` and `efm_audio` cannot be used together.
 
 !!! note
-    decode-orc's EFM sink skips lead-in (track 00) sections until its timeline settles, so image sectors placed in the lead-in come out of a decode as missing sectors, though the stream carries them. Every sector placed in the programme area decodes byte-identical.
+    decode-orc's EFM sink skips lead-in (track 00) sections. Image sectors always lie at address 0 or above, so they carry programme-area subcode even in the video lead-in, and every placed sector decodes byte-identical.
 
 ## A complete example
 

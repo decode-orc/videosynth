@@ -242,7 +242,10 @@ void EmitLaserdisc(YAML::Emitter& out, const LaserdiscParameters& laserdisc,
           << efm_data.picture_offset_sectors;
     }
     if (efm_data.q_control != EfmDataQControl::kData) {
-      out << YAML::Key << "q_control" << YAML::Value << "data_copy_permitted";
+      out << YAML::Key << "q_control" << YAML::Value
+          << (efm_data.q_control == EfmDataQControl::kAudio
+                  ? "audio"
+                  : "data_copy_permitted");
     }
     if (efm_data.q_mode != kEfmDataQModeLaserdisc) {
       out << YAML::Key << "q_mode" << YAML::Value << efm_data.q_mode;

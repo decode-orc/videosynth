@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "videosynth/yaml_project_emitter.h"
 #include "videosynth/yaml_project_parser.h"
 
 namespace videosynth {
@@ -1304,6 +1305,24 @@ TEST(YamlProjectParserTest, ParsesEfmDataOverrides) {
   EXPECT_EQ(efm_data.q_mode, kEfmDataQModeCompactDisc);
 }
 
+TEST(YamlProjectParserTest, ParsesEfmDataAudioQControlAndEmitsItBack) {
+  YamlProjectParser parser;
+  const ParseResult result = parser.ParseString(
+      MakeProjectWithLaserdiscBlock("  efm_data:\n"
+                                    "    image: disc.dat\n"
+                                    "    q_control: audio\n"));
+  ASSERT_TRUE(result.ok) << (result.errors.empty() ? "" : result.errors[0]);
+  EXPECT_EQ(result.project.laserdisc.efm_data.q_control,
+            EfmDataQControl::kAudio);
+
+  YamlProjectEmitter emitter;
+  const ParseResult reparsed =
+      parser.ParseString(emitter.EmitString(result.project));
+  ASSERT_TRUE(reparsed.ok);
+  EXPECT_EQ(reparsed.project.laserdisc.efm_data.q_control,
+            EfmDataQControl::kAudio);
+}
+
 TEST(YamlProjectParserTest, RejectsEfmDataWithoutImageOrWithBadQControl) {
   YamlProjectParser parser;
   EXPECT_FALSE(
@@ -1315,7 +1334,7 @@ TEST(YamlProjectParserTest, RejectsEfmDataWithoutImageOrWithBadQControl) {
       parser
           .ParseString(MakeProjectWithLaserdiscBlock("  efm_data:\n"
                                                      "    image: disc.dat\n"
-                                                     "    q_control: audio\n"))
+                                                     "    q_control: cdda\n"))
           .ok);
   EXPECT_FALSE(
       parser

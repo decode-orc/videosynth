@@ -97,6 +97,28 @@ TEST(EfmDataLayoutTest, SectorsBeforeTheImageAreLeadInFill) {
   EXPECT_EQ(layout.Slot(27).image_index, 0U);
 }
 
+TEST(EfmDataLayoutTest, LeadInSectorsFromAddressZeroAreMode0Fill) {
+  const Section lead_in = MakeSection("LeadIn", SectionType::kLeadIn, true);
+  const Section programme =
+      MakeSection("Stills", SectionType::kProgrammeArea, true);
+  std::vector<EfmDataFrame> frames;
+  AddFrames(&lead_in, 60, 0, &frames);
+  AddFrames(&programme, 10, 1, &frames);
+
+  // The image starts at address 143, 10 sectors before picture 1. Address 0
+  // (section 27) starts the programme area inside the lead-in, so the
+  // sectors from there to the image are Mode 0, not lead-in fill.
+  const EfmDataLayout layout = Build(Standard::kPal, frames, 100, 143);
+  EXPECT_EQ(layout.zero_address_section(), 27);
+  EXPECT_EQ(layout.Slot(26).kind, EfmDataSlotKind::kLeadInFill);
+  EXPECT_EQ(layout.Slot(27).kind, EfmDataSlotKind::kMode0Fill);
+  EXPECT_EQ(layout.Slot(27).address, 0U);
+  EXPECT_EQ(layout.Slot(169).kind, EfmDataSlotKind::kMode0Fill);
+  EXPECT_EQ(layout.Slot(170).kind, EfmDataSlotKind::kImageSector);
+  EXPECT_EQ(layout.Slot(170).address, 143U);
+  EXPECT_EQ(layout.Slot(170).image_index, 0U);
+}
+
 TEST(EfmDataLayoutTest, SectorsAfterTheImageAreMode0WithContinuingAddresses) {
   const Section programme =
       MakeSection("Stills", SectionType::kProgrammeArea, true);
