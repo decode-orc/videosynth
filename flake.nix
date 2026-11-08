@@ -14,8 +14,11 @@
         # commit hash is passed in as a version override instead.
         versionString = self.shortRev or self.dirtyShortRev or "0.1.0";
 
-        # Python environment for the MkDocs documentation site.
-        mkdocsPythonEnv = pkgs.python312.withPackages (ps: [
+        # Python environment for the MkDocs documentation site. Uses the default
+        # python3 so packages come from the binary cache: Hydra only builds the
+        # default interpreter's package set, so pinning e.g. python312 forces
+        # local source builds (and their test suites).
+        mkdocsPythonEnv = pkgs.python3.withPackages (ps: [
           ps.mkdocs
           ps.mkdocs-material
           ps.mkdocs-awesome-nav
