@@ -1512,6 +1512,9 @@ bool GenerationStage::BuildFrameSchedule(
   // picture_number code. This offset is added to global_frame_index when
   // computing the colour-subcarrier phase so that sources not starting at PN 1
   // still produce disc-accurate colour sequences ((PN-1) % colour_period).
+  // The first section carrying a picture_number code sets it, numbering from
+  // 1 when it has no start_value; a later section's start_value re-anchors
+  // only that section.
   std::size_t initial_frame_offset = 0;
   for (const Section& sec : project.sections) {
     bool found = false;
@@ -1520,9 +1523,11 @@ bool GenerationStage::BuildFrameSchedule(
         continue;
       }
       for (const Section::LineInjectionCode& code : inj.codes) {
-        if (code.code_type == "picture_number" && code.start_value_specified &&
-            code.start_value > 1) {
-          initial_frame_offset = static_cast<std::size_t>(code.start_value - 1);
+        if (code.code_type == "picture_number") {
+          if (code.start_value_specified && code.start_value > 1) {
+            initial_frame_offset =
+                static_cast<std::size_t>(code.start_value - 1);
+          }
           found = true;
           break;
         }

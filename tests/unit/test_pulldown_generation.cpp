@@ -361,6 +361,42 @@ TEST(PulldownGenerationTest, CavFilmDiscPositionFollowsThePictureNumber) {
   }
 }
 
+// The first section with picture numbers sets the colour sequence's offset,
+// even when it numbers from 1, with or without a start_value; a later
+// section's start_value re-anchors only that section.
+TEST(PulldownGenerationTest, FirstPictureNumberSectionSetsTheColourOffset) {
+  for (const bool first_has_start_value : {true, false}) {
+    Project project;
+    project.cvbs_presets.video_standard_preset = Standard::kNtsc;
+    project.cvbs_presets.sample_encoding_preset = "CVBS_U10_4FSC";
+    project.cvbs_presets.signal_state_preset = "STANDARD_STABLE_LOCKED";
+    project.laserdisc.disc_type = "CAV";
+    // Four pictures in five frames, then a video section from picture 4,
+    // whose offset of 3 frames would swap the NTSC colour sequence.
+    Section film = WithPictureNumber(
+        MakeFilm("Film", 0, 3, CadencePhase::kA, CadenceContinuity::kRestart),
+        1);
+    film.line_injections[0].codes[0].start_value_specified =
+        first_has_start_value;
+    project.sections = {
+        film, WithPictureNumber(MakeClip("Video", "video.mkv", 0, 2), 4)};
+
+    std::vector<IGenerationStage::FrameScheduleItem> schedule;
+    std::vector<std::string> errors;
+    ASSERT_TRUE(MakeStage()->BuildFrameSchedule(project, &schedule, &errors))
+        << (errors.empty() ? "" : errors.front());
+    ASSERT_EQ(schedule.size(), 8U);
+    for (std::size_t frame = 0; frame < 5U; ++frame) {
+      EXPECT_EQ(schedule[frame].enrichment->disc_frame_index, frame)
+          << "start_value " << first_has_start_value << " frame " << frame;
+    }
+    for (std::size_t frame = 5; frame < 8U; ++frame) {
+      EXPECT_EQ(schedule[frame].enrichment->disc_frame_index, frame - 2U)
+          << "start_value " << first_has_start_value << " frame " << frame;
+    }
+  }
+}
+
 // A film reel's disc position starts where its first picture lies on a
 // continuous film disc; a video section without picture numbers keeps the
 // frame counter.
