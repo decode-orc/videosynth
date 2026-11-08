@@ -697,6 +697,9 @@ Section ApplySectionEditDelta(const Section& before, const Section& after,
   if (after.horizontal_resample != before.horizontal_resample) {
     target.horizontal_resample = after.horizontal_resample;
   }
+  if (after.horizontal_mapping != before.horizontal_mapping) {
+    target.horizontal_mapping = after.horizontal_mapping;
+  }
   if (!(after.chroma_line_sign == before.chroma_line_sign)) {
     target.chroma_line_sign = after.chroma_line_sign;
   }

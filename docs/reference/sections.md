@@ -30,7 +30,8 @@ sections:
 | `cadence` | map | No | [field cadence](#cadence) | video cadence |
 | `laserdisc` | map | No | [section `laserdisc`](section-laserdisc.md) — disc area and biphase codes (LaserDisc projects only) | absent |
 | `line_injections` | list | No | `vitc` only, not implemented — see [section `laserdisc`](section-laserdisc.md#vitc-line-injections) | absent |
-| `horizontal_resample` | string | No | `nearest`, `bandlimited` ([horizontal mapping](#horizontal_resample)) | `nearest` |
+| `horizontal_resample` | string | No | `nearest`, `bandlimited` ([horizontal resampling](#horizontal_resample)) | `nearest` |
+| `horizontal_mapping` | string | No | `active_window`, `bt601` ([horizontal mapping](#horizontal_mapping)) | `active_window` |
 | `chroma_line_sign` | list | No | [chroma line sign regions](#chroma_line_sign) (PAL and PAL-M) | absent |
 | `luma_bandwidth` | map | No | [luma bandwidth limit](#luma_bandwidth) | absent |
 | `picture_response` | string or map | No | `domesday`, or a map of [picture response](#picture_response) curves | absent |
@@ -135,7 +136,7 @@ The keys, the CAV minimum durations, the [ordering rules](section-laserdisc.md#o
 
 ## `horizontal_resample`
 
-How the source raster's 720 active pixels are mapped onto the 4fsc active window (922 samples for PAL and SECAM, 52 µs). Optional.
+How the source raster's 720 active pixels are interpolated onto the 4fsc active window (922 samples for PAL and SECAM, 52 µs). Optional. Where the pixels sit along the line is set by [`horizontal_mapping`](#horizontal_mapping); the positions below are for its default, `active_window`.
 
 ```yaml
 - name: Photo
@@ -158,6 +159,33 @@ How the source raster's 720 active pixels are mapped onto the 4fsc active window
 - `nearest` keeps existing projects bit-exact.
 
 Validation: any other value is a parse error. The emitter writes the key only for `bandlimited`.
+
+## `horizontal_mapping`
+
+Where the source raster's pixels sit along the line. Optional.
+
+```yaml
+- name: Capture
+  type: progressive
+  source: "{project}/media/capture.mkv"
+  duration_frames: 54000
+  horizontal_mapping: bt601
+```
+
+| Value | Mapping |
+|-------|---------|
+| `active_window` (default) | The 720 source pixels are stretched over the 52 µs active window: sample *x* of an *N*-sample window is at pixel position *x* · 720 / *N*. |
+| `bt601` | Source pixel *n* is centred at the ITU-R BT.601 sampling instant *t*₀ + *n* / 13.5 MHz after 0H, so the 720 pixels span their native 53.33 µs. |
+
+- *t*₀ is the start of the BT.601 digital active line: 132 luminance periods (9.78 µs) after 0H for 625-line, 122 periods (9.04 µs) for 525-line (ITU-R BT.601-5 Part A Table 2 item 7 and Appendix 1). Sample 0 of every 4fsc line is 0H.
+- One source pixel is 4fsc / 13.5 MHz samples wide: 1.3137 for PAL and SECAM (720 pixels over 945.8 samples), 1.0606 for NTSC (763.6 samples).
+- The active window itself does not change. On PAL and SECAM it shows source pixels 3 to 704 and every window sample carries picture. On NTSC and PAL-M the window starts 10.5 µs after 0H, so it shows pixels 19 to 719, and the last two samples of the window, past the end of pixel 719, stay at blanking.
+- A source sampled on the BT.601 grid — a 13.5 MHz digital capture, or a decode-orc `mkv-ffv1-bt601` export — keeps its horizontal scale and position through the 4fsc signal. With `active_window` the same source comes out 2.5 % narrower (52 / 53.33) and shifted by about 6 pixels.
+- [`horizontal_resample`](#horizontal_resample) applies on either grid: `nearest` holds pixel ⌊*u*⌋ at pixel position *u*, `bandlimited` interpolates at *u* − 0.5.
+- The [`picture_response`](#picture_response), [`luma_bandwidth`](#luma_bandwidth) limit and the chroma low-pass follow the mapping. The [`chroma_line_sign`](#chroma_line_sign) regions are tested against source pixels, before it.
+- `active_window` keeps existing projects bit-exact.
+
+Validation: any other value is a parse error. The emitter writes the key only for `bt601`.
 
 ## `chroma_line_sign`
 
@@ -187,7 +215,7 @@ Rectangles of the source picture whose U or V is multiplied by each line's PAL V
 - The V-switch sign is +1 on lines whose V axis is transmitted as is and −1 on lines where it is inverted (ITU-R BT.1700 Annex 1 Part B Table 1 item 10f). It belongs to the line, and a given frame line's switch flips every frame (625 and 525 are odd), so a still image alone cannot express it.
 - `v: follow_switch` cancels the switch: the transmitted V carrier is unswitched. A PAL decoder, which removes the switch, sees V alternate line by line. A correct delay-line decoder averages it to grey; delay-line amplitude errors show as "Venetian blinds" and a non-orthogonal demodulator colours it. Because the unswitched V lands where U would be in the vertical spectrum, a 2D or Transform PAL decoder cannot tell it from U by position.
 - `u: follow_switch` makes U alternate with the switch (the "+V/±U anti-PAL" field).
-- Regions are tested against source pixels, before the [horizontal mapping](#horizontal_resample). Overlapping regions each apply their sign, so two `follow_switch` regions on one component cancel.
+- Regions are tested against source pixels, before the [horizontal mapping](#horizontal_mapping). Overlapping regions each apply their sign, so two `follow_switch` regions on one component cancel.
 - Lines outside every region, and every line with a +1 switch sign, are bit-identical to a section without the block.
 - The [picture truth](output.md#truth) includes the alternation.
 

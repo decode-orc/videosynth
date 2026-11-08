@@ -657,6 +657,20 @@ QWidget* SectionEditor::BuildPictureGroup() {
          "Nyquist frequency instead."));
   form->addRow(tr("Horizontal resampling:"), horizontal_resample_combo_);
 
+  horizontal_mapping_combo_ = new QComboBox(picture_group_);
+  horizontal_mapping_combo_->addItem(
+      tr("Active window"), static_cast<int>(HorizontalMapping::kActiveWindow));
+  horizontal_mapping_combo_->addItem(
+      tr("BT.601 grid"), static_cast<int>(HorizontalMapping::kBt601));
+  horizontal_mapping_combo_->setToolTip(
+      tr("Where the source pixels sit along the line. Active window stretches "
+         "the 720 pixels over the 52 us active line. BT.601 grid places them "
+         "at the 13.5 MHz BT.601 sampling instants (53.33 us, starting 9.78 us "
+         "after 0H on 625-line, 9.04 us on 525-line), so a BT.601 capture or "
+         "export keeps its scale and position; the edges of the line beyond "
+         "the 720 pixels stay at blanking."));
+  form->addRow(tr("Horizontal mapping:"), horizontal_mapping_combo_);
+
   chroma_line_sign_note_ = new QLabel(picture_group_);
   chroma_line_sign_note_->setWordWrap(true);
   chroma_line_sign_note_->setText(
@@ -671,6 +685,7 @@ QWidget* SectionEditor::BuildPictureGroup() {
     }
   };
   connect(horizontal_resample_combo_, &QComboBox::activated, this, commit);
+  connect(horizontal_mapping_combo_, &QComboBox::activated, this, commit);
   connect(chroma_line_sign_editor_, &ChromaLineSignEditor::RegionsEdited, this,
           commit);
   return picture_group_;
@@ -1201,6 +1216,9 @@ void SectionEditor::LoadFromDocument() {
   horizontal_resample_combo_->setCurrentIndex(
       horizontal_resample_combo_->findData(
           static_cast<int>(section.horizontal_resample)));
+  horizontal_mapping_combo_->setCurrentIndex(
+      horizontal_mapping_combo_->findData(
+          static_cast<int>(section.horizontal_mapping)));
   const Standard standard = project.cvbs_presets.video_standard_preset;
   const bool line_sign_supported = SupportsChromaLineSign(standard);
   chroma_line_sign_note_->setVisible(!line_sign_supported);
@@ -1399,6 +1417,8 @@ Section SectionEditor::SectionFromWidgets() const {
 
   section.horizontal_resample = static_cast<HorizontalResample>(
       horizontal_resample_combo_->currentData().toInt());
+  section.horizontal_mapping = static_cast<HorizontalMapping>(
+      horizontal_mapping_combo_->currentData().toInt());
   section.chroma_line_sign = chroma_line_sign_editor_->regions();
 
   // Noise layers. The capture layer's group owns noise_db/spread/seed and its

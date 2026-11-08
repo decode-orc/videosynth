@@ -46,6 +46,7 @@
 #include "videosynth/signal_shaping.h"
 #include "videosynth/signal_timing_model.h"
 #include "videosynth/source_frame_range.h"
+#include "videosynth/source_pixel_grid.h"
 #include "videosynth/timing_constants.h"
 
 namespace videosynth {
@@ -116,36 +117,66 @@ struct SampledSynthesisContext {
 
 // Maps each active-window sample position to its source pixel column.
 //
-// MapActiveSampleToSourcePixel performs an integer division per call, and the
-// mapping only depends on the active window width and the source's active
-// raster, so the whole line's worth of positions is resolved once per source
-// geometry rather than once per sample of every active line.
+// The mapping only depends on the active window width, the source's active
+// raster and the section's horizontal mapping, so the whole line's worth of
+// positions is resolved once per source geometry rather than once per sample
+// of every active line. The active-window stretch keeps the exact integer
+// arithmetic of MapActiveSampleToSourcePixel; the BT.601 grid holds the pixel
+// whose span contains the sample (floor of its SourcePixelGrid coordinate).
 //
 // The mapping is monotonically non-decreasing, so samples whose pixel column
-// falls outside the source raster form a suffix; in_range_sample_count records
-// where that suffix starts and lets the sample loop drop its bounds check.
+// falls outside the source raster, or (on the BT.601 grid) beyond the source's
+// active width, form a suffix; in_range_sample_count records where that suffix
+// starts and lets the sample loop drop its bounds check. The suffix stays at
+// blanking.
+//
+// The BT.601 digital active line starts before the active window on every
+// supported standard (9.78 us after 0H against 9.98 us for 625-line, 9.04 us
+// against 10.5 us for 525-line), so no prefix of the window lies before the
+// first source pixel; the clamp below only guards that invariant.
 struct ActiveSampleColumnMap {
   int active_width = -1;
   int active_x = -1;
   int source_width = -1;
+  HorizontalMapping mapping = HorizontalMapping::kActiveWindow;
+  SourcePixelGrid grid;
   int in_range_sample_count = 0;
   std::vector<int> pixel_x;
 
-  bool MatchesSource(const FrameSourceImage& source) const {
+  bool MatchesSource(const FrameSourceImage& source,
+                     HorizontalMapping source_mapping,
+                     const SourcePixelGrid& source_grid) const {
     return active_width == source.active_width && active_x == source.active_x &&
-           source_width == source.width;
+           source_width == source.width && mapping == source_mapping &&
+           grid == source_grid;
   }
 
-  void Rebuild(const FrameSourceImage& source, int active_window_samples) {
+  void Rebuild(const FrameSourceImage& source, int active_window_samples,
+               HorizontalMapping source_mapping,
+               const SourcePixelGrid& source_grid) {
     active_width = source.active_width;
     active_x = source.active_x;
     source_width = source.width;
+    mapping = source_mapping;
+    grid = source_grid;
     pixel_x.assign(static_cast<std::size_t>(active_window_samples), 0);
     in_range_sample_count = active_window_samples;
+    if (mapping == HorizontalMapping::kBt601) {
+      in_range_sample_count = SourcePixelGridInRangeSamples(
+          grid, active_window_samples, source.active_width);
+    }
+    const int last_pixel = std::max(0, source.active_width - 1);
     for (int x_sample = 0; x_sample < active_window_samples; ++x_sample) {
-      const int mapped =
-          MapActiveSampleToSourcePixel(x_sample, active_window_samples,
-                                       source.active_width, source.active_x);
+      int mapped = 0;
+      if (mapping == HorizontalMapping::kBt601) {
+        const auto offset =
+            static_cast<int>(std::floor(SourcePixelCoordinate(grid, x_sample)));
+        mapped = source.active_x + std::clamp(offset, 0, last_pixel);
+      } else {
+        mapped =
+            MapActiveSampleToSourcePixel(x_sample, active_window_samples,
+                                         source.active_width, source.active_x);
+      }
       pixel_x[static_cast<std::size_t>(x_sample)] = mapped;
       if (mapped >= source.width && x_sample < in_range_sample_count) {
         in_range_sample_count = x_sample;
@@ -1319,6 +1350,7 @@ class GenerationStage::TemplateCache {
                   section.luma_bandwidth,
                   section.picture_response,
                   section.horizontal_resample,
+                  section.horizontal_mapping,
                   section.chroma_line_sign,
                   field_source_frames,
                   sequence_phase};
@@ -1368,6 +1400,7 @@ class GenerationStage::TemplateCache {
     LumaBandwidthParameters luma_bandwidth;
     PictureResponseParameters picture_response;
     HorizontalResample horizontal_resample = HorizontalResample::kNearest;
+    HorizontalMapping horizontal_mapping = HorizontalMapping::kActiveWindow;
     std::vector<ChromaLineSignRegion> chroma_line_sign;
     // Source frame of field 1 and field 2.
     std::array<int, 2> field_source_frames{};
@@ -1380,6 +1413,7 @@ class GenerationStage::TemplateCache {
              luma_bandwidth == other.luma_bandwidth &&
              picture_response == other.picture_response &&
              horizontal_resample == other.horizontal_resample &&
+             horizontal_mapping == other.horizontal_mapping &&
              chroma_line_sign == other.chroma_line_sign;
     }
   };
@@ -1680,10 +1714,19 @@ void GenerationStage::SynthesiseTemplate(
   std::vector<int>& active_sample_indices = resources.active_sample_indices;
   std::vector<SampleFixed>& encoded_line_chroma = resources.encoded_line_chroma;
   ActiveSampleColumnMap& column_map = resources.column_map;
+  // Where the section's horizontal_mapping places a source's pixels.
+  auto GridFor = [&](const FrameSourceImage& source) {
+    return ResolveSourcePixelGrid(section.horizontal_mapping, video_standard,
+                                  synth.sample_rate_hz, active_window_start,
+                                  active_window_samples, source.active_width);
+  };
   // Both fields come from the same source, so they share one raster.
   const FrameSourceImage& field1_source = *field_sources[0];
-  if (!column_map.MatchesSource(field1_source)) {
-    column_map.Rebuild(field1_source, active_window_samples);
+  const SourcePixelGrid field1_grid = GridFor(field1_source);
+  if (!column_map.MatchesSource(field1_source, section.horizontal_mapping,
+                                field1_grid)) {
+    column_map.Rebuild(field1_source, active_window_samples,
+                       section.horizontal_mapping, field1_grid);
   }
 
   // The section's luma bandwidth limit, designed once per change of settings.
@@ -1719,13 +1762,14 @@ void GenerationStage::SynthesiseTemplate(
   // Builds the band-limited resampler for a source raster on first use or
   // when the raster changes.
   auto EnsureResampler = [&](const FrameSourceImage& source) {
+    const SourcePixelGrid grid = GridFor(source);
     if (resources.resampler == nullptr ||
         !resources.resampler->Matches(active_window_samples,
                                       source.active_width, source.active_x,
-                                      source.width)) {
+                                      source.width, grid)) {
       resources.resampler = std::make_unique<BandlimitedHorizontalResampler>(
           active_window_samples, source.active_width, source.active_x,
-          source.width);
+          source.width, grid);
     }
   };
 

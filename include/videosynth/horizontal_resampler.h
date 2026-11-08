@@ -17,6 +17,8 @@
 #include <cstdint>
 #include <vector>
 
+#include "videosynth/source_pixel_grid.h"
+
 namespace videosynth {
 
 // Design stopband attenuation in dB, matching the luma bandwidth limit so the
@@ -36,10 +38,11 @@ constexpr double kHorizontalResampleTransitionCyclesPerPixel = 0.1;
 // Band-limited source-row to active-window mapping.
 //
 // Output sample x of an N-sample active window reads the source row at pixel
-// position u = x * W / N - 0.5 (W = source active width, measured from the
-// source's active_x). The nearest mapping holds pixel k for the samples with
-// k <= x * W / N < k + 1, so pixel k's value is centred on the middle of that
-// span and edges land on the same samples under both mappings.
+// position u(x) - 0.5, where u is the section's SourcePixelGrid coordinate
+// (measured from the source's active_x). The nearest mapping holds pixel k for
+// the samples with k <= u(x) < k + 1, so pixel k's value is centred on the
+// middle of that span and edges land on the same samples under both mappings.
+// For the active-window stretch u(x) = x * W / N (W = source active width).
 //
 // Each output sample has its own phase of a Kaiser-windowed sinc kernel,
 // designed once at construction and normalised to unit DC gain, so a flat
@@ -58,15 +61,28 @@ class BandlimitedHorizontalResampler {
   //   source_active_width:   W, the source's active width in pixels.
   //   source_active_x:       First active source column.
   //   source_width:          Raster width; taps never read beyond it.
+  //   grid:                  Source pixel position of every sample.
   BandlimitedHorizontalResampler(int active_window_samples,
                                  int source_active_width, int source_active_x,
-                                 int source_width);
+                                 int source_width, const SourcePixelGrid& grid);
+
+  // The active-window stretch (ActiveWindowSourcePixelGrid).
+  BandlimitedHorizontalResampler(int active_window_samples,
+                                 int source_active_width, int source_active_x,
+                                 int source_width)
+      : BandlimitedHorizontalResampler(
+            active_window_samples, source_active_width, source_active_x,
+            source_width,
+            ActiveWindowSourcePixelGrid(active_window_samples,
+                                        source_active_width)) {}
 
   bool Matches(int active_window_samples, int source_active_width,
-               int source_active_x, int source_width) const {
+               int source_active_x, int source_width,
+               const SourcePixelGrid& grid) const {
     return active_window_samples == active_window_samples_ &&
            source_active_width == source_active_width_ &&
-           source_active_x == source_active_x_ && source_width == source_width_;
+           source_active_x == source_active_x_ &&
+           source_width == source_width_ && grid == grid_;
   }
 
   // Resamples one row. row is indexed by absolute source column and holds at
@@ -104,6 +120,7 @@ class BandlimitedHorizontalResampler {
   int source_active_width_;
   int source_active_x_;
   int source_width_;
+  SourcePixelGrid grid_;
   int taps_per_sample_ = 0;
   // Row-major [sample][tap] weights and the (edge-clamped) source columns
   // they apply to.

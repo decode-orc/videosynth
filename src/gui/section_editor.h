@@ -255,6 +255,7 @@ class SectionEditor : public QWidget {
   // Picture mapping: horizontal resampling and chroma_line_sign regions.
   QGroupBox* picture_group_ = nullptr;
   QComboBox* horizontal_resample_combo_ = nullptr;
+  QComboBox* horizontal_mapping_combo_ = nullptr;
   QLabel* chroma_line_sign_note_ = nullptr;
   ChromaLineSignEditor* chroma_line_sign_editor_ = nullptr;
 

@@ -367,6 +367,14 @@ struct PictureResponseParameters {
 // source spectrum.
 enum class HorizontalResample { kNearest, kBandlimited };
 
+// Where the source raster's pixels sit along the line (YAML
+// `horizontal_mapping:`). kActiveWindow stretches the source's active width
+// over the 52 us 4fsc active window. kBt601 places source pixel n at the
+// ITU-R BT.601 sampling instant t0 + n / 13.5 MHz after 0H, so a 720-pixel
+// BT.601 raster spans its native 53.33 us; samples of the active window beyond
+// that span stay at blanking.
+enum class HorizontalMapping { kActiveWindow, kBt601 };
+
 // How one colour-difference component of a chroma_line_sign region is
 // carried. kNormal leaves it as the encoder would; kFollowSwitch multiplies it
 // by the line's PAL V-switch sign (+1 on lines whose V axis is not inverted,
@@ -728,6 +736,7 @@ struct Section {
   LumaBandwidthParameters luma_bandwidth = {};
   PictureResponseParameters picture_response = {};
   HorizontalResample horizontal_resample = HorizontalResample::kNearest;
+  HorizontalMapping horizontal_mapping = HorizontalMapping::kActiveWindow;
   std::vector<ChromaLineSignRegion> chroma_line_sign = {};
   NoiseParameters noise = {};
   DropoutParameters dropouts = {};

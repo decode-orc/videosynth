@@ -608,6 +608,28 @@ bool ParseCadence(const YAML::Node& node, CadenceParameters* cadence,
   return true;
 }
 
+// Parses `section.horizontal_mapping:`.
+bool ParseHorizontalMapping(const YAML::Node& section_node,
+                            HorizontalMapping* mapping,
+                            std::vector<std::string>* errors) {
+  const std::string context = "section";
+  std::string text;
+  if (!ParseScalarString(section_node, "horizontal_mapping", context, &text,
+                         errors)) {
+    return false;
+  }
+  if (text == "active_window") {
+    *mapping = HorizontalMapping::kActiveWindow;
+  } else if (text == "bt601") {
+    *mapping = HorizontalMapping::kBt601;
+  } else {
+    errors->push_back(context + ".horizontal_mapping has unrecognised value '" +
+                      text + "'. Expected one of: active_window, bt601.");
+    return false;
+  }
+  return true;
+}
+
 // Parses `section.horizontal_resample:`.
 bool ParseHorizontalResample(const YAML::Node& section_node,
                              HorizontalResample* resample,
@@ -1938,6 +1960,7 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
                                                   "luma_bandwidth",
                                                   "picture_response",
                                                   "horizontal_resample",
+                                                  "horizontal_mapping",
                                                   "chroma_line_sign",
                                                   "noise",
                                                   "dropouts",
@@ -2059,6 +2082,12 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
       if (section_node["horizontal_resample"] &&
           !ParseHorizontalResample(section_node, &section.horizontal_resample,
                                    &result.errors)) {
+        return result;
+      }
+
+      if (section_node["horizontal_mapping"] &&
+          !ParseHorizontalMapping(section_node, &section.horizontal_mapping,
+                                  &result.errors)) {
         return result;
       }
 

@@ -269,6 +269,7 @@ sections:
       - region: {x: 0, y: 0, width: 10, height: 10}
         u: follow_switch
     horizontal_resample: bandlimited
+    horizontal_mapping: bt601
     cadence:
       pattern: "2:3"
 )");
@@ -278,6 +279,7 @@ sections:
   const std::string emitted = YamlProjectEmitter().EmitString(parsed.project);
   const std::vector<std::string> order = {"    cadence:",
                                           "    horizontal_resample:",
+                                          "    horizontal_mapping:",
                                           "    chroma_line_sign:",
                                           "    luma_bandwidth:",
                                           "    osd:",
