@@ -302,6 +302,92 @@ TEST(PulldownGenerationTest, CavFilmKeepsTheColourSequenceOnDiscFrames) {
   EXPECT_EQ(schedule[2].enrichment->field_osd_texts[1].at(0), "00103");
 }
 
+Section WithPictureNumber(Section section, int start_value) {
+  section.section_type = SectionType::kProgrammeArea;
+  Section::LineInjection injection;
+  injection.type = "laserdisc";
+  Section::LineInjectionCode picture_number;
+  picture_number.code_type = "picture_number";
+  picture_number.start_value = start_value;
+  picture_number.start_value_specified = true;
+  injection.codes = {picture_number};
+  section.line_injections.push_back(injection);
+  return section;
+}
+
+// A capture that leaves out an earlier film reel puts each picture of the
+// later reel at the disc position it has on the whole disc (issue #12),
+// while the colour sequence keeps following the frame position.
+TEST(PulldownGenerationTest, CavFilmDiscPositionFollowsThePictureNumber) {
+  Project disc;
+  disc.cvbs_presets.video_standard_preset = Standard::kNtsc;
+  disc.cvbs_presets.sample_encoding_preset = "CVBS_U10_4FSC";
+  disc.cvbs_presets.signal_state_preset = "STANDARD_STABLE_LOCKED";
+  disc.laserdisc.disc_type = "CAV";
+  // Eight pictures each: ten frames of AABBBCCDDD twice.
+  const Section reel1 = WithPictureNumber(
+      MakeFilm("Reel1", 0, 7, CadencePhase::kA, CadenceContinuity::kRestart),
+      1);
+  const Section reel2 = WithPictureNumber(
+      MakeFilm("Reel2", 2, 9, CadencePhase::kA, CadenceContinuity::kRestart),
+      9);
+  disc.sections = {reel1, reel2};
+  Project capture = disc;
+  capture.sections = {reel2};
+
+  std::vector<IGenerationStage::FrameScheduleItem> disc_schedule;
+  std::vector<IGenerationStage::FrameScheduleItem> capture_schedule;
+  std::vector<std::string> errors;
+  ASSERT_TRUE(MakeStage()->BuildFrameSchedule(disc, &disc_schedule, &errors))
+      << (errors.empty() ? "" : errors.front());
+  ASSERT_TRUE(
+      MakeStage()->BuildFrameSchedule(capture, &capture_schedule, &errors))
+      << (errors.empty() ? "" : errors.front());
+  ASSERT_EQ(disc_schedule.size(), 20U);
+  ASSERT_EQ(capture_schedule.size(), 10U);
+
+  for (std::size_t frame = 0; frame < disc_schedule.size(); ++frame) {
+    EXPECT_EQ(disc_schedule[frame].enrichment->DiscPosition(), frame)
+        << "disc frame " << frame;
+  }
+  for (std::size_t frame = 0; frame < capture_schedule.size(); ++frame) {
+    const FrameEnrichment& enrichment = *capture_schedule[frame].enrichment;
+    EXPECT_EQ(enrichment.DiscPosition(), 10U + frame) << "frame " << frame;
+    EXPECT_EQ(enrichment.field_picture_numbers,
+              disc_schedule[10 + frame].enrichment->field_picture_numbers)
+        << "frame " << frame;
+    // The colour sequence still runs from the first picture number.
+    EXPECT_EQ(enrichment.disc_frame_index, 8U + frame) << "frame " << frame;
+  }
+}
+
+// A film reel's disc position starts where its first picture lies on a
+// continuous film disc; a video section without picture numbers keeps the
+// frame counter.
+TEST(PulldownGenerationTest, FilmDiscPositionStartsAtItsFirstPicture) {
+  Project project;
+  project.cvbs_presets.video_standard_preset = Standard::kNtsc;
+  project.cvbs_presets.sample_encoding_preset = "CVBS_U10_4FSC";
+  project.cvbs_presets.signal_state_preset = "STANDARD_STABLE_LOCKED";
+  project.laserdisc.disc_type = "CAV";
+  project.sections = {WithPictureNumber(MakeFilm("Film", 0, 9, CadencePhase::kA,
+                                                 CadenceContinuity::kRestart),
+                                        5),
+                      MakeClip("Video", "video.mkv", 0, 2)};
+
+  std::vector<IGenerationStage::FrameScheduleItem> schedule;
+  std::vector<std::string> errors;
+  ASSERT_TRUE(MakeStage()->BuildFrameSchedule(project, &schedule, &errors))
+      << (errors.empty() ? "" : errors.front());
+  // Picture 5 starts the second AABBBCCDDD cycle, on disc frame 5.
+  EXPECT_EQ(schedule[0].enrichment->DiscPosition(), 5U);
+  EXPECT_EQ(schedule[12].enrichment->DiscPosition(), 17U);
+  // The video section without picture numbers keeps the frame counter.
+  const FrameEnrichment& video = *schedule.back().enrichment;
+  EXPECT_FALSE(video.film_disc_position.has_value());
+  EXPECT_EQ(video.DiscPosition(), video.disc_frame_index);
+}
+
 TEST(PulldownGenerationTest, AudioFollowsFilmTimeAndVideoFrames) {
   const Project project = MakeMixedProject();
   std::unique_ptr<GenerationStage> stage = MakeStage();

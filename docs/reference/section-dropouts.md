@@ -69,6 +69,8 @@ With `anchor: disc`:
 
 On a disc without picture numbers, the disc frame is the output position plus the project's first-picture offset.
 
+In a `"2:3"` section with picture numbers, whose pictures are fewer than its frames, the disc frame is the one its first picture falls on in a continuous 2:3 cadence from picture 1 at phase A (picture 9 falls on frame 10), counting on one per frame. A capture that leaves out earlier film reels therefore gives each picture the disc frame it has on the whole disc.
+
 ## Severity scale
 
 `scale` is a severity level, not a physical unit. The mapping is exponential in t = (scale − 1) / 19:

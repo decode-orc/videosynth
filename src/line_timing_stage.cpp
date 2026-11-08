@@ -129,7 +129,7 @@ std::vector<LineTimingError> LineTimingStage::FrameErrors(
     std::size_t disc_frame = global_frame;
     if (global_frame < schedule.size() &&
         schedule[global_frame].enrichment != nullptr) {
-      disc_frame = schedule[global_frame].enrichment->disc_frame_index;
+      disc_frame = schedule[global_frame].enrichment->DiscPosition();
     }
     const std::vector<LineTimingError> shared = DrawLineTimingErrors(
         line_timing.shared, standard,

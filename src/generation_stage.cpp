@@ -18,6 +18,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -266,6 +267,21 @@ SampledSynthesisContext BuildSampledSynthesisContext(Standard standard) {
       BurstEnvelopeRiseTimeSeconds(standard), context.sample_rate_hz);
   context.active = GetActiveRasterGeometry(standard, context.sample_rate_hz);
   return context;
+}
+
+// The disc frame a 2:3 section's first field falls on, taking the disc as a
+// continuous 2:3 cadence from picture 1 at phase A (AABBBCCDDD: four pictures
+// in ten fields). picture_number is the picture that field shows and
+// field_in_letter its 1-based field within that picture. A capture that starts
+// part-way through a film disc then gives each picture the frame it has on the
+// whole disc.
+std::size_t FilmDiscStartFrame(int picture_number, int field_in_letter) {
+  constexpr std::array<std::size_t, 4> kPictureStartField = {0, 2, 5, 7};
+  const auto picture = static_cast<std::size_t>(picture_number - 1);
+  const std::size_t field =
+      (10 * (picture / 4)) + kPictureStartField[picture % 4] +
+      static_cast<std::size_t>(std::max(field_in_letter - 1, 0));
+  return field / 2;
 }
 
 // Returns the picture_number start_value from a section's laserdisc injection,
@@ -1592,6 +1608,8 @@ bool GenerationStage::BuildFrameSchedule(
   // meaningful on CLV discs, where it runs from the start of the output.
   const bool disc_is_clv =
       DiscTypeFromString(project.laserdisc.disc_type) == DiscType::kCLV;
+  const Section* film_position_section = nullptr;
+  std::optional<std::size_t> film_disc_start;
   for (std::size_t frame_index = 0; frame_index < out_schedule->size();
        ++frame_index) {
     FrameScheduleItem& item = (*out_schedule)[frame_index];
@@ -1611,6 +1629,24 @@ bool GenerationStage::BuildFrameSchedule(
             {item.fields[0].starts_picture, item.fields[1].starts_picture},
             enrichment.get(), errors)) {
       return false;
+    }
+
+    // A 2:3 section with picture numbers takes its disc position from its
+    // first picture number, since its frames outnumber its pictures and
+    // disc_frame_index follows the output position there.
+    if (item.section != film_position_section) {
+      film_position_section = item.section;
+      film_disc_start.reset();
+      const int first_picture = enrichment->field_picture_numbers[0];
+      if (item.section->cadence.pattern == CadencePattern::kPulldown23 &&
+          first_picture > 0) {
+        film_disc_start = FilmDiscStartFrame(
+            first_picture, item.fields[0].cadence_field_in_letter);
+      }
+    }
+    if (film_disc_start.has_value()) {
+      enrichment->film_disc_position =
+          *film_disc_start + static_cast<std::size_t>(item.section_frame_index);
     }
 
     // The {frame_number} OSD token is the 1-based position of this frame in the

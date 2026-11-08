@@ -176,6 +176,8 @@ The capture layer is keyed by section and output position: two projects with the
 
 The shared layer is keyed by **disc position** only — the CAV picture number when the section carries a `picture_number` code, otherwise the output position plus the project's first-picture offset. Section boundaries and output position play no part. Two captures of one pressing therefore carry identical pressing noise on the same picture even when one starts later, skips, or replays a range of pictures. Consecutive pictures always get different pressing noise, including the repeated pictures of a held still.
 
+In a `"2:3"` section with picture numbers, whose pictures are fewer than its frames, the disc position is the frame its first picture falls on in a continuous 2:3 cadence from picture 1 at phase A (picture 9 falls on frame 10), counting on one per frame. A capture that leaves out earlier film reels therefore gives each picture the disc position it has on the whole disc.
+
 Its seed is mixed with a constant specific to the shared layer, so a `shared.noise_seed` equal to a capture `noise_seed` still gives independent noise.
 
 The pressing noise is read off the disc with the picture, so the project's [`channel.timing_offset_samples`](channel.md) delays it exactly as it delays the picture: a capture whose offset differs from the rest of its pressing still carries the pressing noise on the same picture samples, and it cancels in the difference of two aligned captures. The capture layer stays on the output sample grid, since nothing else shares it.

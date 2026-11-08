@@ -14,6 +14,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -90,6 +91,20 @@ struct FrameEnrichment {
   // position plus the project's first-picture-number offset. Drives
   // colour-subcarrier phase, PAL burst blanking parity, and pilot-burst phase.
   std::size_t disc_frame_index = 0;
+  // Disc position of a 2:3 pulldown frame whose section carries CAV picture
+  // numbers: the frame its section starts on in a continuous 2:3 cadence from
+  // picture 1, plus the frame's position in the section. A film section's
+  // picture numbers count film pictures, so disc_frame_index cannot carry
+  // this, and its colour sequence deliberately follows the frame position.
+  // Unset otherwise. Read it through DiscPosition().
+  std::optional<std::size_t> film_disc_position;
+  // Where the frame lies on the disc, for what the pressing carries:
+  // disc-anchored dropouts, the shared noise and line-timing layers and the
+  // per-picture channel response. Every capture of one pressing gives the same
+  // picture the same position, whatever its output position.
+  std::size_t DiscPosition() const {
+    return film_disc_position.value_or(disc_frame_index);
+  }
   // Context snapshot for OSD token resolution.
   PerFrameContext context;
   // CAV picture number of the picture each field shows (index 0 = field 1),

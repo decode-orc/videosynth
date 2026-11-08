@@ -171,7 +171,7 @@ void ChannelStage::ApplyChannel(
         std::size_t disc_frame = global_frame;
         if (global_frame < schedule.size() &&
             schedule[global_frame].enrichment != nullptr) {
-          disc_frame = schedule[global_frame].enrichment->disc_frame_index;
+          disc_frame = schedule[global_frame].enrichment->DiscPosition();
         }
         frame_filter.emplace(
             design_filter(static_cast<double>(disc_frame) + 1.0));
