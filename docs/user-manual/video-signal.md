@@ -157,6 +157,8 @@ By default each 4fsc sample takes the nearest source pixel at or to its left —
 
 A [`luma_bandwidth`](../reference/sections.md#luma_bandwidth) limit removes the images above its cutoff, but not the droop, and it does not touch the chroma.
 
+By default the 720 pixels are stretched over the 52 µs window. A BT.601 source was not sampled that way: its 720 pixels at 13.5 MHz span 53.33 µs, starting 9.78 µs after 0H on 625-line systems (9.04 µs on 525-line), so the edges of its line lie in the blanking. Stretched over the window, such a picture comes out 2.5 % narrower and about 6 pixels to the left of where a BT.601 decoder samples it back. [`horizontal_mapping: bt601`](../reference/sections.md#horizontal_mapping) places each pixel at its BT.601 sampling instant instead, so a capture or a decode-orc `mkv-ffv1-bt601` export goes through the 4fsc signal and comes back at its own scale and position. Either resampling method works on either grid.
+
 ### Picture response
 
 Real programme pictures are softer than a sharp still. A camera's aperture, a caption generator and the production chain all roll off fine detail before it reaches the disc. On the BBC Domesday discs, luma above 3.5 MHz carries a tenth of the share that sharp stills such as the bundled maps and text card carry, and there is far less detail between rows. A still that stands in for programme material should be softened the same way, or a decoder is rewarded for recovering detail no disc has.

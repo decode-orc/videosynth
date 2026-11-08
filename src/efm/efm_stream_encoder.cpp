@@ -105,6 +105,39 @@ bool EfmStreamEncoder::PushSamples(const std::vector<std::int16_t>& left,
   return EmitFrames(frames, t_values);
 }
 
+bool EfmStreamEncoder::PushF1Frames(const F1Frame* frames, std::size_t count,
+                                    std::vector<std::uint8_t>* t_values) {
+  if (!begun_ || t_values == nullptr || (frames == nullptr && count > 0) ||
+      assembler_.PendingSampleCount() != 0) {
+    return false;
+  }
+  for (std::size_t index = 0; index < count; ++index) {
+    if (!EmitF2Frame(circ_encoder_.EncodeFrame(frames[index]), t_values)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool EfmStreamEncoder::SkipFrames(std::size_t count,
+                                  std::vector<std::uint8_t>* t_values) {
+  if (!begun_ || t_values == nullptr || assembler_.PendingSampleCount() != 0) {
+    return false;
+  }
+  if (count == 0) {
+    return true;
+  }
+  // The last run has no closing transition; emit it before the signal stops.
+  if (!t_value_encoder_.Flush(t_values)) {
+    return false;
+  }
+  circ_encoder_.Reset();
+  modulator_.Reset();
+  t_value_encoder_.Reset();
+  frame_index_ += count;
+  return true;
+}
+
 bool EfmStreamEncoder::Flush(std::vector<std::uint8_t>* t_values) {
   if (!begun_ || t_values == nullptr) {
     return false;

@@ -608,6 +608,28 @@ bool ParseCadence(const YAML::Node& node, CadenceParameters* cadence,
   return true;
 }
 
+// Parses `section.horizontal_mapping:`.
+bool ParseHorizontalMapping(const YAML::Node& section_node,
+                            HorizontalMapping* mapping,
+                            std::vector<std::string>* errors) {
+  const std::string context = "section";
+  std::string text;
+  if (!ParseScalarString(section_node, "horizontal_mapping", context, &text,
+                         errors)) {
+    return false;
+  }
+  if (text == "active_window") {
+    *mapping = HorizontalMapping::kActiveWindow;
+  } else if (text == "bt601") {
+    *mapping = HorizontalMapping::kBt601;
+  } else {
+    errors->push_back(context + ".horizontal_mapping has unrecognised value '" +
+                      text + "'. Expected one of: active_window, bt601.");
+    return false;
+  }
+  return true;
+}
+
 // Parses `section.horizontal_resample:`.
 bool ParseHorizontalResample(const YAML::Node& section_node,
                              HorizontalResample* resample,
@@ -658,15 +680,32 @@ bool ParseSectionLaserdisc(const YAML::Node& section_node, Section* section,
     errors->push_back("section field 'laserdisc' must be a map/object.");
     return false;
   }
-  const std::set<std::string> keys = {"area", "codes"};
+  const std::set<std::string> keys = {"area", "codes", "efm_data"};
   ValidateAllowedKeys(node, keys, "section.laserdisc", errors);
   if (!errors->empty()) {
     return false;
   }
-  if (!node["area"] && !node["codes"]) {
+  if (!node["area"] && !node["codes"] && !node["efm_data"]) {
     errors->push_back(
-        "section.laserdisc must set at least one of: area, codes.");
+        "section.laserdisc must set at least one of: area, codes, efm_data.");
     return false;
+  }
+
+  // `efm_data: {}` marks the section's frames as carrying the EFM data
+  // channel. The map takes no keys: which sectors a frame carries follows
+  // from the project-wide placement rule.
+  if (node["efm_data"]) {
+    const YAML::Node efm_node = node["efm_data"];
+    if (!efm_node.IsMap()) {
+      errors->push_back(
+          "section.laserdisc.efm_data must be a map/object (use {}).");
+      return false;
+    }
+    ValidateAllowedKeys(efm_node, {}, "section.laserdisc.efm_data", errors);
+    if (!errors->empty()) {
+      return false;
+    }
+    section->carries_efm_data = true;
   }
 
   if (node["area"]) {
@@ -1125,6 +1164,66 @@ bool ParseLaserdiscChannel(const YAML::Node& node,
   return true;
 }
 
+// Parses `laserdisc.efm_data`: the sector image encoded into the EFM data
+// channel and its placement and subcode settings. Ranges are the validator's.
+bool ParseEfmData(const YAML::Node& node, EfmDataOutput* efm_data,
+                  std::vector<std::string>* errors) {
+  const std::string context = "laserdisc.efm_data";
+  if (!node.IsMap()) {
+    errors->push_back(context + " must be a map/object.");
+    return false;
+  }
+  ValidateAllowedKeys(node,
+                      {"image", "first_address", "picture_offset_sectors",
+                       "q_control", "q_mode"},
+                      context, errors);
+  if (!errors->empty()) {
+    return false;
+  }
+  if (!node["image"]) {
+    errors->push_back(context + " is missing required field: 'image'.");
+    return false;
+  }
+  if (!ParseScalarString(node, "image", context, &efm_data->image, errors)) {
+    return false;
+  }
+  if (node["first_address"] &&
+      !ParseInteger(node, "first_address", context, &efm_data->first_address,
+                    errors)) {
+    return false;
+  }
+  if (node["picture_offset_sectors"] &&
+      !ParseInteger(node, "picture_offset_sectors", context,
+                    &efm_data->picture_offset_sectors, errors)) {
+    return false;
+  }
+  if (node["q_control"]) {
+    std::string q_control;
+    if (!ParseScalarString(node, "q_control", context, &q_control, errors)) {
+      return false;
+    }
+    if (q_control == "data") {
+      efm_data->q_control = EfmDataQControl::kData;
+    } else if (q_control == "data_copy_permitted") {
+      efm_data->q_control = EfmDataQControl::kDataCopyPermitted;
+    } else if (q_control == "audio") {
+      efm_data->q_control = EfmDataQControl::kAudio;
+    } else {
+      errors->push_back(context + ".q_control has unrecognised value '" +
+                        q_control +
+                        "'. Expected one of: data, data_copy_permitted, "
+                        "audio.");
+      return false;
+    }
+  }
+  if (node["q_mode"] &&
+      !ParseInteger(node, "q_mode", context, &efm_data->q_mode, errors)) {
+    return false;
+  }
+  efm_data->enabled = true;
+  return true;
+}
+
 // Parses the project-wide `laserdisc:` block: the disc format, the
 // LaserVision signal options, the EFM digital audio selection and the
 // LaserVision channel.
@@ -1139,7 +1238,7 @@ bool ParseLaserdisc(const YAML::Node& root, Project* project,
     return false;
   }
   const std::set<std::string> keys = {"disc_type", "pilot_burst", "vbi_burst",
-                                      "efm_audio", "channel"};
+                                      "efm_audio", "efm_data",    "channel"};
   ValidateAllowedKeys(node, keys, "laserdisc", errors);
   if (!errors->empty()) {
     return false;
@@ -1147,7 +1246,7 @@ bool ParseLaserdisc(const YAML::Node& root, Project* project,
   if (node.size() == 0U) {
     errors->push_back(
         "laserdisc block must set at least one of: disc_type, pilot_burst, "
-        "vbi_burst, efm_audio, channel.");
+        "vbi_burst, efm_audio, efm_data, channel.");
     return false;
   }
 
@@ -1192,6 +1291,11 @@ bool ParseLaserdisc(const YAML::Node& root, Project* project,
       return false;
     }
     laserdisc.efm_audio.enabled = true;
+  }
+
+  if (node["efm_data"] &&
+      !ParseEfmData(node["efm_data"], &laserdisc.efm_data, errors)) {
+    return false;
   }
 
   if (node["channel"] &&
@@ -1859,6 +1963,7 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
                                                   "luma_bandwidth",
                                                   "picture_response",
                                                   "horizontal_resample",
+                                                  "horizontal_mapping",
                                                   "chroma_line_sign",
                                                   "noise",
                                                   "dropouts",
@@ -1980,6 +2085,12 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
       if (section_node["horizontal_resample"] &&
           !ParseHorizontalResample(section_node, &section.horizontal_resample,
                                    &result.errors)) {
+        return result;
+      }
+
+      if (section_node["horizontal_mapping"] &&
+          !ParseHorizontalMapping(section_node, &section.horizontal_mapping,
+                                  &result.errors)) {
         return result;
       }
 

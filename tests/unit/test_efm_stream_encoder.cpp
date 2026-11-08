@@ -248,5 +248,84 @@ TEST(EfmStreamEncoderTest, ResetRestoresTheConstructedState) {
   EXPECT_EQ(second, first);
 }
 
+TEST(EfmStreamEncoderTest, F1FrameInputMatchesSampleInput) {
+  const TrackTable table = MakeTrackTable(75, 300, 75);
+  std::vector<std::int16_t> left;
+  std::vector<std::int16_t> right;
+  MakeSamples(std::size_t{6} * 250U, &left, &right);
+
+  std::vector<F1Frame> frames;
+  AudioFrameAssembler assembler;
+  ASSERT_TRUE(assembler.PushSamples(left, right, &frames));
+
+  EfmStreamEncoder encoder;
+  ASSERT_TRUE(encoder.Begin(table));
+  std::vector<std::uint8_t> t_values;
+  ASSERT_TRUE(encoder.PushF1Frames(frames.data(), frames.size(), &t_values));
+  ASSERT_TRUE(encoder.Flush(&t_values));
+
+  EXPECT_EQ(t_values, EncodeStream(table, left, right));
+}
+
+TEST(EfmStreamEncoderTest, F1FrameInputIsRejectedWithSamplesPending) {
+  EfmStreamEncoder encoder;
+  ASSERT_TRUE(encoder.Begin(MakeTrackTable(75, 300, 75)));
+  std::vector<std::uint8_t> t_values;
+  ASSERT_TRUE(encoder.PushSamples({1, 2}, {3, 4}, &t_values));
+  const F1Frame frame{};
+  EXPECT_FALSE(encoder.PushF1Frames(&frame, 1, &t_values));
+  EXPECT_FALSE(encoder.SkipFrames(1, &t_values));
+}
+
+TEST(EfmStreamEncoderTest, SkippedFramesKeepTheSubcodeTimelineAndRestart) {
+  const TrackTable table = MakeTrackTable(75, 300, 75);
+  constexpr std::size_t kRunFrames = 3 * kFramesPerSubcodeSection;
+  constexpr std::size_t kGapFrames = 2 * kFramesPerSubcodeSection;
+  std::vector<F1Frame> frames(kRunFrames);
+  for (std::size_t index = 0; index < frames.size(); ++index) {
+    frames[index].fill(static_cast<std::uint8_t>(index * 7U));
+  }
+
+  EfmStreamEncoder encoder;
+  ASSERT_TRUE(encoder.Begin(table));
+  std::vector<std::uint8_t> first_run;
+  ASSERT_TRUE(encoder.PushF1Frames(frames.data(), frames.size(), &first_run));
+  ASSERT_TRUE(encoder.SkipFrames(kGapFrames, &first_run));
+  EXPECT_EQ(encoder.ChannelFrameCount(), kRunFrames + kGapFrames);
+  std::vector<std::uint8_t> second_run;
+  ASSERT_TRUE(encoder.PushF1Frames(frames.data(), frames.size(), &second_run));
+  // End the second run too, emitting its final T value.
+  ASSERT_TRUE(encoder.SkipFrames(1, &second_run));
+
+  // Each run decodes on its own, frame-synchronous from its first bit.
+  const std::vector<DecodedFrame> first =
+      TestChannelDecoder().Decode(first_run);
+  const std::vector<DecodedFrame> second =
+      TestChannelDecoder().Decode(second_run);
+  ASSERT_EQ(first.size(), kRunFrames);
+  ASSERT_EQ(second.size(), kRunFrames);
+
+  // The second run's subcode continues at the section after the gap.
+  SubcodeGenerator generator;
+  ASSERT_TRUE(generator.Begin(table));
+  const std::size_t resume_section =
+      (kRunFrames + kGapFrames) / kFramesPerSubcodeSection;
+  SubcodeSection expected;
+  ASSERT_TRUE(generator.GenerateSection(resume_section, &expected));
+  EXPECT_EQ(second[0].control_symbol, kSubcodeSyncS0);
+  for (std::size_t frame = kSubcodeSyncFrames; frame < kFramesPerSubcodeSection;
+       ++frame) {
+    ASSERT_EQ(second[frame].control_byte, expected.ControlByte(frame))
+        << "frame " << frame;
+  }
+
+  // A restarted CIRC encoder is a fresh one, so the restarted run's data
+  // symbols equal the first run's.
+  for (std::size_t index = 0; index < kRunFrames; ++index) {
+    ASSERT_EQ(second[index].f2_frame, first[index].f2_frame)
+        << "frame " << index;
+  }
+}
+
 }  // namespace
 }  // namespace videosynth::efm

@@ -11,6 +11,8 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -41,6 +43,22 @@ struct EfmTrackLayout {
   std::size_t pause_end_sample = 0;
 };
 
+// How the project's programme-area sections map onto subcode tracks.
+struct EfmTrackLayoutOptions {
+  // When true, every programme-area run belongs to track 01: the layout of a
+  // single digital data track (ECMA-130 clause 20). When false, each run is
+  // its own track, as for digital audio.
+  bool single_programme_track = false;
+
+  // When set and the stream opens with a lead-in followed by the programme
+  // area, the subcode section at which the programme area (and the pause
+  // before track 1) starts, in place of the first programme-area frame: the
+  // programme area takes over the lead-in's sections from there on. A start
+  // after the first programme-area frame is moved back to it. Unset, the
+  // areas follow the sections.
+  std::optional<std::int64_t> programme_start_section;
+};
+
 // Builds the track table for `output_frame_sections` — the section shown by
 // each stored output frame, in output order, as passed to
 // AudioTrackGenerator::Begin.
@@ -59,9 +77,16 @@ struct EfmTrackLayout {
 // section, or more than efm::kMaxTrackNumber tracks would be emitted
 // (IEC 60856:1986 Amd 2, 13.5.3.3 / IEC 60857:1986 Amd 2, 13.6.3.3).
 //
+// With options.single_programme_track the programme-area runs are merged into
+// one track 01 instead, so the track limit does not apply. With
+// options.programme_start_section the programme area may start inside the
+// lead-in; it is an error for that start to leave the lead-in no subcode
+// section.
+//
 // Thread-safety: a pure function of its arguments.
 bool BuildEfmTrackLayout(
     Standard standard, const std::vector<const Section*>& output_frame_sections,
-    EfmTrackLayout* layout, std::vector<std::string>* errors);
+    EfmTrackLayout* layout, std::vector<std::string>* errors,
+    const EfmTrackLayoutOptions& options = {});
 
 }  // namespace videosynth

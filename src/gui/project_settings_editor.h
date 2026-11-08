@@ -28,6 +28,7 @@ class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
 class QPushButton;
+class QSpinBox;
 
 namespace videosynth::gui {
 
@@ -40,9 +41,9 @@ class ResponseByPictureEditor;
 // control maps 1:1 to a Project field and commits through ProjectDocument
 // commands; standard-dependent enablement follows BuildProjectSettingsFormState
 // so invalid combinations cannot be entered. Everything LaserDisc-specific
-// (disc format, pilot/VBI burst, EFM digital audio and the LaserVision
-// channel) sits in one checkable "LaserDisc" group whose body stays hidden
-// until the project declares a laserdisc block.
+// (disc format, pilot/VBI burst, EFM digital audio or data and the
+// LaserVision channel) sits in one checkable "LaserDisc" group whose body stays
+// hidden until the project declares a laserdisc block.
 //
 // Thread-safety: NOT thread-safe. GUI (main) thread only.
 class ProjectSettingsEditor : public QWidget {
@@ -59,8 +60,8 @@ class ProjectSettingsEditor : public QWidget {
   void SetStandardEditable(bool editable);
 
   // The group holding `field` (kChannel, kChromaError, kLineTiming,
-  // kLaserdiscChannel) and the input to focus in it, for validation issue
-  // navigation; null for other fields.
+  // kLaserdiscChannel, kEfmData) and the input to focus in it, for validation
+  // issue navigation; null for other fields.
   QWidget* FieldGroup(IssueField field) const;
   QWidget* FieldFocusWidget(IssueField field) const;
 
@@ -81,6 +82,10 @@ class ProjectSettingsEditor : public QWidget {
   // validator rejects once the project has no laserdisc block. Returns true
   // when any section changed.
   bool ClearSectionLaserdiscBlocks();
+  // Clears every section's EFM data flag, which the validator rejects once the
+  // project has no laserdisc.efm_data block. Returns true when any section
+  // changed.
+  bool ClearSectionEfmDataFlags();
 
   QWidget* BuildVitsGroup();
   QWidget* BuildChannelGroup();
@@ -88,6 +93,7 @@ class ProjectSettingsEditor : public QWidget {
   QWidget* BuildLineTimingGroup();
   QWidget* BuildLaserdiscGroup();
   QWidget* BuildLaserdiscChannelGroup(QWidget* parent);
+  QWidget* BuildEfmDataGroup(QWidget* parent);
   void LoadChannelAndChromaError(const Project& project);
   void LoadLineTiming(const Project& project);
   void LoadLaserdisc(const Project& project);
@@ -100,10 +106,13 @@ class ProjectSettingsEditor : public QWidget {
 
   // Translated sentence describing the EFM selection's outcome.
   QString EfmStatusText(EfmOutputStatus status) const;
+  // Translated sentence describing the EFM data selection's outcome.
+  QString EfmDataStatusText(EfmDataStatus status) const;
 
   void OnStandardChanged();
   void OnSignalTypeChanged();
   void OnBrowseVideoPath();
+  void OnBrowseEfmDataImage();
   void OnVitsPlacementChanged();
   void OnVitsRowToggled(int row);
   void OnVitsLineEdited(int row);
@@ -201,6 +210,17 @@ class ProjectSettingsEditor : public QWidget {
   QCheckBox* efm_check_ = nullptr;
   QComboBox* efm_pair_combo_ = nullptr;
   QLabel* efm_hint_ = nullptr;
+  // LaserDisc EFM data (AIV / LV-ROM): the sector image, its placement and
+  // the Q-channel CONTROL and ADR of the data track. Exclusive with digital
+  // audio: a disc has one EFM channel.
+  QGroupBox* efm_data_group_ = nullptr;
+  QLineEdit* efm_data_image_edit_ = nullptr;
+  QPushButton* efm_data_browse_button_ = nullptr;
+  QSpinBox* efm_data_first_address_spin_ = nullptr;
+  QSpinBox* efm_data_offset_spin_ = nullptr;
+  QComboBox* efm_data_q_control_combo_ = nullptr;
+  QComboBox* efm_data_q_mode_combo_ = nullptr;
+  QLabel* efm_data_hint_ = nullptr;
 
   // laserdisc.channel: the LaserVision pressing and replay channel. The
   // FM-beat group is disabled outside 625-line PAL; fm_beat_hint_ says why.

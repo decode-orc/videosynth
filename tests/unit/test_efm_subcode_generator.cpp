@@ -216,6 +216,55 @@ TEST(EfmSubcodeGeneratorTest, ProgrammeQUsesMode4AdrAndAudioControl) {
   EXPECT_EQ(payload[kIndexOrPointByte], kIndexAudio);
 }
 
+TEST(EfmSubcodeGeneratorTest, DataTableSetsControlAndAdrInEveryArea) {
+  TrackTable table = MakeDiscTable();
+  table.control = kControlDataCopyProhibited;
+  table.adr = kAdrMode1;
+  SubcodeGenerator generator;
+  ASSERT_TRUE(generator.Begin(table));
+
+  // IEC 60908-1999, 17.5: control 0100 is a data track, copy prohibited; ADR
+  // 1 is the compact-disc mode some AIV discs record instead of mode 4.
+  const std::size_t sample_sections[] = {
+      0, table.entries[1].start_section + kTrackOnePauseSections,
+      table.entries[3].start_section};
+  for (const std::size_t index : sample_sections) {
+    const SubcodeSection section = GenerateAt(generator, index);
+    const QChannelPayload payload = section.QPayload();
+    EXPECT_EQ(payload[kControlAdrByte], 0x41U) << "section " << index;
+    EXPECT_EQ(section.QCrc(), IndependentQCrc(payload)) << "section " << index;
+  }
+}
+
+TEST(EfmSubcodeGeneratorTest, AdrChangesOnlyTheAdrNibble) {
+  TrackTable table = MakeDiscTable();
+  SubcodeGenerator mode4;
+  ASSERT_TRUE(mode4.Begin(table));
+  table.adr = kAdrMode1;
+  SubcodeGenerator mode1;
+  ASSERT_TRUE(mode1.Begin(table));
+
+  for (std::size_t index = 0; index < mode4.SectionCount(); index += 37) {
+    QChannelPayload a = GenerateAt(mode4, index).QPayload();
+    QChannelPayload b = GenerateAt(mode1, index).QPayload();
+    EXPECT_EQ(a[kControlAdrByte] & 0x0FU, kAdrMode4);
+    EXPECT_EQ(b[kControlAdrByte] & 0x0FU, kAdrMode1);
+    a[kControlAdrByte] = 0;
+    b[kControlAdrByte] = 0;
+    EXPECT_EQ(a, b) << "section " << index;
+  }
+}
+
+TEST(EfmSubcodeGeneratorTest, BeginRejectsControlOrAdrWiderThanANibble) {
+  TrackTable table = MakeDiscTable();
+  table.control = 0x10;
+  SubcodeGenerator generator;
+  EXPECT_FALSE(generator.Begin(table));
+  table.control = kControlDataCopyPermitted;
+  table.adr = 0x10;
+  EXPECT_FALSE(generator.Begin(table));
+}
+
 TEST(EfmSubcodeGeneratorTest, TrackOnePauseCountsDownToZeroAtTheAudioStart) {
   const TrackTable table = MakeDiscTable();
   SubcodeGenerator generator;

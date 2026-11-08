@@ -1,6 +1,6 @@
 # `laserdisc`
 
-Everything about a project that is specific to LaserDisc (LaserVision): the disc format, the LaserVision signal options, EFM digital audio and the LaserVision replay channel. Optional — a project that is not a disc has no `laserdisc:` block, and none of these settings appear anywhere else in the file.
+Everything about a project that is specific to LaserDisc (LaserVision): the disc format, the LaserVision signal options, the EFM channel (digital audio or data) and the LaserVision replay channel. Optional — a project that is not a disc has no `laserdisc:` block, and none of these settings appear anywhere else in the file.
 
 ```yaml
 laserdisc:
@@ -25,6 +25,7 @@ Each section that belongs to the disc says where it sits on it, and which biphas
 | `pilot_burst` | bool | No | `true`, `false` | `false` |
 | `vbi_burst` | bool | No | `true`, `false` | `false` |
 | `efm_audio` | map | No | See [`efm_audio`](#efm_audio) | absent |
+| `efm_data` | map | No | See [`efm_data`](#efm_data) | absent |
 | `channel` | map | No | See [LaserVision channel](laserdisc-channel.md) | absent |
 
 The block must set at least one key. An empty `laserdisc:` block, or any other key, is a parse error.
@@ -80,13 +81,72 @@ Constraints:
 
 The disc areas come from each section's [`laserdisc.area`](section-laserdisc.md#area): a lead-in carries the table of contents, each programme-area section is one EFM track and the lead-out carries lead-out subcode. The pair's tone parameters are declared only in the per-section [`audio:`](section-audio.md) blocks; its 48 kHz WAV track is written as normal and is unaffected. The `.efm` and `.efm.meta` files are written beside the video output — see [output](output.md#video_path) and [Audio](../user-manual/audio.md#laserdisc-efm-digital-audio).
 
+## `efm_data`
+
+Its presence encodes a sector image into the EFM channel, as an Acorn Interactive Video (AIV) or LV-ROM disc carries computer data in place of digital audio. The image is the user data of consecutive sectors, 2 048 bytes each: the same `.dat` that decode-orc's EFM sink writes in `data` mode. Each sector becomes an ECMA-130 Mode 1 sector (sync, BCD header, EDC, RSPC P and Q parity, Annex B scrambling), one per subcode section, 75 a second. Only the sections that declare [`laserdisc.efm_data`](section-laserdisc.md#efm_data) carry the EFM signal.
+
+```yaml
+laserdisc:
+  disc_type: CAV
+  efm_data:
+    image: "{project}/community_north.dat"
+```
+
+| Key | Type | Required | Range | Default |
+|-----|------|----------|-------|---------|
+| `image` | path | Yes | A file of whole 2 048-byte sectors | — |
+| `first_address` | int | No | 0–449 999 | `0` |
+| `picture_offset_sectors` | int | No | 0–449 999 | `150` |
+| `q_control` | string | No | `data`, `data_copy_permitted`, `audio` | `data` |
+| `q_mode` | int | No | `4`, `1` | `4` |
+
+- **`image`** — the sector image. Asset roots such as `{project}` apply.
+- **`first_address`** — the Sector Address (ECMA-130 §14.2) of the image's first sector. Sector *n* of the image carries address `first_address + n`, and decode-orc's sink writes each sector at the offset its address gives.
+- **`picture_offset_sectors`** — header time minus picture time, in sectors. AIV players find data by picture number and EFM time together, so a sector's position against the pictures is part of the format. The default 150 (2 s) is the AIV rule: picture *p* carries addresses 3*p* + 150 to 3*p* + 152 on PAL (NTSC and PAL-M: from ⌊*p* × 75 / 29.97⌋ + 150).
+- **`q_control`** — the Q-channel CONTROL nibble: `data` is 0100 (data track, copy prohibited), `data_copy_permitted` is 0110, and `audio` is 0000 (two audio channels without pre-emphasis, copy prohibited; IEC 60908 §17.5). Some pressings of the BBC Domesday National A side record 0000 on their data track, others 0100.
+- **`q_mode`** — the Q-channel ADR. `4` is the LaserDisc mode of IEC 60856/60857 Amd 2 §13.5.1.1 / §13.6.1.1. Set `1` (the compact-disc mode of IEC 60908 §17.5) to match AIV discs such as the BBC Domesday discs, which were mastered before that amendment and record ADR 1. Only the ADR nibble changes.
+
+**Placement.** The rule is anchored on the first output frame that carries a CAV picture number (a section's `picture_number` code), or, when no frame does, on the first `programme_area` frame, taken as picture 1. From there header addresses follow the subcode timeline continuously, so address minus Q time stays constant, which a decoder's sector placement relies on. A picture number that breaks the continuous count from the anchor is reported, and its sectors keep following the timeline. A sector's 98 F1 frames enter the CIRC encoder at the start of its subcode section, with the CIRC delay (108 F1 frames, about ⅓ of a PAL frame) not pre-compensated, as for audio.
+
+**What each subcode section carries**, in a section that carries EFM:
+
+| Header address | Content |
+|----------------|---------|
+| Inside the image | The image sector |
+| Below 0 (the EFM lead-in) | A Mode 1 lead-in sector: zero user data, header MIN + A0, time since the start of the stream (ECMA-130 §14.2) |
+| From 0 on, before or after the image (also in a `lead_in` section) | A Mode 0 sector (ECMA-130 §14.1) with its address |
+
+Frames of sections that do not declare `efm_data` carry **no EFM signal**: their `efm_frame` rows have no t-values, and the channel stream restarts after them. Q time keeps counting across the gap. A sector whose CIRC decode window runs into such a frame (the last sector or so of each run) cannot be decoded, and the run reports it.
+
+The subcode is one data track over the whole programme area, with the 2 s pause before track 1. The lead-in carries the table of contents, and the lead-out carries lead-out subcode, as for audio.
+
+**Programme area start.** The EFM programme area starts at header address 0, not at the first `programme_area` frame, so the Q absolute time equals the header address throughout, as on the AIV discs. The track 1 pause (index 00) covers addresses 0 to 149, and index 01 starts at 00:02:00. With the default offset on PAL, address 0 falls 153 sectors (51 frames) before picture 1, inside the video lead-in. The `lead_in` frames before address 0 carry the table of contents; those from address 0 on carry programme-area Q and their image sectors. The EFM lead-in must hold at least one table-of-contents cycle (12 subcode sections, 4 PAL frames), so on PAL with the default offset the `lead_in` section needs at least 55 frames. Without a `lead_in` section the programme area starts with the first frame, as for audio.
+
+Constraints:
+
+| Rule | Severity |
+|------|----------|
+| Together with `efm_audio` (a disc has one EFM channel) | Error |
+| Video standard not PAL, NTSC or PAL-M | Error |
+| `image` empty, `first_address` or `picture_offset_sectors` out of range, `q_mode` not 1 or 4 | Error |
+| A PAL section declares both `efm_data` and an audio channel pair | Error |
+| The image is not a whole, non-zero number of 2 048-byte sectors | Error (at generation) |
+| Address 0 falls less than 12 subcode sections after the start of the `lead_in` section | Error (at generation), with the frames it needs |
+| No section declares `efm_data` | Warning |
+| Image sectors fall on frames without EFM, or beyond the stream | Warning (at generation), with the count and first address |
+| A left-out image sector is not blank (every byte the same value) | Warning (at generation) |
+| Placed sectors cut by a frame without EFM | Warning (at generation) |
+| A picture number breaks the count from the anchor | Warning (at generation) |
+
+The `.efm` and `.efm.meta` files are written beside the video output, as for `efm_audio`. See [EFM data](../user-manual/laserdisc.md#efm-data).
+
 ## `channel`
 
 The LaserVision pressing and replay channel: the FM-beat herringbone recorded on the master, the group-delay pre-distortion of IEC 60856, the replay amplitude response (fixed, or varying with disc position) and the misregistration of field 2 against field 1. See [LaserVision channel](laserdisc-channel.md).
 
 ## Rules
 
-- An empty block, an unknown key, a non-string `disc_type`, a non-boolean `pilot_burst` or `vbi_burst`, or a non-integer `efm_audio.pair` is a parse error.
+- An empty block, an unknown key, a non-string `disc_type`, a non-boolean `pilot_burst` or `vbi_burst`, a non-integer `efm_audio.pair`, an `efm_data` block without `image`, an unknown `efm_data` key, a non-integer `efm_data` number or a `q_control` other than `data`, `data_copy_permitted` or `audio` is a parse error.
 - `disc_type` other than `CAV` or `CLV` is a validation error, as is a section with biphase codes in a project without `disc_type`.
 - A section with a `laserdisc` block in a project without one is a validation error.
 - The whole block on a SECAM project is a validation error.

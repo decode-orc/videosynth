@@ -62,6 +62,9 @@ constexpr double kMinEfmTrackSeconds = 4.0;
 // IEC 60908-1999, 17.5.1: the pause preceding the first track is 2 s to 3 s,
 // so the first programme-area section must carry the pause plus a full track.
 constexpr double kEfmFirstTrackPauseSeconds = 2.0;
+
+// ECMA-130 14.2: the highest Sector Address, 99:59:74 at 75 sectors a second.
+constexpr int kMaxEfmSectorAddress = (100 * 60 * 75) - 1;
 constexpr uint32_t kMaxUsersCodeX1Nibble = 7;
 
 std::string Lowercase(std::string value) {
@@ -2594,6 +2597,93 @@ void ValidateEfmAudioOutput(const videosynth::Project& project,
   }
 }
 
+// Validates the EFM data channel: the project-level `laserdisc.efm_data`
+// settings and the sections that declare `laserdisc.efm_data`.
+void ValidateEfmDataOutput(const videosynth::Project& project,
+                           videosynth::ValidationResult* result) {
+  if (result == nullptr) {
+    return;
+  }
+  const videosynth::EfmDataOutput& efm_data = project.laserdisc.efm_data;
+  auto error = [result](const std::string& message) {
+    result->is_valid = false;
+    result->errors.push_back("Project configuration error: " + message);
+  };
+
+  bool any_section = false;
+  for (const videosynth::Section& section : project.sections) {
+    any_section = any_section || section.carries_efm_data;
+  }
+  if (!efm_data.enabled) {
+    if (any_section) {
+      error(
+          "section.laserdisc.efm_data requires a project-level "
+          "laserdisc.efm_data block naming the sector image.");
+    }
+    return;
+  }
+
+  // A disc has one EFM channel: it carries digital audio or data, not both.
+  if (project.laserdisc.efm_audio.enabled) {
+    error(
+        "laserdisc.efm_data and laserdisc.efm_audio cannot be used together; "
+        "a disc has one EFM channel.");
+  }
+
+  const videosynth::Standard standard =
+      project.cvbs_presets.video_standard_preset;
+  if (!videosynth::StandardHasLaserdiscDigitalAudio(standard)) {
+    error(
+        "laserdisc.efm_data requires a PAL, NTSC or PAL_M "
+        "video_standard_preset; got '" +
+        videosynth::StandardToString(standard) + "'.");
+  }
+
+  if (efm_data.image.empty()) {
+    error("laserdisc.efm_data.image must name a sector image file.");
+  }
+  // ECMA-130 14.2: a Sector Address is MIN:SEC:FRAC in BCD, up to 99:59:74.
+  const std::string max_address = std::to_string(kMaxEfmSectorAddress);
+  if (efm_data.first_address < 0 ||
+      efm_data.first_address > kMaxEfmSectorAddress) {
+    error("laserdisc.efm_data.first_address must be in [0, " + max_address +
+          "]; got " + std::to_string(efm_data.first_address) + ".");
+  }
+  if (efm_data.picture_offset_sectors < 0 ||
+      efm_data.picture_offset_sectors > kMaxEfmSectorAddress) {
+    error("laserdisc.efm_data.picture_offset_sectors must be in [0, " +
+          max_address + "]; got " +
+          std::to_string(efm_data.picture_offset_sectors) + ".");
+  }
+  if (efm_data.q_mode != videosynth::kEfmDataQModeLaserdisc &&
+      efm_data.q_mode != videosynth::kEfmDataQModeCompactDisc) {
+    error(
+        "laserdisc.efm_data.q_mode must be 4 (LaserDisc, IEC 60856/60857 "
+        "Amd 2) or 1 (compact disc, as recorded by pre-standard AIV discs); "
+        "got " +
+        std::to_string(efm_data.q_mode) + ".");
+  }
+
+  if (!any_section) {
+    result->warnings.push_back(
+        "laserdisc.efm_data: no section declares laserdisc.efm_data, so the "
+        "EFM stream carries no data.");
+  }
+
+  // On a PAL LaserDisc the EFM signal takes the place of the analogue sound
+  // carriers, so a section cannot carry both.
+  if (standard == videosynth::Standard::kPal) {
+    for (const videosynth::Section& section : project.sections) {
+      if (section.carries_efm_data && !section.audio_channel_pairs.empty()) {
+        error("section '" + section.name +
+              "' declares both laserdisc.efm_data and analogue audio "
+              "channel pairs; a PAL section cannot carry EFM and analogue "
+              "sound together.");
+      }
+    }
+  }
+}
+
 // Validates disc-structure section ordering. When lead_in, lead_out, or
 // programme_area section types are declared, the section sequence must be
 // [lead_in] programme_area... [lead_out]: no section may precede the lead_in,
@@ -2965,6 +3055,7 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
   }
 
   ValidateEfmAudioOutput(project, &result);
+  ValidateEfmDataOutput(project, &result);
   ValidateTruthOutput(project, &result);
 
   if (project.sections.empty()) {

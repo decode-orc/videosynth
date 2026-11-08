@@ -12,7 +12,7 @@ Every artefact a run produces is colocated with `output.video_path`. The project
 | `<name>.meta` | Always | SQLite metadata sidecar |
 | `<name>.dropouts.meta` | Any section has dropouts | SQLite dropout sidecar |
 | `<name>_audio_<pair>.wav` | Any section declares that pair | 48 kHz/24-bit stereo audio |
-| `<name>.efm` | [`laserdisc.efm_audio`](../reference/laserdisc.md#efm_audio) is present | Laserdisc EFM channel stream |
+| `<name>.efm` | [`laserdisc.efm_audio`](../reference/laserdisc.md#efm_audio) or [`laserdisc.efm_data`](../reference/laserdisc.md#efm_data) is present | Laserdisc EFM channel stream |
 | `<name>.efm.meta` | With the above | SQLite frame index for the EFM stream |
 | `<name>.truth` | `output.truth: true` | Picture truth: planar `float32` Y/U/V at 4fsc |
 | `<name>.truth.meta` | With the above | SQLite sidecar: layout and conventions of the truth file |

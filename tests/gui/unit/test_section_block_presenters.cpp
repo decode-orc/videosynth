@@ -528,22 +528,26 @@ TEST(SectionBlockPresenterTest, ApplySectionEditDeltaMirrorsPictureMapping) {
   Section before;
   Section after = before;
   after.horizontal_resample = HorizontalResample::kBandlimited;
+  after.horizontal_mapping = HorizontalMapping::kBt601;
   AddChromaLineSignRegion(&after.chroma_line_sign, 576);
   Section target;
   target.name = "Target";
   const Section mirrored = ApplySectionEditDelta(before, after, target);
   EXPECT_EQ(mirrored.horizontal_resample, HorizontalResample::kBandlimited);
+  EXPECT_EQ(mirrored.horizontal_mapping, HorizontalMapping::kBt601);
   EXPECT_EQ(mirrored.chroma_line_sign, after.chroma_line_sign);
 
   // An unrelated edit keeps the target's own picture settings.
   Section own = target;
   own.horizontal_resample = HorizontalResample::kBandlimited;
+  own.horizontal_mapping = HorizontalMapping::kBt601;
   AddChromaLineSignRegion(&own.chroma_line_sign, 576);
   own.chroma_line_sign[0].x = 100;
   Section renamed = before;
   renamed.source = "assets/other.exr";
   const Section kept = ApplySectionEditDelta(before, renamed, own);
   EXPECT_EQ(kept.horizontal_resample, own.horizontal_resample);
+  EXPECT_EQ(kept.horizontal_mapping, own.horizontal_mapping);
   EXPECT_EQ(kept.chroma_line_sign, own.chroma_line_sign);
 }
 
@@ -1273,6 +1277,57 @@ TEST(SectionBlockPresentersTest, SectionLaserdiscBlockClears) {
   EXPECT_EQ(section.section_type, SectionType::kUnknown);
   EXPECT_TRUE(section.line_injections.empty());
   EXPECT_FALSE(SectionHasLaserdiscBlock(section));
+}
+
+TEST(SectionBlockPresentersTest, EfmDataIsPartOfTheSectionLaserdiscBlock) {
+  Section section;
+  section.carries_efm_data = true;
+  EXPECT_TRUE(SectionHasLaserdiscBlock(section));
+  EXPECT_TRUE(ClearSectionLaserdiscBlock(&section));
+  EXPECT_FALSE(section.carries_efm_data);
+
+  section.carries_efm_data = true;
+  EXPECT_TRUE(ClearSectionEfmData(&section));
+  EXPECT_FALSE(ClearSectionEfmData(&section));
+}
+
+TEST(SectionBlockPresentersTest, SectionEfmDataControlFollowsProject) {
+  Project project;
+  project.cvbs_presets.video_standard_preset = Standard::kPal;
+  Section section;
+  EXPECT_FALSE(SectionEfmDataVisible(project, section));
+  // A section still carrying the channel keeps the control so it can be
+  // cleared.
+  section.carries_efm_data = true;
+  EXPECT_TRUE(SectionEfmDataVisible(project, section));
+  section.carries_efm_data = false;
+  project.laserdisc.efm_data.enabled = true;
+  EXPECT_TRUE(SectionEfmDataVisible(project, section));
+}
+
+TEST(SectionBlockPresentersTest, PalEfmDataConflictsWithAnalogueAudio) {
+  Project project;
+  project.cvbs_presets.video_standard_preset = Standard::kPal;
+  Section section;
+  section.carries_efm_data = true;
+  EXPECT_FALSE(SectionEfmDataConflictsWithAudio(project, section));
+  section.audio_channel_pairs.emplace_back();
+  EXPECT_TRUE(SectionEfmDataConflictsWithAudio(project, section));
+  project.cvbs_presets.video_standard_preset = Standard::kNtsc;
+  EXPECT_FALSE(SectionEfmDataConflictsWithAudio(project, section));
+}
+
+TEST(SectionBlockPresentersTest, ApplySectionEditDeltaMirrorsEfmData) {
+  const Section before;
+  Section after = before;
+  after.carries_efm_data = true;
+  EXPECT_TRUE(ApplySectionEditDelta(before, after, Section{}).carries_efm_data);
+  Section target;
+  target.carries_efm_data = true;
+  // An unrelated edit leaves the target's flag alone.
+  Section renamed = before;
+  renamed.name = "Renamed";
+  EXPECT_TRUE(ApplySectionEditDelta(before, renamed, target).carries_efm_data);
 }
 
 TEST(SectionBlockPresentersTest, SectionLaserdiscGroupFollowsProjectBlock) {

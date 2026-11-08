@@ -77,6 +77,31 @@ TEST(EfmTrackLayoutTest, MapsPalSectionsToTracksInOutputOrder) {
   EXPECT_TRUE(generator.Begin(layout.table));
 }
 
+TEST(EfmTrackLayoutTest, SingleProgrammeTrackMergesProgrammeSections) {
+  const std::vector<Section> sections = {
+      MakeSection("LeadIn", SectionType::kLeadIn),
+      MakeSection("Chapter0", SectionType::kProgrammeArea),
+      MakeSection("Chapter1", SectionType::kProgrammeArea),
+      MakeSection("Chapter2", SectionType::kProgrammeArea),
+      MakeSection("LeadOut", SectionType::kLeadOut),
+  };
+
+  EfmTrackLayout layout;
+  std::vector<std::string> errors;
+  EfmTrackLayoutOptions options;
+  options.single_programme_track = true;
+  ASSERT_TRUE(BuildEfmTrackLayout(Standard::kPal,
+                                  FrameList(sections, kPalFramesPerSection),
+                                  &layout, &errors, options))
+      << (errors.empty() ? "" : errors.front());
+
+  ASSERT_EQ(layout.table.entries.size(), 3U);
+  EXPECT_EQ(layout.table.entries[1].area, efm::SubcodeArea::kProgramme);
+  EXPECT_EQ(layout.table.entries[1].track_number, 1U);
+  EXPECT_EQ(layout.table.entries[1].section_count,
+            3U * kPalSubcodeSectionsPerRun);
+}
+
 TEST(EfmTrackLayoutTest, PauseCoversTheStartOfTheFirstTrack) {
   const std::vector<Section> sections = {
       MakeSection("LeadIn", SectionType::kLeadIn),
@@ -254,6 +279,65 @@ TEST(EfmTrackLayoutTest, RejectsMoreTracksThanTheDiscAllows) {
                                    &layout, &errors));
   ASSERT_EQ(errors.size(), 1U);
   EXPECT_NE(errors.front().find("79"), std::string::npos);
+}
+
+TEST(EfmTrackLayoutTest, ProgrammeAreaMayStartInsideTheLeadIn) {
+  const std::vector<Section> sections = {
+      MakeSection("LeadIn", SectionType::kLeadIn),
+      MakeSection("Data", SectionType::kProgrammeArea),
+      MakeSection("LeadOut", SectionType::kLeadOut),
+  };
+  EfmTrackLayoutOptions options;
+  options.single_programme_track = true;
+  options.programme_start_section = 10;
+
+  EfmTrackLayout layout;
+  std::vector<std::string> errors;
+  ASSERT_TRUE(BuildEfmTrackLayout(Standard::kPal,
+                                  FrameList(sections, kPalFramesPerSection),
+                                  &layout, &errors, options));
+  ASSERT_EQ(layout.table.entries.size(), 3U);
+  EXPECT_EQ(layout.table.entries[0].area, efm::SubcodeArea::kLeadIn);
+  EXPECT_EQ(layout.table.entries[0].section_count, 10U);
+  EXPECT_EQ(layout.table.entries[1].area, efm::SubcodeArea::kProgramme);
+  EXPECT_EQ(layout.table.entries[1].start_section, 10U);
+  EXPECT_EQ(layout.table.entries[1].section_count,
+            (2 * kPalSubcodeSectionsPerRun) - 10U);
+  EXPECT_EQ(layout.pause_start_sample, 10U * kEfmSamplesPerSubcodeSection);
+}
+
+TEST(EfmTrackLayoutTest, ProgrammeStartAfterTheLeadInIsMovedBackToIt) {
+  const std::vector<Section> sections = {
+      MakeSection("LeadIn", SectionType::kLeadIn),
+      MakeSection("Data", SectionType::kProgrammeArea),
+  };
+  EfmTrackLayoutOptions options;
+  options.programme_start_section = 30;
+
+  EfmTrackLayout layout;
+  std::vector<std::string> errors;
+  ASSERT_TRUE(BuildEfmTrackLayout(Standard::kPal,
+                                  FrameList(sections, kPalFramesPerSection),
+                                  &layout, &errors, options));
+  ASSERT_EQ(layout.table.entries.size(), 2U);
+  EXPECT_EQ(layout.table.entries[1].start_section, kPalSubcodeSectionsPerRun);
+}
+
+TEST(EfmTrackLayoutTest, RejectsAProgrammeStartThatLeavesNoLeadIn) {
+  const std::vector<Section> sections = {
+      MakeSection("LeadIn", SectionType::kLeadIn),
+      MakeSection("Data", SectionType::kProgrammeArea),
+  };
+  EfmTrackLayoutOptions options;
+  options.programme_start_section = 0;
+
+  EfmTrackLayout layout;
+  std::vector<std::string> errors;
+  EXPECT_FALSE(BuildEfmTrackLayout(Standard::kPal,
+                                   FrameList(sections, kPalFramesPerSection),
+                                   &layout, &errors, options));
+  ASSERT_EQ(errors.size(), 1U);
+  EXPECT_NE(errors.front().find("LeadIn"), std::string::npos);
 }
 
 TEST(EfmTrackLayoutTest, RejectsAnEmptyOutput) {

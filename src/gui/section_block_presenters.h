@@ -336,14 +336,29 @@ bool SectionTypeAllowsBatchAssignment(SectionType type);
 // never see it.
 bool SectionLaserdiscGroupVisible(const Project& project);
 
-// True when `section` carries laserdisc data: a disc area or laserdisc code
-// injections (its YAML `laserdisc:` block).
+// True when `section` carries laserdisc data: a disc area, laserdisc code
+// injections or the EFM data channel (its YAML `laserdisc:` block).
 bool SectionHasLaserdiscBlock(const Section& section);
 
-// Removes the section's laserdisc data (disc area and code injections), as
-// required once the project has no laserdisc block. Returns true when the
-// section changed.
+// Removes the section's laserdisc data (disc area, code injections and EFM
+// data), as required once the project has no laserdisc block. Returns true
+// when the section changed.
 bool ClearSectionLaserdiscBlock(Section* section);
+
+// The section editor offers the "carries EFM data" control when the project
+// declares laserdisc.efm_data, and keeps it while the section still carries
+// the channel so it can be cleared.
+bool SectionEfmDataVisible(const Project& project, const Section& section);
+
+// True when the section carries EFM data and analogue audio channel pairs on
+// a PAL project, which ValidateEfmDataOutput rejects: on PAL LaserDisc the EFM
+// signal takes the place of the analogue sound carriers.
+bool SectionEfmDataConflictsWithAudio(const Project& project,
+                                      const Section& section);
+
+// Stops the section carrying the EFM data channel, as required once the
+// project has no laserdisc.efm_data block. Returns true when it changed.
+bool ClearSectionEfmData(Section* section);
 
 // Toggles the section's laserdisc block. Enabling places the section in the
 // programme area unless it already has a disc area (the programme area is the

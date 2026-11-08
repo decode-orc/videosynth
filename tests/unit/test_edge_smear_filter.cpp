@@ -78,7 +78,7 @@ TEST(EdgeSmearFilterTest, WarmsUpOverTheFramesOwnTail) {
 TEST(EdgeSmearFilterTest, ZeroFractionLeavesTheFrameUntouched) {
   std::vector<SampleFixed> frame(1000);
   for (std::size_t n = 0; n < frame.size(); ++n) {
-    frame[n] = static_cast<SampleFixed>(n * 7919U);
+    frame[n] = static_cast<SampleFixed>(n) * 7919;
   }
   const std::vector<SampleFixed> before = frame;
   ApplyEdgeSmear(0.0, 5.0, frame.data(), frame.size());

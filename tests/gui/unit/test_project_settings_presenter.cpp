@@ -315,6 +315,97 @@ TEST(ProjectSettingsPresenterTest, NormalizeLaserdiscClearsEfmForeignToStd) {
   EXPECT_EQ(cleared.efm_audio.pair, 0);
 }
 
+// A PAL project with EFM data enabled and one section carrying it.
+Project MakeEfmDataProject() {
+  Project project = MakeProject(Standard::kPal);
+  project.laserdisc.enabled = true;
+  project.laserdisc.efm_data.enabled = true;
+  project.laserdisc.efm_data.image = "data/image.dat";
+  project.sections[0].carries_efm_data = true;
+  return project;
+}
+
+TEST(ProjectSettingsPresenterTest, EfmDataIdleUntilEnabled) {
+  const ProjectSettingsFormState state =
+      BuildProjectSettingsFormState(MakeProject(Standard::kPal));
+  EXPECT_TRUE(state.efm_data_editable);
+  EXPECT_FALSE(state.efm_data_fields_editable);
+  EXPECT_EQ(state.efm_data_status, EfmDataStatus::kDisabled);
+  // The IEC LaserDisc Q mode is offered first, as the default.
+  ASSERT_EQ(state.efm_data_q_mode_options.size(), 2U);
+  EXPECT_EQ(state.efm_data_q_mode_options[0], kEfmDataQModeLaserdisc);
+  EXPECT_EQ(state.efm_data_q_mode_options[1], kEfmDataQModeCompactDisc);
+  EXPECT_EQ(state.efm_data_q_control_options.size(), 3U);
+}
+
+TEST(ProjectSettingsPresenterTest, EfmDataStatusFollowsTheValidator) {
+  Project project = MakeEfmDataProject();
+  ProjectSettingsFormState state = BuildProjectSettingsFormState(project);
+  EXPECT_TRUE(state.efm_data_fields_editable);
+  EXPECT_EQ(state.efm_data_status, EfmDataStatus::kActive);
+
+  project.sections[0].carries_efm_data = false;
+  EXPECT_EQ(BuildProjectSettingsFormState(project).efm_data_status,
+            EfmDataStatus::kNoSection);
+
+  project.laserdisc.efm_data.image.clear();
+  EXPECT_EQ(BuildProjectSettingsFormState(project).efm_data_status,
+            EfmDataStatus::kNoImage);
+
+  project.cvbs_presets.video_standard_preset = Standard::kSecam;
+  state = BuildProjectSettingsFormState(project);
+  EXPECT_FALSE(state.efm_data_editable);
+  EXPECT_FALSE(state.efm_data_fields_editable);
+  EXPECT_EQ(state.efm_data_status, EfmDataStatus::kUnsupportedStandard);
+}
+
+// A disc has one EFM channel: each EFM use locks the other's enable control.
+TEST(ProjectSettingsPresenterTest, EfmDataAndDigitalAudioExcludeEachOther) {
+  Project project = MakeEfmDataProject();
+  EXPECT_FALSE(BuildProjectSettingsFormState(project).efm_output_editable);
+
+  project.laserdisc.efm_audio.enabled = true;
+  const ProjectSettingsFormState both = BuildProjectSettingsFormState(project);
+  EXPECT_FALSE(both.efm_data_editable);
+  EXPECT_EQ(both.efm_data_status, EfmDataStatus::kConflictsWithAudio);
+
+  project.laserdisc.efm_data = EfmDataOutput{};
+  const ProjectSettingsFormState audio = BuildProjectSettingsFormState(project);
+  EXPECT_TRUE(audio.efm_output_editable);
+  EXPECT_FALSE(audio.efm_data_editable);
+}
+
+TEST(ProjectSettingsPresenterTest, SetEfmDataEnabledKeepsOrResetsSettings) {
+  LaserdiscParameters laserdisc;
+  SetEfmDataEnabled(&laserdisc, true);
+  EXPECT_TRUE(laserdisc.enabled);
+  EXPECT_TRUE(laserdisc.efm_data.enabled);
+  EXPECT_EQ(laserdisc.efm_data.q_mode, kEfmDataQModeLaserdisc);
+  EXPECT_EQ(laserdisc.efm_data.picture_offset_sectors,
+            kEfmDataDefaultPictureOffsetSectors);
+
+  laserdisc.efm_data.image = "image.dat";
+  laserdisc.efm_data.q_mode = kEfmDataQModeCompactDisc;
+  SetEfmDataEnabled(&laserdisc, true);
+  EXPECT_EQ(laserdisc.efm_data.image, "image.dat");
+  EXPECT_EQ(laserdisc.efm_data.q_mode, kEfmDataQModeCompactDisc);
+
+  SetEfmDataEnabled(&laserdisc, false);
+  EXPECT_TRUE(laserdisc.efm_data == EfmDataOutput{});
+  EXPECT_TRUE(laserdisc.enabled);
+}
+
+TEST(ProjectSettingsPresenterTest, NormalizeLaserdiscClearsEfmDataForSecam) {
+  LaserdiscParameters laserdisc;
+  SetEfmDataEnabled(&laserdisc, true);
+  laserdisc.efm_data.image = "image.dat";
+  EXPECT_TRUE(
+      NormalizeLaserdiscForStandard(laserdisc, Standard::kNtsc).efm_data ==
+      laserdisc.efm_data);
+  EXPECT_FALSE(NormalizeLaserdiscForStandard(laserdisc, Standard::kSecam)
+                   .efm_data.enabled);
+}
+
 TEST(ProjectSettingsPresenterTest, TruthIsOfferedForQuadratureStandardsOnly) {
   OutputTargets output;
   output.truth = true;

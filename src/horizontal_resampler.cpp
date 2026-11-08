@@ -27,11 +27,12 @@ constexpr double kPi = 3.14159265358979323846;
 
 BandlimitedHorizontalResampler::BandlimitedHorizontalResampler(
     int active_window_samples, int source_active_width, int source_active_x,
-    int source_width)
+    int source_width, const SourcePixelGrid& grid)
     : active_window_samples_(active_window_samples),
       source_active_width_(source_active_width),
       source_active_x_(source_active_x),
-      source_width_(source_width) {
+      source_width_(source_width),
+      grid_(grid) {
   const int first_column = std::max(0, source_active_x);
   const int last_column =
       std::min(source_active_x + source_active_width, source_width) - 1;
@@ -56,12 +57,10 @@ BandlimitedHorizontalResampler::BandlimitedHorizontalResampler(
   columns_.assign(static_cast<std::size_t>(active_window_samples) * taps,
                   first_column);
 
-  const double pixels_per_sample = static_cast<double>(source_active_width) /
-                                   static_cast<double>(active_window_samples);
   const double cutoff = kHorizontalResampleCutoffCyclesPerPixel;
   for (int x = 0; x < active_window_samples; ++x) {
     // Pixel-index position of this sample, relative to source_active_x.
-    const double position = (static_cast<double>(x) * pixels_per_sample) - 0.5;
+    const double position = SourcePixelCoordinate(grid, x) - 0.5;
     const int first_tap_pixel =
         static_cast<int>(std::floor(position)) - (taps_per_sample_ / 2) + 1;
     double sum = 0.0;

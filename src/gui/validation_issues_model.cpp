@@ -78,6 +78,9 @@ IssueField ClassifyIssueField(const std::string& message) {
     return StartsWith(detail, "scratch.") ? IssueField::kScratchDropouts
                                           : IssueField::kRandomDropouts;
   }
+  if (detail.find("efm_data") != std::string::npos) {
+    return IssueField::kEfmData;
+  }
   // Cadence findings name the key right after the section reference.
   if (name_end != std::string::npos && StartsWith(detail, "cadence ")) {
     return IssueField::kCadence;

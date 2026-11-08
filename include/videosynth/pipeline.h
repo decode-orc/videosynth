@@ -15,6 +15,7 @@
 #include "videosynth/audio_track_generator.h"
 #include "videosynth/channel_stage.h"
 #include "videosynth/chroma_error_stage.h"
+#include "videosynth/data_efm_writer.h"
 #include "videosynth/dropout_injection_stage.h"
 #include "videosynth/interfaces.h"
 #include "videosynth/line_timing_stage.h"
@@ -123,6 +124,9 @@ class VideoSynthPipeline {
   // Writes output.truth beside the video output; used only from the thread
   // that runs the pipeline.
   PictureTruthWriter truth_writer_;
+  // Writes laserdisc.efm_data beside the video output; used only from the
+  // thread that runs the pipeline.
+  DataEfmWriter efm_data_writer_;
 };
 
 }  // namespace videosynth

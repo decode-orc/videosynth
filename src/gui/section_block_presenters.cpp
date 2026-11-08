@@ -697,6 +697,9 @@ Section ApplySectionEditDelta(const Section& before, const Section& after,
   if (after.horizontal_resample != before.horizontal_resample) {
     target.horizontal_resample = after.horizontal_resample;
   }
+  if (after.horizontal_mapping != before.horizontal_mapping) {
+    target.horizontal_mapping = after.horizontal_mapping;
+  }
   if (!(after.chroma_line_sign == before.chroma_line_sign)) {
     target.chroma_line_sign = after.chroma_line_sign;
   }
@@ -713,6 +716,9 @@ Section ApplySectionEditDelta(const Section& before, const Section& after,
   }
   if (!(after.audio_channel_pairs == before.audio_channel_pairs)) {
     target.audio_channel_pairs = after.audio_channel_pairs;
+  }
+  if (after.carries_efm_data != before.carries_efm_data) {
+    target.carries_efm_data = after.carries_efm_data;
   }
   // Line injections mirror per code, filtered by the target's section type
   // (which the section_type mirror above has already updated).
@@ -815,7 +821,8 @@ bool SectionLaserdiscGroupVisible(const Project& project) {
 }
 
 bool SectionHasLaserdiscBlock(const Section& section) {
-  if (section.section_type != SectionType::kUnknown) {
+  if (section.section_type != SectionType::kUnknown ||
+      section.carries_efm_data) {
     return true;
   }
   return std::any_of(section.line_injections.begin(),
@@ -830,12 +837,32 @@ bool ClearSectionLaserdiscBlock(Section* section) {
     return false;
   }
   section->section_type = SectionType::kUnknown;
+  section->carries_efm_data = false;
   auto& injections = section->line_injections;
   injections.erase(std::remove_if(injections.begin(), injections.end(),
                                   [](const Section::LineInjection& injection) {
                                     return injection.type == "laserdisc";
                                   }),
                    injections.end());
+  return true;
+}
+
+bool SectionEfmDataVisible(const Project& project, const Section& section) {
+  return project.laserdisc.efm_data.enabled || section.carries_efm_data;
+}
+
+bool SectionEfmDataConflictsWithAudio(const Project& project,
+                                      const Section& section) {
+  return section.carries_efm_data &&
+         project.cvbs_presets.video_standard_preset == Standard::kPal &&
+         !section.audio_channel_pairs.empty();
+}
+
+bool ClearSectionEfmData(Section* section) {
+  if (!section->carries_efm_data) {
+    return false;
+  }
+  section->carries_efm_data = false;
   return true;
 }
 

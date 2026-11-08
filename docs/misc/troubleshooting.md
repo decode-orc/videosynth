@@ -430,6 +430,26 @@ A soundtrack comes from the section's own video, so an EXR still has none. Use a
 
 A warning will say that no section declares the pair named in `laserdisc.efm_audio`. Add an `audio:` block declaring that pair to at least one section.
 
+### `laserdisc.efm_data and laserdisc.efm_audio cannot be used together`
+
+A disc has one EFM channel, carrying either digital audio or data. Remove one of the two blocks.
+
+### `a PAL section cannot carry EFM and analogue sound together`
+
+On a PAL disc the EFM signal takes the place of the analogue sound carriers. Remove the section's `audio:` channel pairs, or its `laserdisc.efm_data`.
+
+### `EFM data image ... is not a whole, non-zero number of 2048-byte sectors`
+
+The image holds user data only, 2 048 bytes per sector. A raw 2 352-byte sector dump, or a truncated file, is rejected.
+
+### EFM data sectors are left out, or are not blank
+
+The image sectors whose pictures fall in sections without `laserdisc.efm_data`, or before the stream starts or after it ends, are left out. The log gives the count and the first address. Picture *p* carries sectors 3*p* + 150 to 3*p* + 152 on PAL, so either extend the sections that carry EFM, or check `picture_offset_sectors` and `first_address`. A warning that left-out sectors are not blank means real data is lost. Free space in a filesystem image is blank (every byte the same), so this usually points to a layout mistake.
+
+### EFM data sectors in the lead-in are missing after a decode
+
+decode-orc skips lead-in sections until its timeline settles, so it reports the image sectors placed in the lead-in as missing. The `.efm` stream does carry them.
+
 ### `output.truth requires a PAL, NTSC or PAL-M project`
 
 SECAM carries its colour as frequency-modulated subcarriers, with no U/V quadrature components for the truth to record. Remove `truth: true` from SECAM projects.

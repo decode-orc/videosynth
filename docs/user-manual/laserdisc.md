@@ -311,7 +311,52 @@ The colour field sequence follows the disc's video frames throughout, so it stay
 - **The VBI burst.** NTSC discs keep the colour burst on the equalising and broad sync lines of the vertical interval ([`laserdisc.vbi_burst: true`](../reference/laserdisc.md#vbi_burst)); the burst on the broad pulses dips below sync tip, so it too needs a signed or raw [sample encoding](video-signal.md#sample-encodings) to avoid clipping.
 - **No VITC.** Laserdisc uses the IEC biphase system as its sole timecode mechanism, and a `vitc` injection in a section that carries laserdisc codes is a validation error. (VITC is not implemented at all in the current runtime, so the question does not arise in practice.)
 - **EFM digital audio**, optionally — [`laserdisc.efm_audio`](../reference/laserdisc.md#efm_audio); see [Audio](audio.md#laserdisc-efm-digital-audio). The section's `laserdisc.area` alone drives the EFM disc-area mapping, so a project can have an EFM lead-in without carrying biphase codes at all.
+- **EFM data**, optionally, instead of EFM audio — [`laserdisc.efm_data`](../reference/laserdisc.md#efm_data); see [EFM data](#efm-data).
 - **The LaserVision channel**, optionally — the FM-beat herringbone, the IEC 60856 group-delay pre-distortion, the replay response and the field-2 offset, in [`laserdisc.channel`](../reference/laserdisc-channel.md); see [Impairments](impairments.md#the-laservision-channel).
+
+## EFM data
+
+Acorn Interactive Video (AIV) discs such as the BBC Domesday discs carry computer data in the EFM channel instead of digital audio. [`laserdisc.efm_data`](../reference/laserdisc.md#efm_data) names a sector image (2 048 bytes per sector, as decode-orc's EFM sink writes in `data` mode). Each section whose frames carry that data says so with [`laserdisc.efm_data: {}`](../reference/section-laserdisc.md#efm_data):
+
+```yaml
+laserdisc:
+  disc_type: CAV
+  efm_data:
+    image: "{project}/disc.dat"
+    q_mode: 1            # AIV discs record ADR 1; the default 4 is the LaserDisc mode
+
+sections:
+  - name: LeadIn
+    type: progressive
+    source: "{bundled}/exr/720x576/PLUGE.exr"
+    duration_frames: 60
+    laserdisc: { area: lead_in, efm_data: {} }
+  - name: Stills
+    type: progressive
+    source: "{bundled}/exr/720x576/75_BARS.exr"
+    duration_frames: 1000
+    laserdisc:
+      area: programme_area
+      efm_data: {}
+      codes:
+        - code_type: picture_number
+          start_value: 1
+  - name: Film                  # analogue sound, so no EFM on PAL
+    type: progressive
+    source: "{project}/film.mkv"
+    laserdisc: { area: programme_area }
+    audio:
+      channel_pairs:
+        - pair: 0
+          video_audio: { stream: 0 }
+```
+
+Where a sector lies against the picture numbers is part of the format, because AIV players find data by picture number and EFM time together. By default picture *p* carries image sectors 3*p* + 150 to 3*p* + 152 on PAL, so the image's first 153 sectors fall in the lead-in. The EFM programme area starts at sector 0, 51 frames before picture 1, so those sectors carry programme-area subcode as on a real AIV disc, and only the lead-in frames before it carry the table of contents. The lead-in therefore needs at least 55 frames on PAL. Sections that do not declare `efm_data` carry no EFM signal, and the image sectors that fall on their pictures are left out. The run log says how many were left out, from which address, and warns if any of them is not blank. Before sector 0 the stream carries lead-in sectors, which a decoder discards; between sector 0 and the image's first sector, and after its last, it carries Mode 0 sectors, which decode as zero-filled sectors.
+
+The `.efm` and `.efm.meta` files are written beside the video output, as for EFM audio. `efm_data` and `efm_audio` cannot be used together.
+
+!!! note
+    decode-orc's EFM sink skips lead-in (track 00) sections. Image sectors always lie at address 0 or above, so they carry programme-area subcode even in the video lead-in, and every placed sector decodes byte-identical.
 
 ## A complete example
 

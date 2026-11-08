@@ -112,6 +112,7 @@ endif()
 set(videosynth_efm_sources
     src/efm/audio_frame_assembler.cpp
     src/efm/circ_encoder.cpp
+    src/efm/data_sector.cpp
     src/efm/efm_modulator.cpp
     src/efm/efm_stream_encoder.cpp
     src/efm/subcode_generator.cpp
@@ -153,6 +154,11 @@ add_library(videosynth_core
     src/biphase_injection_manager.cpp
     src/cav_code_generator.cpp
     src/clv_code_generator.cpp
+    src/data_efm_writer.cpp
+    src/efm_data_encoder.cpp
+    src/efm_data_layout.cpp
+    src/efm_sector_image.cpp
+    src/efm_stream_file.cpp
     src/efm_track_layout.cpp
     src/fm_encoder.cpp
     src/fm_code_generator.cpp

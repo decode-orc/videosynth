@@ -269,6 +269,7 @@ sections:
       - region: {x: 0, y: 0, width: 10, height: 10}
         u: follow_switch
     horizontal_resample: bandlimited
+    horizontal_mapping: bt601
     cadence:
       pattern: "2:3"
 )");
@@ -278,6 +279,7 @@ sections:
   const std::string emitted = YamlProjectEmitter().EmitString(parsed.project);
   const std::vector<std::string> order = {"    cadence:",
                                           "    horizontal_resample:",
+                                          "    horizontal_mapping:",
                                           "    chroma_line_sign:",
                                           "    luma_bandwidth:",
                                           "    osd:",
@@ -417,6 +419,54 @@ sections:
     source: assets/bars.exr
     duration_frames: 10
 )");
+}
+
+TEST(YamlProjectEmitterTest, EfmDataRoundTripsSettingsAndSectionFlag) {
+  ExpectRoundTrip(R"(
+cvbs_presets:
+  video_standard_preset: PAL
+output:
+  video_path: out/video.cvbs
+laserdisc:
+  disc_type: CAV
+  efm_data:
+    image: data/disc.dat
+    first_address: 4
+    picture_offset_sectors: 75
+    q_control: data_copy_permitted
+    q_mode: 1
+sections:
+  - name: Stills
+    type: progressive
+    source: assets/bars.exr
+    duration_frames: 10
+    laserdisc:
+      area: programme_area
+      efm_data: {}
+)");
+}
+
+TEST(YamlProjectEmitterTest, EfmDataDefaultsAreOmitted) {
+  YamlProjectParser parser;
+  const ParseResult parsed = parser.ParseString(R"(
+cvbs_presets:
+  video_standard_preset: PAL
+output:
+  video_path: out/video.cvbs
+laserdisc:
+  efm_data:
+    image: data/disc.dat
+sections:
+  - name: Stills
+    type: progressive
+    source: assets/bars.exr
+    duration_frames: 10
+)");
+  ASSERT_TRUE(parsed.ok);
+  const std::string emitted = YamlProjectEmitter().EmitString(parsed.project);
+  EXPECT_NE(emitted.find("image: data/disc.dat"), std::string::npos);
+  EXPECT_EQ(emitted.find("q_mode"), std::string::npos);
+  EXPECT_EQ(emitted.find("picture_offset_sectors"), std::string::npos);
 }
 
 TEST(YamlProjectEmitterTest, DisabledEfmAudioOmitsTheKey) {

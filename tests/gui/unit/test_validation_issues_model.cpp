@@ -251,6 +251,18 @@ TEST(ValidationIssuesModelTest, FieldClassificationIgnoresTheSectionName) {
             IssueField::kNone);
 }
 
+TEST(ValidationIssuesModelTest, EfmDataFindingsNameTheEfmDataField) {
+  EXPECT_EQ(ClassifyIssueField("Project configuration error: "
+                               "laserdisc.efm_data.image must name a sector "
+                               "image file."),
+            IssueField::kEfmData);
+  EXPECT_EQ(ClassifyIssueField("Project configuration error: section 'Data' "
+                               "declares both laserdisc.efm_data and analogue "
+                               "audio channel pairs; a PAL section cannot "
+                               "carry EFM and analogue sound together."),
+            IssueField::kEfmData);
+}
+
 TEST(ValidationIssuesModelTest, ModelExposesTheFieldRole) {
   ValidationIssuesModel model;
   ValidationIssue issue;

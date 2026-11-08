@@ -63,6 +63,8 @@ inline constexpr double kField2OffsetMaxLines = 4.0;
 // Per-line timing error (ValidateLineTimingParameters).
 inline constexpr double kLineTimingMaxNs = 50.0;
 inline constexpr double kLineTimingCorrelationMax = 0.99;
+// EFM data sector addresses (ValidateEfmDataOutput, ECMA-130 14.2): 99:59:74.
+inline constexpr int kEfmDataMaxSectorAddress = (100 * 60 * 75) - 1;
 }  // namespace project_editor_limits
 
 // Outcome of the project-level LaserDisc digital audio (EFM) selection.
@@ -77,6 +79,23 @@ enum class EfmOutputStatus {
   // Requested, but no section declares the selected channel pair.
   kPairNotDeclared,
   // Requested and emitted: an `.efm` stream is written for the selected pair.
+  kActive,
+};
+
+// Outcome of the project-level LaserDisc EFM data (AIV / LV-ROM) selection.
+// The reasons mirror ValidateEfmDataOutput.
+enum class EfmDataStatus {
+  // The project does not request EFM data.
+  kDisabled,
+  // Requested, but the video standard has no LaserDisc EFM channel.
+  kUnsupportedStandard,
+  // Requested together with EFM digital audio; a disc has one EFM channel.
+  kConflictsWithAudio,
+  // Requested, but no sector image is named.
+  kNoImage,
+  // Requested, but no section carries the EFM data channel.
+  kNoSection,
+  // Requested and emitted.
   kActive,
 };
 
@@ -153,6 +172,20 @@ struct ProjectSettingsFormState {
   // diagnostics and ProjectEfmAudioPair's predicate for the same conditions.
   EfmOutputStatus efm_status = EfmOutputStatus::kDisabled;
 
+  // EFM data uses the same channel as EFM digital audio, so it is offered for
+  // the same standards and only while digital audio is off (and digital audio
+  // only while EFM data is off; see efm_output_editable).
+  bool efm_data_editable = false;
+  // The image, address and Q-channel controls additionally require EFM data
+  // to be enabled.
+  bool efm_data_fields_editable = false;
+  // Q-channel CONTROL choices, in display order.
+  std::vector<EfmDataQControl> efm_data_q_control_options;
+  // Q-channel ADR choices: the IEC LaserDisc mode first (the default), then
+  // the compact-disc mode pre-standard AIV discs record.
+  std::vector<int> efm_data_q_mode_options;
+  EfmDataStatus efm_data_status = EfmDataStatus::kDisabled;
+
   // The picture truth (output.truth) carries the quadrature U/V components,
   // so it is offered for PAL, NTSC and PAL-M but not SECAM.
   bool truth_editable = true;
@@ -219,6 +252,9 @@ void SetSharedLineTimingEnabled(LineTimingParameters* line_timing,
 
 void SetLaserdiscEnabled(LaserdiscParameters* laserdisc, bool enabled);
 void SetLaserdiscChannelEnabled(LaserdiscParameters* laserdisc, bool enabled);
+// EFM data: disabling resets every efm_data setting to its default; enabling
+// keeps any values already present and enables the laserdisc block.
+void SetEfmDataEnabled(LaserdiscParameters* laserdisc, bool enabled);
 void SetFmBeatEnabled(LaserdiscParameters* laserdisc, bool enabled);
 // Enabling selects the IEC 60856 nominal curve for PAL and a custom curve
 // seeded with the nominal breakpoints for the other standards (the preset is
