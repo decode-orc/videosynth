@@ -375,6 +375,14 @@ enum class HorizontalResample { kNearest, kBandlimited };
 // that span stay at blanking.
 enum class HorizontalMapping { kActiveWindow, kBt601 };
 
+// How much of the line a section paints with picture (YAML `active_extent:`).
+// kWindow paints the 52 us active window only. kSource, with the kBt601
+// mapping, paints every sample the BT.601 grid places a source pixel on, so a
+// 720-pixel raster keeps its whole 53.33 us span: on 625-line systems that
+// reaches 0.2 us before and 1.1 us after the window, into what ITU-R BT.470-6
+// treats as line blanking.
+enum class ActiveExtent { kWindow, kSource };
+
 // How one colour-difference component of a chroma_line_sign region is
 // carried. kNormal leaves it as the encoder would; kFollowSwitch multiplies it
 // by the line's PAL V-switch sign (+1 on lines whose V axis is not inverted,
@@ -737,6 +745,7 @@ struct Section {
   PictureResponseParameters picture_response = {};
   HorizontalResample horizontal_resample = HorizontalResample::kNearest;
   HorizontalMapping horizontal_mapping = HorizontalMapping::kActiveWindow;
+  ActiveExtent active_extent = ActiveExtent::kWindow;
   std::vector<ChromaLineSignRegion> chroma_line_sign = {};
   NoiseParameters noise = {};
   DropoutParameters dropouts = {};

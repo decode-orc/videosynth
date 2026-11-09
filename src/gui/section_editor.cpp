@@ -671,6 +671,20 @@ QWidget* SectionEditor::BuildPictureGroup() {
          "the 720 pixels stay at blanking."));
   form->addRow(tr("Horizontal mapping:"), horizontal_mapping_combo_);
 
+  active_extent_combo_ = new QComboBox(picture_group_);
+  active_extent_combo_->addItem(tr("Active window"),
+                                static_cast<int>(ActiveExtent::kWindow));
+  active_extent_combo_->addItem(tr("Whole BT.601 span"),
+                                static_cast<int>(ActiveExtent::kSource));
+  active_extent_combo_->setToolTip(
+      tr("How much of the line carries picture. Active window paints the "
+         "52 us active line and leaves the rest at blanking. Whole BT.601 "
+         "span (BT.601 grid only) paints all 720 pixels, about 0.2 us before "
+         "and 1.1 us after the window on 625-line, for masters whose picture "
+         "runs past the end of the 52 us line. That part of the line is "
+         "blanking in the broadcast standards."));
+  form->addRow(tr("Picture extent:"), active_extent_combo_);
+
   chroma_line_sign_note_ = new QLabel(picture_group_);
   chroma_line_sign_note_->setWordWrap(true);
   chroma_line_sign_note_->setText(
@@ -685,7 +699,19 @@ QWidget* SectionEditor::BuildPictureGroup() {
     }
   };
   connect(horizontal_resample_combo_, &QComboBox::activated, this, commit);
+  // The extent only applies on the BT.601 grid.
+  connect(horizontal_mapping_combo_, &QComboBox::activated, this, [this] {
+    const bool bt601 = static_cast<HorizontalMapping>(
+                           horizontal_mapping_combo_->currentData().toInt()) ==
+                       HorizontalMapping::kBt601;
+    active_extent_combo_->setEnabled(bt601);
+    if (!bt601) {
+      active_extent_combo_->setCurrentIndex(active_extent_combo_->findData(
+          static_cast<int>(ActiveExtent::kWindow)));
+    }
+  });
   connect(horizontal_mapping_combo_, &QComboBox::activated, this, commit);
+  connect(active_extent_combo_, &QComboBox::activated, this, commit);
   connect(chroma_line_sign_editor_, &ChromaLineSignEditor::RegionsEdited, this,
           commit);
   return picture_group_;
@@ -1219,6 +1245,10 @@ void SectionEditor::LoadFromDocument() {
   horizontal_mapping_combo_->setCurrentIndex(
       horizontal_mapping_combo_->findData(
           static_cast<int>(section.horizontal_mapping)));
+  active_extent_combo_->setCurrentIndex(
+      active_extent_combo_->findData(static_cast<int>(section.active_extent)));
+  active_extent_combo_->setEnabled(section.horizontal_mapping ==
+                                   HorizontalMapping::kBt601);
   const Standard standard = project.cvbs_presets.video_standard_preset;
   const bool line_sign_supported = SupportsChromaLineSign(standard);
   chroma_line_sign_note_->setVisible(!line_sign_supported);
@@ -1419,6 +1449,11 @@ Section SectionEditor::SectionFromWidgets() const {
       horizontal_resample_combo_->currentData().toInt());
   section.horizontal_mapping = static_cast<HorizontalMapping>(
       horizontal_mapping_combo_->currentData().toInt());
+  section.active_extent =
+      section.horizontal_mapping == HorizontalMapping::kBt601
+          ? static_cast<ActiveExtent>(
+                active_extent_combo_->currentData().toInt())
+          : ActiveExtent::kWindow;
   section.chroma_line_sign = chroma_line_sign_editor_->regions();
 
   // Noise layers. The capture layer's group owns noise_db/spread/seed and its

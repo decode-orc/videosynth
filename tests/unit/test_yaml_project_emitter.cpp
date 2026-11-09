@@ -270,6 +270,7 @@ sections:
         u: follow_switch
     horizontal_resample: bandlimited
     horizontal_mapping: bt601
+    active_extent: source
     cadence:
       pattern: "2:3"
 )");
@@ -280,6 +281,7 @@ sections:
   const std::vector<std::string> order = {"    cadence:",
                                           "    horizontal_resample:",
                                           "    horizontal_mapping:",
+                                          "    active_extent:",
                                           "    chroma_line_sign:",
                                           "    luma_bandwidth:",
                                           "    osd:",

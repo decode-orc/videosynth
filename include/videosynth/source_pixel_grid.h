@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 
 #include "videosynth/model.h"
@@ -26,6 +27,10 @@ constexpr double kBt601SampleRateHz = 13.5e6;
 // sample is 864 - 720 - 12 = 132 or 858 - 720 - 16 = 122 samples after 0H.
 constexpr int kBt601ZeroHToActiveSamples625 = 132;
 constexpr int kBt601ZeroHToActiveSamples525 = 122;
+
+// ITU-R BT.601-5 Part A Table 2 item 6: 720 luminance samples per digital
+// active line on both line standards.
+constexpr int kBt601ActiveLineSamples = 720;
 
 // Affine map from an active-window sample index x to a source pixel
 // coordinate u(x) = origin_pixels + x * pixels_per_sample, measured from the
@@ -118,6 +123,52 @@ inline int SourcePixelGridInRangeSamples(const SourcePixelGrid& grid,
     }
   }
   return active_sample_count;
+}
+
+// The run of 4fsc samples, within a line, that a section paints with
+// picture: start is the sample offset after 0H and samples the count.
+//
+// Thread-safety: plain value type.
+struct ActiveSampleSpan {
+  int start = 0;
+  int samples = 0;
+
+  int end() const { return start + samples; }
+  bool operator==(const ActiveSampleSpan& other) const {
+    return start == other.start && samples == other.samples;
+  }
+};
+
+// The span a section paints. Every combination except bt601 with
+// ActiveExtent::kSource paints the active window [window_start, window_end).
+// That one paints the union of the window and the BT.601 digital active line,
+// from the first sample inside pixel 0 (whose span starts half a pixel before
+// t0) to the last sample inside pixel 719, so no source pixel the grid places
+// on the line is cut. The span is clamped to [0, line_limit).
+inline ActiveSampleSpan ResolveActiveSampleSpan(
+    HorizontalMapping mapping, ActiveExtent extent, Standard standard,
+    double sample_rate_hz, int window_start, int window_end, int line_limit) {
+  int start = window_start;
+  int end = window_end;
+  if (mapping == HorizontalMapping::kBt601 && extent == ActiveExtent::kSource &&
+      sample_rate_hz > 0.0) {
+    const int zero_h_to_active = Is625LineStandard(standard)
+                                     ? kBt601ZeroHToActiveSamples625
+                                     : kBt601ZeroHToActiveSamples525;
+    const double samples_per_pixel = sample_rate_hz / kBt601SampleRateHz;
+    // Pixel n covers [t0 + n - 0.5, t0 + n + 0.5) BT.601 periods after 0H.
+    const double first_edge =
+        (static_cast<double>(zero_h_to_active) - 0.5) * samples_per_pixel;
+    const double last_edge =
+        (static_cast<double>(zero_h_to_active + kBt601ActiveLineSamples) -
+         0.5) *
+        samples_per_pixel;
+    start = std::min(start, static_cast<int>(std::ceil(first_edge)));
+    end = std::max(end, static_cast<int>(std::ceil(last_edge)));
+  }
+  start = std::clamp(start, 0, std::max(0, line_limit - 1));
+  end = std::clamp(end, start + 1, std::max(start + 1, line_limit));
+  return ActiveSampleSpan{.start = start, .samples = end - start};
 }
 
 }  // namespace videosynth

@@ -135,6 +135,7 @@ These apply only to a project with a [`laserdisc:`](../reference/laserdisc.md) b
 
 - `horizontal_resample` other than `nearest` or `bandlimited` is a parse error.
 - `horizontal_mapping` other than `active_window` or `bt601` is a parse error.
+- `active_extent` other than `window` or `source` is a parse error. `active_extent: source` without `horizontal_mapping: bt601` is an error.
 - `chroma_line_sign` on an NTSC or SECAM project is an error.
 - Each `chroma_line_sign` region needs a positive `width` and `height` and must lie inside the 720×576 (PAL) or 720×486 (PAL-M) source raster, and must set `u` or `v` (or both) to `follow_switch`.
 - A `chroma_line_sign` that is not a list, an entry without `region` or one of its four coordinates, a non-integer coordinate, a `u`/`v` value other than `normal` or `follow_switch`, or an unknown key is a parse error.

@@ -1367,6 +1367,7 @@ class GenerationStage::TemplateCache {
                   section.picture_response,
                   section.horizontal_resample,
                   section.horizontal_mapping,
+                  section.active_extent,
                   section.chroma_line_sign,
                   field_source_frames,
                   sequence_phase};
@@ -1417,6 +1418,7 @@ class GenerationStage::TemplateCache {
     PictureResponseParameters picture_response;
     HorizontalResample horizontal_resample = HorizontalResample::kNearest;
     HorizontalMapping horizontal_mapping = HorizontalMapping::kActiveWindow;
+    ActiveExtent active_extent = ActiveExtent::kWindow;
     std::vector<ChromaLineSignRegion> chroma_line_sign;
     // Source frame of field 1 and field 2.
     std::array<int, 2> field_source_frames{};
@@ -1430,6 +1432,7 @@ class GenerationStage::TemplateCache {
              picture_response == other.picture_response &&
              horizontal_resample == other.horizontal_resample &&
              horizontal_mapping == other.horizontal_mapping &&
+             active_extent == other.active_extent &&
              chroma_line_sign == other.chroma_line_sign;
     }
   };
@@ -1727,6 +1730,25 @@ void GenerationStage::SynthesiseTemplate(
   const int secam_frame_parity = static_cast<int>(sequence_phase % 2U);
   const int active_window_start = resources.active_window_start;
   const int active_window_samples = resources.active_window_samples;
+  // The run of each line the section paints with picture: the active window,
+  // or with active_extent: source the whole BT.601 span around it. The
+  // per-line workspaces are sized to it, since the chroma encoder takes its
+  // length from the axes it is handed.
+  const ActiveSampleSpan painted_span = ResolveActiveSampleSpan(
+      section.horizontal_mapping, section.active_extent, video_standard,
+      synth.sample_rate_hz, active_window_start, resources.active_window_end,
+      synth.max_line_samples);
+  const int painted_start = painted_span.start;
+  const int painted_samples = painted_span.samples;
+  const auto painted_slots = static_cast<std::size_t>(painted_samples);
+  resources.line_source_samples.resize(painted_slots);
+  resources.active_sample_indices.resize(painted_slots);
+  resources.encoded_line_chroma.resize(painted_slots);
+  resources.line_luma.resize(painted_slots);
+  resources.filtered_line_luma.resize(painted_slots);
+  resources.response_line_luma.resize(painted_slots);
+  resources.line_u_axis.resize(painted_slots);
+  resources.line_v_axis.resize(painted_slots);
   const bool pal_pilot_burst = resources.pal_pilot_burst;
   const SampleFixed blanking_fixed = resources.blanking_fixed;
   const SampleFixed* const luma_code_table = resources.luma_code_table.data();
@@ -1758,15 +1780,15 @@ void GenerationStage::SynthesiseTemplate(
   // Where the section's horizontal_mapping places a source's pixels.
   auto GridFor = [&](const FrameSourceImage& source) {
     return ResolveSourcePixelGrid(section.horizontal_mapping, video_standard,
-                                  synth.sample_rate_hz, active_window_start,
-                                  active_window_samples, source.active_width);
+                                  synth.sample_rate_hz, painted_start,
+                                  painted_samples, source.active_width);
   };
   // Both fields come from the same source, so they share one raster.
   const FrameSourceImage& field1_source = *field_sources[0];
   const SourcePixelGrid field1_grid = GridFor(field1_source);
   if (!column_map.MatchesSource(field1_source, section.horizontal_mapping,
                                 field1_grid)) {
-    column_map.Rebuild(field1_source, active_window_samples,
+    column_map.Rebuild(field1_source, painted_samples,
                        section.horizontal_mapping, field1_grid);
   }
 
@@ -1805,12 +1827,11 @@ void GenerationStage::SynthesiseTemplate(
   auto EnsureResampler = [&](const FrameSourceImage& source) {
     const SourcePixelGrid grid = GridFor(source);
     if (resources.resampler == nullptr ||
-        !resources.resampler->Matches(active_window_samples,
-                                      source.active_width, source.active_x,
-                                      source.width, grid)) {
+        !resources.resampler->Matches(painted_samples, source.active_width,
+                                      source.active_x, source.width, grid)) {
       resources.resampler = std::make_unique<BandlimitedHorizontalResampler>(
-          active_window_samples, source.active_width, source.active_x,
-          source.width, grid);
+          painted_samples, source.active_width, source.active_x, source.width,
+          grid);
     }
   };
 
@@ -1827,7 +1848,7 @@ void GenerationStage::SynthesiseTemplate(
   int response_plane_width = 0;
   if (picture_response != nullptr && picture_response->has_vertical()) {
     response_plane_width = std::max(
-        0, std::min(active_window_samples, column_map.in_range_sample_count));
+        0, std::min(painted_samples, column_map.in_range_sample_count));
     const auto plane_width = static_cast<std::size_t>(response_plane_width);
     const int frame_rows = 2 * synth.active.active_lines_per_field;
     std::vector<SampleFixed>& plane_input = resources.response_plane_input;
@@ -2021,11 +2042,16 @@ void GenerationStage::SynthesiseTemplate(
           ActiveFrameLineIndex(synth.active, line.line_number_1based);
       if (active_y >= 0) {
         // A half-picture line keeps its blanking waveform, including the
-        // mid-line equalizing pulse, from the end of its picture onward.
+        // mid-line equalizing pulse, from the end of its picture onward. Every
+        // other line's picture runs to the end of the painted span.
+        const int window_picture_end =
+            ActivePictureEndSamples(synth.active, line.line_number_1based);
         const int picture_end = std::clamp(
-            ActivePictureEndSamples(synth.active, line.line_number_1based), 0,
-            line_samples);
-        const int tail_samples = (picture_end < resources.active_window_end)
+            (window_picture_end < synth.active.active_window_end_samples)
+                ? window_picture_end
+                : painted_span.end(),
+            0, line_samples);
+        const int tail_samples = (picture_end < painted_span.end())
                                      ? (line_samples - picture_end)
                                      : 0;
         if (tail_samples > 0) {
@@ -2038,7 +2064,7 @@ void GenerationStage::SynthesiseTemplate(
         const bool invert_pal_v_axis =
             (is_pal || is_pal_m) && PalInvertVAxisForLine(sequence_phase, line);
         const std::size_t active_window_line_start_absolute =
-            absolute_line_base + static_cast<std::size_t>(active_window_start);
+            absolute_line_base + static_cast<std::size_t>(painted_start);
         // SMPTE 170M-2004 Section 10: defines active chroma with burst+180
         // deg reference for NTSC. PAL and PAL-M use 0 phase offset; PAL
         // additionally carries the subcarrier anchor so picture chroma stays
@@ -2067,15 +2093,14 @@ void GenerationStage::SynthesiseTemplate(
         // as x_sample grows. Taking the smallest such bound as the loop limit
         // removes both per-sample checks while leaving the skipped tail with
         // exactly the placeholder values it had before.
-        const int line_sample_limit = line_samples - active_window_start;
+        const int line_sample_limit = line_samples - painted_start;
         const int painted_sample_count =
             (source_row < source_frame.height)
-                ? std::max(0,
-                           std::min({active_window_samples, line_sample_limit,
-                                     column_map.in_range_sample_count}))
+                ? std::max(0, std::min({painted_samples, line_sample_limit,
+                                        column_map.in_range_sample_count}))
                 : 0;
 
-        const int active_line_sample_base = line_base + active_window_start;
+        const int active_line_sample_base = line_base + painted_start;
         const YCbCr444Pixel* const source_row_pixels =
             (painted_sample_count > 0) ? &source_frame.PixelAt(0, source_row)
                                        : nullptr;
@@ -2272,7 +2297,7 @@ void GenerationStage::SynthesiseTemplate(
                                     secam_frame_parity),
               SecamInitialPhaseRadForLine(line.line_number_1based,
                                           secam_frame_parity),
-              line_source_samples, active_window_start, line_samples,
+              line_source_samples, painted_start, line_samples,
               &secam_line_chroma);
           for (int i = 0; i < line_samples; ++i) {
             c_out[static_cast<std::size_t>(line_base + i)] +=
@@ -2285,7 +2310,7 @@ void GenerationStage::SynthesiseTemplate(
                     line_v_axis.end(), 0);
           chroma_encoder->EncodeAxesFromPhaseStart(
               line_u_axis, line_v_axis, phase_start, &encoded_line_chroma);
-          for (int x_sample = 0; x_sample < active_window_samples; ++x_sample) {
+          for (int x_sample = 0; x_sample < painted_samples; ++x_sample) {
             c_out[static_cast<std::size_t>(
                 active_sample_indices[static_cast<std::size_t>(x_sample)])] +=
                 encoded_line_chroma[static_cast<std::size_t>(x_sample)];
@@ -2311,10 +2336,14 @@ void GenerationStage::SynthesiseTemplate(
           const std::size_t row_offset =
               static_cast<std::size_t>(truth_row) *
               static_cast<std::size_t>(active_window_samples);
+          // The truth raster is the active window; the painted span may
+          // start before it.
           const int truth_samples =
               std::max(0, std::min({active_window_samples,
                                     picture_end - active_window_start,
                                     line_samples - active_window_start}));
+          const int truth_slot_offset = active_window_start - painted_start;
+          const int truth_line_sample_base = line_base + active_window_start;
           const std::vector<std::int32_t>& filtered_u =
               chroma_encoder->filtered_sin_axis();
           const std::vector<std::int32_t>& filtered_v =
@@ -2329,14 +2358,19 @@ void GenerationStage::SynthesiseTemplate(
           float* const truth_v = truth->v_mv.data() + row_offset;
           for (int x_sample = 0; x_sample < truth_samples; ++x_sample) {
             const std::size_t slot = static_cast<std::size_t>(x_sample);
+            const int painted_slot = x_sample + truth_slot_offset;
             truth_y[slot] = static_cast<float>(SampleFixedToMillivolts(
-                y_out[static_cast<std::size_t>(active_line_sample_base +
+                y_out[static_cast<std::size_t>(truth_line_sample_base +
                                                x_sample)] -
                 blanking_fixed));
             truth_u[slot] = static_cast<float>(
-                static_cast<double>(filtered_u[slot]) * u_mv_per_unit);
+                static_cast<double>(
+                    filtered_u[static_cast<std::size_t>(painted_slot)]) *
+                u_mv_per_unit);
             truth_v[slot] = static_cast<float>(
-                static_cast<double>(filtered_v[slot]) * v_mv_per_unit);
+                static_cast<double>(
+                    filtered_v[static_cast<std::size_t>(painted_slot)]) *
+                v_mv_per_unit);
           }
         }
       }

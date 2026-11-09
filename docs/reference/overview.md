@@ -43,6 +43,7 @@ Each entry in `sections:` may carry these optional keys, listed in [canonical or
 | `line_injections` | Section line injections (`vitc`, not implemented) | [section laserdisc](section-laserdisc.md#vitc-line-injections) |
 | `horizontal_resample` | Source-pixel to 4fsc-sample interpolation | [sections](sections.md#horizontal_resample) |
 | `horizontal_mapping` | Source-pixel positions along the line (active window or BT.601 grid) | [sections](sections.md#horizontal_mapping) |
+| `active_extent` | How much of the line carries picture (active window or the whole BT.601 span) | [sections](sections.md#active_extent) |
 | `chroma_line_sign` | Per-region PAL chroma line sign | [sections](sections.md#chroma_line_sign) |
 | `luma_bandwidth` | Low-pass on the picture luma | [sections](sections.md#luma_bandwidth) |
 | `picture_response` | Camera-chain softening of the picture luma | [sections](sections.md#picture_response) |
@@ -192,6 +193,7 @@ sections:
         target_lines:
     horizontal_resample:
     horizontal_mapping:
+    active_extent:
     chroma_line_sign:
       - region:
           x:

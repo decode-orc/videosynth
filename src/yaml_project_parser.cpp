@@ -630,6 +630,27 @@ bool ParseHorizontalMapping(const YAML::Node& section_node,
   return true;
 }
 
+// Parses `section.active_extent:`.
+bool ParseActiveExtent(const YAML::Node& section_node, ActiveExtent* extent,
+                       std::vector<std::string>* errors) {
+  const std::string context = "section";
+  std::string text;
+  if (!ParseScalarString(section_node, "active_extent", context, &text,
+                         errors)) {
+    return false;
+  }
+  if (text == "window") {
+    *extent = ActiveExtent::kWindow;
+  } else if (text == "source") {
+    *extent = ActiveExtent::kSource;
+  } else {
+    errors->push_back(context + ".active_extent has unrecognised value '" +
+                      text + "'. Expected one of: window, source.");
+    return false;
+  }
+  return true;
+}
+
 // Parses `section.horizontal_resample:`.
 bool ParseHorizontalResample(const YAML::Node& section_node,
                              HorizontalResample* resample,
@@ -1964,6 +1985,7 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
                                                   "picture_response",
                                                   "horizontal_resample",
                                                   "horizontal_mapping",
+                                                  "active_extent",
                                                   "chroma_line_sign",
                                                   "noise",
                                                   "dropouts",
@@ -2091,6 +2113,12 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
       if (section_node["horizontal_mapping"] &&
           !ParseHorizontalMapping(section_node, &section.horizontal_mapping,
                                   &result.errors)) {
+        return result;
+      }
+
+      if (section_node["active_extent"] &&
+          !ParseActiveExtent(section_node, &section.active_extent,
+                             &result.errors)) {
         return result;
       }
 

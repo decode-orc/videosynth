@@ -1908,6 +1908,22 @@ int SourceRasterHeight(videosynth::Standard standard) {
 // Source raster width, shared by every supported standard.
 constexpr int kSourceRasterWidth = 720;
 
+// Checks `active_extent:`: painting the source's whole span needs the BT.601
+// grid, the only mapping that places pixels outside the active window.
+void ValidateActiveExtent(const videosynth::Section& section,
+                          videosynth::ValidationResult* result) {
+  if (result == nullptr ||
+      section.active_extent != videosynth::ActiveExtent::kSource ||
+      section.horizontal_mapping == videosynth::HorizontalMapping::kBt601) {
+    return;
+  }
+  result->is_valid = false;
+  result->errors.push_back(
+      "Picture validation error in section '" + section.name +
+      "': active_extent: source requires horizontal_mapping: bt601; the "
+      "active-window mapping places every source pixel inside the window.");
+}
+
 // Checks `chroma_line_sign:`: PAL or PAL-M only, every region inside the
 // source raster and following the V-switch on at least one component.
 void ValidateChromaLineSign(const videosynth::Section& section,
@@ -3131,6 +3147,7 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
       }
 
       ValidateChromaLineSign(section, project, &result);
+      ValidateActiveExtent(section, &result);
       if (!result.is_valid) {
         break;
       }
