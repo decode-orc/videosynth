@@ -109,18 +109,11 @@ bool UnpackYuv422p10leFrame(const std::uint16_t* samples,
   return true;
 }
 
-FfmpegVideoFrameDecoder::~FfmpegVideoFrameDecoder() { Close(); }
+// The child terminates ffmpeg when the decoder is destroyed mid-stream, so
+// abandoning a source never waits for the rest of the file to decode.
+FfmpegVideoFrameDecoder::~FfmpegVideoFrameDecoder() = default;
 
-int FfmpegVideoFrameDecoder::Close() {
-  if (pipe_ == nullptr) {
-    return 0;
-  }
-  // Closing the read end first makes a still-running ffmpeg fail its next
-  // write and exit, so pclose does not wait for a whole-file decode.
-  const int status = pclose(pipe_);
-  pipe_ = nullptr;
-  return status;
-}
+int FfmpegVideoFrameDecoder::Close() { return child_.Wait(); }
 
 // static
 std::string FfmpegVideoFrameDecoder::BuildCommand(
@@ -150,7 +143,7 @@ std::string FfmpegVideoFrameDecoder::BuildCommand(
 
 bool FfmpegVideoFrameDecoder::Open(const VideoDecodeRequest& request,
                                    std::string* error) {
-  Close();
+  child_.Terminate();
   if (request.first_frame < 0) {
     if (error != nullptr) {
       *error = "Video decode start frame must be non-negative.";
@@ -163,10 +156,10 @@ bool FfmpegVideoFrameDecoder::Open(const VideoDecodeRequest& request,
                         static_cast<std::size_t>(height_) * 2U);
 
   const std::string command = BuildCommand(request);
-  pipe_ = popen(command.c_str(), "r");
-  if (pipe_ == nullptr) {
+  std::string spawn_error;
+  if (!child_.Start(command, &spawn_error)) {
     if (error != nullptr) {
-      *error = "Unable to run ffmpeg for video source decoding.";
+      *error = "Unable to run ffmpeg for video source decoding: " + spawn_error;
     }
     return false;
   }
@@ -175,7 +168,7 @@ bool FfmpegVideoFrameDecoder::Open(const VideoDecodeRequest& request,
 
 VideoFrameReadStatus FfmpegVideoFrameDecoder::ReadFrame(
     FrameSourceImage* out_image, std::string* error) {
-  if (pipe_ == nullptr) {
+  if (!child_.running()) {
     if (error != nullptr) {
       *error = "Video decoder read before a successful open.";
     }
@@ -183,8 +176,8 @@ VideoFrameReadStatus FfmpegVideoFrameDecoder::ReadFrame(
   }
 
   const std::size_t wanted = frame_samples_.size();
-  const std::size_t read =
-      std::fread(frame_samples_.data(), sizeof(std::uint16_t), wanted, pipe_);
+  const std::size_t read = std::fread(
+      frame_samples_.data(), sizeof(std::uint16_t), wanted, child_.stream());
   if (read == 0U) {
     // A clean end of stream needs ffmpeg itself to have succeeded; a non-zero
     // status means the file failed to decode rather than simply ended.
@@ -198,7 +191,7 @@ VideoFrameReadStatus FfmpegVideoFrameDecoder::ReadFrame(
     return VideoFrameReadStatus::kEndOfStream;
   }
   if (read != wanted) {
-    Close();
+    child_.Terminate();
     if (error != nullptr) {
       *error =
           "Decoded video payload size is not aligned to yuv422p10le frame "

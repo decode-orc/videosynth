@@ -19,7 +19,6 @@
 #include <OpenEXR/ImfStringAttribute.h>
 
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
@@ -34,6 +33,8 @@
 #include <string>
 #include <system_error>
 #include <utility>
+
+#include "videosynth/child_process.h"
 
 namespace videosynth {
 namespace {
@@ -287,22 +288,16 @@ bool RunFfprobe(const std::string& source, const std::string& arguments,
   const std::string command =
       "ffprobe -v error " + arguments + " '" + escaped_source + "' 2>/dev/null";
 
-  std::array<char, 4096> buffer{};
   std::string output;
-  FILE* pipe = popen(command.c_str(), "r");
-  if (pipe == nullptr) {
+  std::string spawn_error;
+  const int rc = RunAndCaptureOutput(command, &output, &spawn_error);
+  if (rc < 0) {
     if (error != nullptr) {
-      *error = "Unable to run ffprobe for progressive source probing.";
+      *error = "Unable to run ffprobe for progressive source probing: " +
+               spawn_error;
     }
     return false;
   }
-
-  while (std::fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) !=
-         nullptr) {
-    output += buffer.data();
-  }
-
-  const int rc = pclose(pipe);
   if (rc != 0) {
     if (error != nullptr) {
       *error = "ffprobe failed while probing progressive source profile.";

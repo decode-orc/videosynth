@@ -2489,7 +2489,7 @@ videosynth-gui --log-level trace --log-file out/videosynth-gui.log
   - **Logging**: [spdlog](https://github.com/gabime/spdlog).
   - **Metadata sidecars**: SQLite3.
   - **EXR stills**: OpenEXR (with zlib).
-  - **Video and audio decode**: the external `ffmpeg`/`ffprobe` programs, run as child processes (no FFmpeg libraries are linked).
+  - **Video and audio decode**: the external `ffmpeg`/`ffprobe` programs, run as child processes (no FFmpeg libraries are linked). Every one is started through `ChildProcessReader` (`src/child_process.cpp`), not `popen`. Its pipe is close-on-exec and is created and spawned under one process-wide lock, so a decoder opened on one thread never leaks its pipe into a child started on another. Each child runs in its own process group. A decoder abandoned mid-stream sends that group SIGTERM, then SIGKILL after a 1 s grace period, so teardown never depends on ffmpeg hitting EPIPE.
   - **GUI**: Qt 6 (Widgets, Svg), only when `VIDEOSYNTH_BUILD_GUI` is on.
   - **Testing**: [Google Test](https://github.com/google/googletest), only when `VIDEOSYNTH_BUILD_TESTS` is on.
 

@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 
+#include "videosynth/child_process.h"
 #include "videosynth/model.h"
 #include "videosynth/source_colour_conversion.h"
 
@@ -113,10 +114,10 @@ class FfmpegVideoFrameDecoder final : public IVideoFrameDecoder {
   static std::string BuildCommand(const VideoDecodeRequest& request);
 
  private:
-  // Closes the pipe; returns the child's exit status from pclose.
+  // Waits for an ffmpeg that has finished writing; returns its wait status.
   int Close();
 
-  FILE* pipe_ = nullptr;
+  ChildProcessReader child_;
   int width_ = 0;
   int height_ = 0;
   // One frame of planar yuv422p10le samples, reused across reads.

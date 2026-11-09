@@ -11,7 +11,6 @@
 
 #include "videosynth/audio_sample_source.h"
 
-#include <array>
 #include <cstdlib>
 #include <filesystem>
 #include <iomanip>
@@ -20,6 +19,7 @@
 #include <system_error>
 
 #include "videosynth/audio_sample_conversion.h"
+#include "videosynth/child_process.h"
 
 namespace videosynth {
 namespace {
@@ -48,18 +48,11 @@ double ParseSecondsOrZero(const std::string& value) {
 
 }  // namespace
 
-FfmpegAudioSampleSource::~FfmpegAudioSampleSource() { Close(); }
+// The child terminates ffmpeg when the source is destroyed mid-stream, so
+// abandoning a soundtrack never waits for the rest of it to decode.
+FfmpegAudioSampleSource::~FfmpegAudioSampleSource() = default;
 
-int FfmpegAudioSampleSource::Close() {
-  if (pipe_ == nullptr) {
-    return 0;
-  }
-  // Closing the read end first makes a still-running ffmpeg fail its next
-  // write and exit, so pclose does not wait for a whole-file decode.
-  const int status = pclose(pipe_);
-  pipe_ = nullptr;
-  return status;
-}
+int FfmpegAudioSampleSource::Close() { return child_.Wait(); }
 
 // static
 std::string FfmpegAudioSampleSource::BuildCommand(const std::string& path,
@@ -83,7 +76,7 @@ std::string FfmpegAudioSampleSource::BuildCommand(const std::string& path,
 bool FfmpegAudioSampleSource::Open(const std::string& path, int stream,
                                    double start_seconds, int sample_rate_hz,
                                    std::string* error) {
-  Close();
+  child_.Terminate();
   if (stream < 0 || sample_rate_hz <= 0) {
     if (error != nullptr) {
       *error = "Audio decode needs a non-negative stream and a positive rate.";
@@ -92,10 +85,10 @@ bool FfmpegAudioSampleSource::Open(const std::string& path, int stream,
   }
   const std::string command =
       BuildCommand(path, stream, start_seconds, sample_rate_hz);
-  pipe_ = popen(command.c_str(), "r");
-  if (pipe_ == nullptr) {
+  std::string spawn_error;
+  if (!child_.Start(command, &spawn_error)) {
     if (error != nullptr) {
-      *error = "Unable to run ffmpeg for audio decoding.";
+      *error = "Unable to run ffmpeg for audio decoding: " + spawn_error;
     }
     return false;
   }
@@ -107,7 +100,7 @@ int FfmpegAudioSampleSource::Read(int count, std::vector<std::int32_t>* left,
                                   std::string* error) {
   left->clear();
   right->clear();
-  if (count <= 0 || pipe_ == nullptr) {
+  if (count <= 0 || !child_.running()) {
     // A closed source has already reached its end.
     return 0;
   }
@@ -115,8 +108,8 @@ int FfmpegAudioSampleSource::Read(int count, std::vector<std::int32_t>* left,
   const std::size_t wanted =
       static_cast<std::size_t>(count) * static_cast<std::size_t>(2);
   interleaved_.resize(wanted);
-  const std::size_t read =
-      std::fread(interleaved_.data(), sizeof(std::int32_t), wanted, pipe_);
+  const std::size_t read = std::fread(interleaved_.data(), sizeof(std::int32_t),
+                                      wanted, child_.stream());
   const std::size_t frames = read / 2U;
   left->reserve(frames);
   right->reserve(frames);
@@ -154,20 +147,16 @@ bool FfprobeAudioFileProbe::Probe(const std::string& path,
       "-show_entries stream=channels,sample_rate,duration "
       "-show_entries format=duration -of compact=p=1:nk=0 '" +
       EscapeForSingleQuotedShell(path) + "' 2>/dev/null";
-  FILE* pipe = popen(command.c_str(), "r");
-  if (pipe == nullptr) {
+  std::string output;
+  std::string spawn_error;
+  const int status = RunAndCaptureOutput(command, &output, &spawn_error);
+  if (status < 0) {
     if (error != nullptr) {
-      *error = "Unable to run ffprobe for audio file probing.";
+      *error = "Unable to run ffprobe for audio file probing: " + spawn_error;
     }
     return false;
   }
-  std::array<char, 4096> buffer{};
-  std::string output;
-  while (std::fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) !=
-         nullptr) {
-    output += buffer.data();
-  }
-  if (pclose(pipe) != 0) {
+  if (status != 0) {
     if (error != nullptr) {
       *error = "ffprobe could not read the audio file.";
     }

@@ -151,6 +151,7 @@ add_library(videosynth_core
     src/audio_track_generator.cpp
     src/audio_wav_writer.cpp
     src/biphase_encoder.cpp
+    src/child_process.cpp
     src/biphase_injection_manager.cpp
     src/cav_code_generator.cpp
     src/clv_code_generator.cpp
