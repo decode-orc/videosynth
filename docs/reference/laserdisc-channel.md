@@ -123,7 +123,7 @@ On a CAV disc the inner tracks lose high frequencies, so the replay response cha
 
 - At least two entries are needed; use `response_db` for a single response.
 - Each frame takes the response at its own picture number, interpolated linearly in picture number between the entries that bracket it, frequency by frequency in dB. Pictures before the first entry or after the last take that entry's response.
-- A frame's picture number is its disc position: the CAV picture number when its section anchors a `picture_number` code with `start_value`, otherwise its 1-based position in the output — the same key the [shared noise layer](section-noise.md) uses. Every capture of one pressing therefore sees the same response on the same picture.
+- A frame's picture number is its disc position: the CAV picture number when its section anchors a `picture_number` code with `start_value`, otherwise its 1-based position in the output (in a `"2:3"` section, the disc frame its picture falls on in a continuous film cadence) — the same key the [shared noise layer](section-noise.md#shared-noise-and-disc-position) uses. Every capture of one pressing therefore sees the same response on the same picture.
 
 ## `field2_offset`
 

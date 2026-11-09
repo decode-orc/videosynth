@@ -5,7 +5,8 @@
  *              each active line from the ITU-R BT.601 sampling grid, leaves
  *              the samples beyond the 720-pixel span at blanking, and keeps
  *              its frames apart from an active-window section of the same
- *              source in the frame template cache.
+ *              source in the frame template cache; with active_extent:
+ *              source it paints the whole BT.601 span past the window.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -65,17 +66,23 @@ double LumaMillivoltsFromCodeForTest(int y_code, const SignalLevels& levels) {
   return levels.black_mv + (y_norm * (levels.white_mv - levels.black_mv));
 }
 
-// Checks every active-window sample of one field-1 line of frame
-// frame_index against the nearest-pixel BT.601 mapping of its source row.
+// Checks every painted sample of one field-1 line of frame frame_index
+// against the nearest-pixel BT.601 mapping of its source row, and the
+// samples just outside the painted span against blanking.
 void ExpectLineFollowsBt601Grid(const Project& project,
                                 const std::vector<SampleFixed>& y,
-                                int frame_index, int line_1based) {
+                                int frame_index, int line_1based,
+                                ActiveExtent extent = ActiveExtent::kWindow) {
   const Standard standard = project.cvbs_presets.video_standard_preset;
   const TimingConstants timing = GetTimingConstants(standard);
   const ActiveRasterGeometry geometry =
       GetActiveRasterGeometry(standard, timing.sample_rate_4fsc_hz);
-  const int window_start = geometry.active_window_start_samples;
-  const int window_samples = geometry.active_window_end_samples - window_start;
+  const ActiveSampleSpan span = ResolveActiveSampleSpan(
+      HorizontalMapping::kBt601, extent, standard, timing.sample_rate_4fsc_hz,
+      geometry.active_window_start_samples, geometry.active_window_end_samples,
+      timing.samples_per_line_4fsc);
+  const int window_start = span.start;
+  const int window_samples = span.samples;
   const SourcePixelGrid grid =
       Bt601SourcePixelGrid(standard, timing.sample_rate_4fsc_hz, window_start);
   const int in_range = SourcePixelGridInRangeSamples(grid, window_samples, 720);
@@ -106,6 +113,13 @@ void ExpectLineFollowsBt601Grid(const Project& project,
       static_cast<std::size_t>(window_start);
 
   const SignalLevels levels = GetSignalLevels(project.cvbs_presets);
+  // The samples either side of the span carry no picture.
+  for (const int x : {-2, -1, window_samples, window_samples + 1}) {
+    EXPECT_NEAR(SampleFixedToMillivolts(y[static_cast<std::size_t>(
+                    static_cast<std::ptrdiff_t>(line_base) + x)]),
+                levels.blanking_mv, 1e-6)
+        << "outside sample " << x;
+  }
   for (int x = 0; x < window_samples; ++x) {
     const double actual =
         SampleFixedToMillivolts(y[line_base + static_cast<std::size_t>(x)]);
@@ -143,6 +157,49 @@ TEST(Bt601HorizontalMappingTest, NtscLineLeavesTheTailBeyondTheSpanBlank) {
   std::vector<std::string> errors;
   ASSERT_TRUE(generation.Generate(project, &y, &c, &errors));
   ExpectLineFollowsBt601Grid(project, y, 0, 100);
+}
+
+TEST(Bt601HorizontalMappingTest, PalSourceExtentPaintsPastTheWindow) {
+  Project project = MakeProject(Standard::kPal);
+  Section section = BarsSection(Standard::kPal, HorizontalMapping::kBt601, 1);
+  section.active_extent = ActiveExtent::kSource;
+  project.sections.push_back(section);
+  GenerationStage generation;
+  std::vector<SampleFixed> y;
+  std::vector<SampleFixed> c;
+  std::vector<std::string> errors;
+  ASSERT_TRUE(generation.Generate(project, &y, &c, &errors));
+  ExpectLineFollowsBt601Grid(project, y, 0, 100, ActiveExtent::kSource);
+}
+
+TEST(Bt601HorizontalMappingTest, NtscSourceExtentPaintsBeforeTheWindow) {
+  Project project = MakeProject(Standard::kNtsc);
+  Section section = BarsSection(Standard::kNtsc, HorizontalMapping::kBt601, 1);
+  section.active_extent = ActiveExtent::kSource;
+  project.sections.push_back(section);
+  GenerationStage generation;
+  std::vector<SampleFixed> y;
+  std::vector<SampleFixed> c;
+  std::vector<std::string> errors;
+  ASSERT_TRUE(generation.Generate(project, &y, &c, &errors));
+  ExpectLineFollowsBt601Grid(project, y, 0, 100, ActiveExtent::kSource);
+}
+
+TEST(Bt601HorizontalMappingTest, TemplateCacheKeepsExtentsApart) {
+  // As below, with the window-extent frames cached before the source-extent
+  // section requests the same keys.
+  Project project = MakeProject(Standard::kPal);
+  project.sections.push_back(
+      BarsSection(Standard::kPal, HorizontalMapping::kBt601, 8));
+  Section wide = BarsSection(Standard::kPal, HorizontalMapping::kBt601, 4);
+  wide.active_extent = ActiveExtent::kSource;
+  project.sections.push_back(wide);
+  GenerationStage generation;
+  std::vector<SampleFixed> y;
+  std::vector<SampleFixed> c;
+  std::vector<std::string> errors;
+  ASSERT_TRUE(generation.Generate(project, &y, &c, &errors));
+  ExpectLineFollowsBt601Grid(project, y, 8, 100, ActiveExtent::kSource);
 }
 
 TEST(Bt601HorizontalMappingTest, TemplateCacheKeepsMappingsApart) {

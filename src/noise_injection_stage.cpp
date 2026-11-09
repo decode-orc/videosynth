@@ -217,7 +217,7 @@ void NoiseInjectionStage::InjectNoise(
       const IGenerationStage::FrameScheduleItem& item = schedule[global_frame];
       const std::uint64_t disc_frame_key =
           item.enrichment != nullptr
-              ? static_cast<std::uint64_t>(item.enrichment->disc_frame_index)
+              ? static_cast<std::uint64_t>(item.enrichment->DiscPosition())
               : static_cast<std::uint64_t>(global_frame);
       std::mt19937_64 shared_rng(DeriveImpairmentSeed(
           static_cast<std::uint64_t>(noise.shared.noise_seed),

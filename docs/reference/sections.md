@@ -32,6 +32,7 @@ sections:
 | `line_injections` | list | No | `vitc` only, not implemented — see [section `laserdisc`](section-laserdisc.md#vitc-line-injections) | absent |
 | `horizontal_resample` | string | No | `nearest`, `bandlimited` ([horizontal resampling](#horizontal_resample)) | `nearest` |
 | `horizontal_mapping` | string | No | `active_window`, `bt601` ([horizontal mapping](#horizontal_mapping)) | `active_window` |
+| `active_extent` | string | No | `window`, `source` ([active extent](#active_extent)) | `window` |
 | `chroma_line_sign` | list | No | [chroma line sign regions](#chroma_line_sign) (PAL and PAL-M) | absent |
 | `luma_bandwidth` | map | No | [luma bandwidth limit](#luma_bandwidth) | absent |
 | `picture_response` | string or map | No | `domesday`, or a map of [picture response](#picture_response) curves | absent |
@@ -186,6 +187,31 @@ Where the source raster's pixels sit along the line. Optional.
 - `active_window` keeps existing projects bit-exact.
 
 Validation: any other value is a parse error. The emitter writes the key only for `bt601`.
+
+## `active_extent`
+
+How much of each line carries picture. Optional.
+
+```yaml
+- name: Capture
+  type: progressive
+  source: "{project}/media/capture.mkv"
+  duration_frames: 54000
+  horizontal_mapping: bt601
+  active_extent: source
+```
+
+| Value | Extent |
+|-------|--------|
+| `window` (default) | Picture is painted only inside the 52 µs active window. Samples outside it stay at blanking. |
+| `source` | With `horizontal_mapping: bt601`, picture is painted wherever the BT.601 grid puts a source pixel, so a 720-pixel raster keeps its whole 53.33 µs line. |
+
+- With `source`, the painted span runs from the first 4fsc sample inside pixel 0 to the last sample inside pixel 719, together with the window. On PAL and SECAM that is samples 173 to 1118 after 0H (9.76 to 63.10 µs), 0.2 µs before and 1.1 µs after the window. On NTSC and PAL-M the BT.601 line ends inside the window, so only the start moves, to sample 129 (9.01 µs).
+- Some real masters carry picture past the end of the 52 µs line. With `window` that picture is cut at the window's end (about BT.601 column 704 on 625-line), and a decoder rings on the step. `source` keeps it, so a decode-orc `mkv-ffv1-bt601` export comes back with its edges intact.
+- The extra samples lie in what ITU-R BT.470-6 and IEC 60856 treat as line blanking: the front porch is shortened to about 0.9 µs. Sync and burst are untouched. Use it to re-create a master, not to make an in-spec signal.
+- The picture truth stays the active window. The project-level chroma error and line timing stages, and the FM beat model, act on the active window only.
+
+Validation: any other value is a parse error. `source` with `horizontal_mapping: active_window` is a validation error. The emitter writes the key only for `source`.
 
 ## `chroma_line_sign`
 

@@ -529,18 +529,21 @@ TEST(SectionBlockPresenterTest, ApplySectionEditDeltaMirrorsPictureMapping) {
   Section after = before;
   after.horizontal_resample = HorizontalResample::kBandlimited;
   after.horizontal_mapping = HorizontalMapping::kBt601;
+  after.active_extent = ActiveExtent::kSource;
   AddChromaLineSignRegion(&after.chroma_line_sign, 576);
   Section target;
   target.name = "Target";
   const Section mirrored = ApplySectionEditDelta(before, after, target);
   EXPECT_EQ(mirrored.horizontal_resample, HorizontalResample::kBandlimited);
   EXPECT_EQ(mirrored.horizontal_mapping, HorizontalMapping::kBt601);
+  EXPECT_EQ(mirrored.active_extent, ActiveExtent::kSource);
   EXPECT_EQ(mirrored.chroma_line_sign, after.chroma_line_sign);
 
   // An unrelated edit keeps the target's own picture settings.
   Section own = target;
   own.horizontal_resample = HorizontalResample::kBandlimited;
   own.horizontal_mapping = HorizontalMapping::kBt601;
+  own.active_extent = ActiveExtent::kSource;
   AddChromaLineSignRegion(&own.chroma_line_sign, 576);
   own.chroma_line_sign[0].x = 100;
   Section renamed = before;
@@ -548,6 +551,7 @@ TEST(SectionBlockPresenterTest, ApplySectionEditDeltaMirrorsPictureMapping) {
   const Section kept = ApplySectionEditDelta(before, renamed, own);
   EXPECT_EQ(kept.horizontal_resample, own.horizontal_resample);
   EXPECT_EQ(kept.horizontal_mapping, own.horizontal_mapping);
+  EXPECT_EQ(kept.active_extent, own.active_extent);
   EXPECT_EQ(kept.chroma_line_sign, own.chroma_line_sign);
 }
 

@@ -700,6 +700,9 @@ Section ApplySectionEditDelta(const Section& before, const Section& after,
   if (after.horizontal_mapping != before.horizontal_mapping) {
     target.horizontal_mapping = after.horizontal_mapping;
   }
+  if (after.active_extent != before.active_extent) {
+    target.active_extent = after.active_extent;
+  }
   if (!(after.chroma_line_sign == before.chroma_line_sign)) {
     target.chroma_line_sign = after.chroma_line_sign;
   }

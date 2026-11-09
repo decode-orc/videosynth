@@ -738,10 +738,11 @@ void DropoutInjectionStage::ComputeFrameDropouts(
   const int frame_index_in_section = item.section_frame_index;
   // Disc position keys disc-anchored dropouts. Disc frames run on one per
   // frame within a section, so the section starts at disc_frame minus its
-  // position (picture_number start_value - 1 on CAV).
+  // position (picture_number start_value - 1 on CAV, or the frame a 2:3
+  // section's first picture has on a continuous film disc).
   const std::uint64_t disc_frame =
       item.enrichment != nullptr
-          ? static_cast<std::uint64_t>(item.enrichment->disc_frame_index)
+          ? static_cast<std::uint64_t>(item.enrichment->DiscPosition())
           : static_cast<std::uint64_t>(global_frame);
   const std::uint64_t section_disc_start =
       disc_frame - static_cast<std::uint64_t>(frame_index_in_section);

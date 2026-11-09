@@ -576,6 +576,14 @@ void EmitHorizontalMapping(YAML::Emitter& out, HorizontalMapping mapping) {
   out << YAML::Key << "horizontal_mapping" << YAML::Value << "bt601";
 }
 
+// Writes `active_extent:` unless it is the window default.
+void EmitActiveExtent(YAML::Emitter& out, ActiveExtent extent) {
+  if (extent == ActiveExtent::kWindow) {
+    return;
+  }
+  out << YAML::Key << "active_extent" << YAML::Value << "source";
+}
+
 // Writes `chroma_line_sign:`; a component left normal is omitted.
 void EmitChromaLineSign(YAML::Emitter& out,
                         const std::vector<ChromaLineSignRegion>& regions) {
@@ -782,6 +790,7 @@ void EmitSection(YAML::Emitter& out, const Section& section) {
   EmitLineInjections(out, section);
   EmitHorizontalResample(out, section.horizontal_resample);
   EmitHorizontalMapping(out, section.horizontal_mapping);
+  EmitActiveExtent(out, section.active_extent);
   EmitChromaLineSign(out, section.chroma_line_sign);
   EmitLumaBandwidth(out, section.luma_bandwidth);
   EmitPictureResponse(out, section.picture_response);

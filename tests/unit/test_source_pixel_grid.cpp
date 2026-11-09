@@ -252,5 +252,83 @@ TEST(HorizontalMappingEmitterTest, OmitsTheDefaultAndRoundTripsBt601) {
             HorizontalMapping::kBt601);
 }
 
+TEST(ActiveExtentParserTest, DefaultsToWindowAndReadsSource) {
+  YamlProjectParser parser;
+  const ParseResult defaulted = parser.ParseString(SectionYaml(""));
+  ASSERT_TRUE(defaulted.ok);
+  EXPECT_EQ(defaulted.project.sections[0].active_extent, ActiveExtent::kWindow);
+
+  const ParseResult source = parser.ParseString(SectionYaml(
+      "    horizontal_mapping: bt601\n    active_extent: source\n"));
+  ASSERT_TRUE(source.ok) << source.errors[0];
+  EXPECT_EQ(source.project.sections[0].active_extent, ActiveExtent::kSource);
+}
+
+TEST(ActiveExtentParserTest, RejectsUnknownValues) {
+  YamlProjectParser parser;
+  const ParseResult result =
+      parser.ParseString(SectionYaml("    active_extent: full\n"));
+  ASSERT_FALSE(result.ok);
+  EXPECT_NE(result.errors[0].find("window, source"), std::string::npos);
+}
+
+TEST(ActiveExtentEmitterTest, OmitsTheDefaultAndRoundTripsSource) {
+  YamlProjectParser parser;
+  YamlProjectEmitter emitter;
+  const ParseResult window = parser.ParseString(SectionYaml(""));
+  ASSERT_TRUE(window.ok);
+  EXPECT_EQ(emitter.EmitString(window.project).find("active_extent"),
+            std::string::npos);
+
+  const ParseResult source = parser.ParseString(SectionYaml(
+      "    horizontal_mapping: bt601\n    active_extent: source\n"));
+  ASSERT_TRUE(source.ok);
+  const ParseResult reparsed =
+      parser.ParseString(emitter.EmitString(source.project));
+  ASSERT_TRUE(reparsed.ok);
+  EXPECT_EQ(reparsed.project.sections[0].active_extent, ActiveExtent::kSource);
+}
+
+// PAL 4fsc: one BT.601 pixel is 1.3137 samples. Pixel 0 starts at
+// 131.5 periods (172.75 samples) and pixel 719 ends at 851.5 periods
+// (1118.6 samples), so the span is samples 173 to 1118 inclusive.
+TEST(ActiveSampleSpanTest, PalSourceExtentCoversTheWholeBt601Line) {
+  const ActiveSampleSpan span =
+      ResolveActiveSampleSpan(HorizontalMapping::kBt601, ActiveExtent::kSource,
+                              Standard::kPal, 17734475.0, 177, 177 + 922, 1137);
+  EXPECT_EQ(span.start, 173);
+  EXPECT_EQ(span.end(), 1119);
+
+  const SourcePixelGrid grid =
+      Bt601SourcePixelGrid(Standard::kPal, 17734475.0, span.start);
+  EXPECT_GE(SourcePixelCoordinate(grid, 0), 0.0);
+  EXPECT_EQ(SourcePixelGridInRangeSamples(grid, span.samples, 720),
+            span.samples);
+}
+
+// NTSC: the BT.601 line starts before the window but ends inside it, so the
+// span is the window extended at its start only.
+TEST(ActiveSampleSpanTest, NtscSourceExtentExtendsOnlyTheStart) {
+  const double rate = 14318181.818181818;
+  const int window_start = 150;
+  const int window_end = 895;
+  const ActiveSampleSpan span = ResolveActiveSampleSpan(
+      HorizontalMapping::kBt601, ActiveExtent::kSource, Standard::kNtsc, rate,
+      window_start, window_end, 910);
+  EXPECT_EQ(span.start, 129);
+  EXPECT_EQ(span.end(), window_end);
+}
+
+TEST(ActiveSampleSpanTest, WindowExtentAndActiveWindowMappingKeepTheWindow) {
+  const ActiveSampleSpan window =
+      ResolveActiveSampleSpan(HorizontalMapping::kBt601, ActiveExtent::kWindow,
+                              Standard::kPal, 17734475.0, 177, 1099, 1137);
+  EXPECT_EQ(window, (ActiveSampleSpan{.start = 177, .samples = 922}));
+  const ActiveSampleSpan stretched = ResolveActiveSampleSpan(
+      HorizontalMapping::kActiveWindow, ActiveExtent::kSource, Standard::kPal,
+      17734475.0, 177, 1099, 1137);
+  EXPECT_EQ(stretched, window);
+}
+
 }  // namespace
 }  // namespace videosynth

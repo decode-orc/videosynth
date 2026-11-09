@@ -18,6 +18,8 @@
 #include <string>
 #include <vector>
 
+#include "videosynth/child_process.h"
+
 namespace videosynth {
 
 // Reads stereo 24-bit samples sequentially from one audio stream of a media
@@ -74,10 +76,10 @@ class FfmpegAudioSampleSource final : public IAudioSampleSource {
                                   double start_seconds, int sample_rate_hz);
 
  private:
-  // Closes the pipe; returns the child's exit status from pclose.
+  // Waits for an ffmpeg that has finished writing; returns its wait status.
   int Close();
 
-  FILE* pipe_ = nullptr;
+  ChildProcessReader child_;
   // Interleaved left/right 32-bit samples, reused across reads.
   std::vector<std::int32_t> interleaved_;
 };
