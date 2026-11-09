@@ -28,6 +28,11 @@
 
 #if defined(__APPLE__)
 #include <crt_externs.h>
+#else
+// POSIX process environment. Declared at global scope: a block-scope extern
+// inside the namespaces below would name videosynth::(anonymous)::environ,
+// which is never defined.
+extern char** environ;  // NOLINT(readability-redundant-declaration)
 #endif
 
 namespace videosynth {
@@ -52,8 +57,7 @@ char** Environment() {
 #if defined(__APPLE__)
   return *_NSGetEnviron();
 #else
-  extern char** environ;
-  return environ;
+  return ::environ;
 #endif
 }
 
