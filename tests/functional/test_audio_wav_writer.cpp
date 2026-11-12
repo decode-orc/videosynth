@@ -87,7 +87,7 @@ TEST(AudioWavWriterTest, WritesValidPalStereoPcm) {
 
   AudioWavWriter writer;
   std::vector<std::string> errors;
-  ASSERT_TRUE(writer.BeginWrite(project, 2, &errors))
+  ASSERT_TRUE(writer.BeginWrite(project, 2, 8, &errors))
       << (errors.empty() ? "" : errors.front());
 
   // Two frames of 4 sample positions each, with distinct L/R content.
@@ -148,7 +148,7 @@ TEST(AudioWavWriterTest, UsesFixedHeaderRateForNtsc) {
 
   AudioWavWriter writer;
   std::vector<std::string> errors;
-  ASSERT_TRUE(writer.BeginWrite(project, 0, &errors));
+  ASSERT_TRUE(writer.BeginWrite(project, 0, 3, &errors));
   ASSERT_TRUE(writer.AppendFrameAudio({1, 2, 3}, {4, 5, 6}, &errors));
   ASSERT_TRUE(writer.FinalizeWrite(&errors));
 
@@ -169,8 +169,37 @@ TEST(AudioWavWriterTest, RejectsMismatchedChannelLengths) {
 
   AudioWavWriter writer;
   std::vector<std::string> errors;
-  ASSERT_TRUE(writer.BeginWrite(project, 0, &errors));
+  ASSERT_TRUE(writer.BeginWrite(project, 0, 3, &errors));
   EXPECT_FALSE(writer.AppendFrameAudio({1, 2, 3}, {4, 5}, &errors));
+  EXPECT_FALSE(errors.empty());
+  writer.AbortWrite();
+}
+
+TEST(AudioWavWriterTest, RejectsFinalizeWhenFewerSamplesThanDeclared) {
+  const std::filesystem::path video_path =
+      std::filesystem::temp_directory_path() /
+      "videosynth_audio_wav_short.cvbs";
+  const Project project = MakeAudioProject(Standard::kPal, video_path.string());
+
+  AudioWavWriter writer;
+  std::vector<std::string> errors;
+  ASSERT_TRUE(writer.BeginWrite(project, 0, 4, &errors));
+  ASSERT_TRUE(writer.AppendFrameAudio({1, 2, 3}, {4, 5, 6}, &errors));
+  EXPECT_FALSE(writer.FinalizeWrite(&errors));
+  EXPECT_FALSE(errors.empty());
+  std::filesystem::remove(
+      AudioWavWriter::DeriveAudioPath(video_path.string(), 0));
+}
+
+TEST(AudioWavWriterTest, RejectsAppendBeyondDeclaredSamples) {
+  const std::filesystem::path video_path =
+      std::filesystem::temp_directory_path() / "videosynth_audio_wav_long.cvbs";
+  const Project project = MakeAudioProject(Standard::kPal, video_path.string());
+
+  AudioWavWriter writer;
+  std::vector<std::string> errors;
+  ASSERT_TRUE(writer.BeginWrite(project, 0, 2, &errors));
+  EXPECT_FALSE(writer.AppendFrameAudio({1, 2, 3}, {4, 5, 6}, &errors));
   EXPECT_FALSE(errors.empty());
   writer.AbortWrite();
 }

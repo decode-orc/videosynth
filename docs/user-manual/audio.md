@@ -36,7 +36,7 @@ The rules:
 
 ## Frame lock
 
-Every track is stereo, 24-bit signed little-endian PCM (RIFF/WAVE) at 48 000 Hz, synchronous with the video per SMPTE 272M §1.2. The per-frame sample count follows the standard:
+Every track is stereo, 24-bit signed little-endian PCM (RIFF/WAVE) at 48 000 Hz, synchronous with the video per SMPTE 272M §1.2. A track longer than about 4 hours 8 minutes passes the 4 GiB RIFF limit and is written as RF64 (EBU Tech 3306) instead; it keeps the `.wav` name. The per-frame sample count follows the standard:
 
 | Standard | Samples per frame |
 |----------|-------------------|

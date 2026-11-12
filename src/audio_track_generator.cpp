@@ -189,6 +189,13 @@ bool AudioTrackGenerator::Begin(
     run_start = run_end;
   }
 
+  // Every pair carries the same sample count, which fixes each WAV file's
+  // container (RIFF or RF64) before the first sample is written.
+  std::uint64_t total_sample_frames = 0;
+  for (const std::int64_t count : frame_sample_counts_) {
+    total_sample_frames += static_cast<std::uint64_t>(count);
+  }
+
   // Open one writer and two channel synthesisers per declared pair.
   const double sample_rate_hz = AudioSampleRateHz(standard_);
   pairs_.reserve(pair_numbers_.size());
@@ -208,7 +215,7 @@ bool AudioTrackGenerator::Begin(
       state.efm_media = std::make_unique<AudioMediaReader>(
           sample_source_factory_, static_cast<int>(EfmAudioSampleRateHz()));
     }
-    if (!state.writer->BeginWrite(project, pair, errors)) {
+    if (!state.writer->BeginWrite(project, pair, total_sample_frames, errors)) {
       // Abort any writers already opened before failing.
       for (PairState& opened : pairs_) {
         opened.writer->AbortWrite();

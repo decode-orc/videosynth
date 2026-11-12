@@ -110,6 +110,8 @@ Mono soundtracks play on both channels and soundtracks with more than two channe
 
 Every track is stereo, 24-bit signed little-endian PCM (RIFF/WAVE, format tag `0x0001`) at 48 000 Hz, synchronous with the video per SMPTE 272M §1.2.
 
+A track longer than the 4 GiB RIFF limit (about 4 hours 8 minutes, roughly 372 800 PAL/SECAM or 446 900 NTSC/PAL-M frames) is written as RF64 (EBU Tech 3306) instead, as the CVBS file format requires. Every pair in one output carries the same sample count, so all pair files use the same container. RF64 files keep the `.wav` extension, but some older WAV readers cannot open them.
+
 | Standard | Samples per frame |
 |----------|-------------------|
 | PAL | 1920 (constant) |
