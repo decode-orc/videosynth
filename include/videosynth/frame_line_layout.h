@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 
 #include "videosynth/model.h"
@@ -51,6 +52,50 @@ inline std::vector<int> BuildLineSampleOffsets(
     running += line_samples[i];
   }
   return offsets;
+}
+
+// Fractional distance, in samples, from a storage line's first sample to the
+// point where that line's 0H falls on the subcarrier-locked 4fsc lattice. It
+// is held exactly as a numerator over kLatticeDelayDenominator.
+struct LatticeDelay {
+  int numerator = 0;
+
+  double Samples() const;
+};
+
+// EBU Tech. 3280-E Section 1.2: 625-line PAL at 4fsc has 709,379 samples per
+// 625-line frame, so the lattice 0H of frame line k (0-based) is
+// k x 709379 / 625 samples after that of line 0.
+constexpr int kLatticeDelayDenominator = 625;
+constexpr std::int64_t kPalLatticeSamplesPerFrame = 709379;
+
+inline double LatticeDelay::Samples() const {
+  return static_cast<double>(numerator) /
+         static_cast<double>(kLatticeDelayDenominator);
+}
+
+// Lattice delay d_k of frame line `line_1based` (1..lines per frame): the
+// lattice 0H position minus the storage line's first-sample offset from
+// BuildLineSampleCounts. For 625-line standards this is 4k/625 for k <= 312
+// and (4k - 1250)/625 for k >= 313 (k = line_1based - 1), so it lies in
+// [0, 2). NTSC and PAL-M are orthogonal at 4fsc and return 0 on every line.
+// The result for a line number outside the frame is unspecified.
+inline LatticeDelay LatticeLineDelay(Standard standard, int line_1based) {
+  if (!Is625LineStandard(standard)) {
+    return LatticeDelay{};
+  }
+  // Storage offset of line k: 1135 samples per line, plus the two extra
+  // samples of line 313 once it has been passed (see BuildLineSampleCounts).
+  constexpr std::int64_t kNominalSamplesPerLine = 1135;
+  constexpr int kFirstLongLine = 313;
+  constexpr std::int64_t kLongLineExtraSamples = 2;
+  const std::int64_t k = line_1based - 1;
+  const std::int64_t storage_offset =
+      (k * kNominalSamplesPerLine) +
+      (line_1based > kFirstLongLine ? kLongLineExtraSamples : 0);
+  return LatticeDelay{.numerator = static_cast<int>(
+                          (k * kPalLatticeSamplesPerFrame) -
+                          (storage_offset * kLatticeDelayDenominator))};
 }
 
 inline int MaxLineSamples(const std::vector<int>& line_samples) {

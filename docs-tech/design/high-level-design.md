@@ -155,7 +155,7 @@ Current implementation status:
 | 40MSPS          | 40,000,000   | 40,000,000    | Oversampling.                    |
 | Custom          | User-defined | User-defined  | Must be > 4fsc.                  |
 
-At `4fsc`, NTSC frame cadence is orthogonal (`910 x 525 = 477,750` samples/frame). PAL is non-orthogonal at `4fsc` and uses `709,379` samples/frame via a distributed one-sample slip pattern (`1135` nominal samples/line with four lines per frame at `1134`).
+At `4fsc`, NTSC frame cadence is orthogonal (`910 x 525 = 477,750` samples/frame). PAL (and SECAM, which shares its storage lattice) is non-orthogonal at `4fsc`: EBU Tech. 3280-E §1.2 gives `1135.0064` samples/line and `709,379` samples/frame. Storage lines are `1135` samples long, except lines 313 and 625, which carry two extra samples each (`1137`), so `625 x 1135 + 4 = 709,379` (`BuildLineSampleCounts`). On the lattice, 0H of frame line *k* (0-based) falls `k x 709379 / 625` samples after 0H of line 0, which is `LatticeLineDelay` *d*ₖ (`4k/625` for *k* ≤ 312, `(4k − 1250)/625` for *k* ≥ 313, so `0 ≤ dₖ < 2`) after the storage line's first sample. The generator does not yet apply *d*ₖ: every line's sync starts at its storage line's first sample, so 0H lags the lattice by *d*ₖ. [`pal-lattice-timing-plan.md`](../user/pal-lattice-timing-plan.md) covers the fix.
 
 
 ---
