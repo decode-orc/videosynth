@@ -954,13 +954,13 @@ TEST(GenerationStageTimingTest, ShapesSyncEdgesInsteadOfHardSteps) {
   auto mv = [&](int index) {
     return SampleFixedToMillivolts(y[static_cast<std::size_t>(index)]);
   };
-  EXPECT_DOUBLE_EQ(mv(line_start - 2), levels.blanking_mv);
+  EXPECT_DOUBLE_EQ(mv(line_start - 3), levels.blanking_mv);
 
   // SMPTE 170M-2004 specifies finite sync rise/fall times, so the pulse edge
   // moves through intermediate levels rather than a single hard step. 0H
-  // falls midway between the storage line's first sample and the one before
-  // it, so those two samples sit symmetrically either side of half
-  // amplitude.
+  // falls between the storage line's first sample and the one before it,
+  // 57/90 sample before the first (SMPTE 244M-2003 I/Q sampling), so the
+  // sample before 0H sits nearer half amplitude than the one after it.
   const double before_0h = mv(line_start - 1);
   const double after_0h = mv(line_start);
   const double half_amplitude = 0.5 * (levels.blanking_mv + levels.sync_tip_mv);
@@ -968,7 +968,7 @@ TEST(GenerationStageTimingTest, ShapesSyncEdgesInsteadOfHardSteps) {
   EXPECT_GT(before_0h, half_amplitude);
   EXPECT_LT(after_0h, half_amplitude);
   EXPECT_GT(after_0h, levels.sync_tip_mv);
-  EXPECT_NEAR(before_0h - half_amplitude, half_amplitude - after_0h, 1e-3);
+  EXPECT_LT(before_0h - half_amplitude, half_amplitude - after_0h);
   EXPECT_NEAR(mv(line_start + 1), levels.sync_tip_mv, 1e-3);
 }
 

@@ -141,6 +141,24 @@ inline bool HasTwoHalfLinePulses(SyncPulseKind kind) {
          kind == SyncPulseKind::kVerticalSync;
 }
 
+// Position of 0H (the half-amplitude point of the falling line-sync edge), in
+// samples, relative to the first sample of the line it starts, before any PAL
+// lattice delay. The first stored sample of a line is the first sampling
+// instant after its 0H (CVBS File Format Specification, Stored Frame and Line
+// Origin); where 0H falls inside that sample period is set by the standard's
+// 0 degree Sc/H sampling phase:
+// - PAL and SECAM: EBU Tech. 3280-E Section 1.2 puts 0H midway between two
+//   samples, so -0.5. PAL-M has no 4fsc interface standard of its own and
+//   follows the PAL convention.
+// - NTSC: SMPTE 244M-2003 Section 3 samples along the I and Q axes with 0H on
+//   a zero crossing of the burst-locked sine wave (0 degree SC/H). The first
+//   sample after 0H is the -Q sample, 57 degrees of subcarrier later (Table 5
+//   burst codes are 112 sin 33 and 112 cos 33 about blanking), so 0H is 57/90
+//   sample before it.
+constexpr double ZeroHOffsetSamples(Standard standard) {
+  return standard == Standard::kNtsc ? -57.0 / 90.0 : -0.5;
+}
+
 inline double BurstPhaseRad(Standard standard, int line_1based) {
   constexpr double kPi = 3.14159265358979323846;
 

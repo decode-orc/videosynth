@@ -66,8 +66,10 @@ inline SourcePixelGrid ActiveWindowSourcePixelGrid(int active_sample_count,
 
 // The BT.601 grid: source pixel n is centred on the BT.601 sampling instant
 // t0 + n / 13.5 MHz, where t0 is the start of the digital active line after
-// 0H. Sample 0 of every 4fsc line sits at 0H, so active-window sample x is
-// (active_window_start_samples + x) / sample_rate_hz after 0H.
+// 0H. Like every feature placed after 0H, the grid counts whole samples from
+// the line's first sample, so active-window sample x is taken to be
+// (active_window_start_samples + x) / sample_rate_hz after 0H; 0H itself lies
+// just before that first sample (ZeroHOffsetSamples).
 inline SourcePixelGrid Bt601SourcePixelGrid(Standard standard,
                                             double sample_rate_hz,
                                             int active_window_start_samples) {

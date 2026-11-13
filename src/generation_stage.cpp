@@ -1141,10 +1141,10 @@ bool GenerationStage::SynthesisResourceCache::Build(
   // signal levels), so each shape is rendered once here and copied into place
   // per line instead of being evaluated sample by sample.
   //
-  // CVBS File Format Specification, Stored Frame and Line Origin, with EBU
-  // Tech. 3280-E §1.2 and SMPTE 244M-2003 §4.1: 0H (the half-amplitude point
-  // of the falling sync edge) lies midway between two samples, half a sample
-  // before the line's first sample. A half-line pulse falls half a nominal
+  // CVBS File Format Specification, Stored Frame and Line Origin: 0H (the
+  // half-amplitude point of the falling sync edge) lies just before the
+  // line's first sample, at ZeroHOffsetSamples (midway on 625 lines and PAL-M,
+  // 57/90 sample before it on NTSC). A half-line pulse falls half a nominal
   // line period after 0H. Widths are measured between the half-amplitude
   // points (ITU-R BT.1700 Part B Table 1, SMPTE 170M Table 2).
   const double half_edge =
@@ -1153,7 +1153,8 @@ bool GenerationStage::SynthesisResourceCache::Build(
   for (std::size_t placement = 0;
        placement < generation_detail::kSyncPulsePlacements; ++placement) {
     const double fall_half_time =
-        -0.5 + ((placement == 0U) ? 0.0 : 0.5 * out->synth.line_period_samples);
+        ZeroHOffsetSamples(standard) +
+        ((placement == 0U) ? 0.0 : 0.5 * out->synth.line_period_samples);
     for (int kind_index = 0;
          kind_index < generation_detail::kSyncPulseKindCount; ++kind_index) {
       const auto kind = static_cast<SyncPulseKind>(kind_index);

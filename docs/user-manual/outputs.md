@@ -25,11 +25,13 @@ Parent directories are created automatically, so an output path can point anywhe
 
 The `.cvbs` (or `.cvbsy`/`.cvbsc`) file is a flat, headerless stream of samples in the project's [sample encoding](video-signal.md#sample-encodings), little-endian, with no per-frame framing of any kind. Frame boundaries are implicit in the sample count:
 
-| Standard | Samples per frame at 4fsc |
-|----------|---------------------------|
-| PAL / SECAM | 709,379 (1135 per line, plus two extra samples on each of lines 313 and 625) |
-| NTSC | 477,750 (910 × 525, orthogonal) |
-| PAL-M | 477,225 (909 × 525) |
+| Standard | Samples per frame at 4fsc | Stored lines | 0H of line *k* (0-based), from the line's first sample |
+|----------|---------------------------|--------------|-----------------------------------------------------|
+| PAL / SECAM | 709,379 | 1135 samples, except lines 313 and 625, which hold 1137 | −0.5 + *d*ₖ, with *d*ₖ = 4*k*/625 for *k* ≤ 312 and (4*k* − 1250)/625 for *k* ≥ 313 |
+| NTSC | 477,750 (910 × 525, orthogonal) | 910 samples | −57/90 (−0.633) |
+| PAL-M | 477,225 (909 × 525) | 909 samples | −0.5 |
+
+So 0H of frame line *k* on PAL is exactly *k* × 709,379 / 625 samples after 0H of line 0, on the subcarrier-locked lattice of EBU Tech. 3280-E. See [Video signal](video-signal.md#sample-encodings) for what that means for the timings after 0H.
 
 At 16 bits per sample that is roughly 1.4 MB per PAL frame and 0.95 MB per NTSC frame — so about 2.1 GB per minute of PAL. Plan storage accordingly, and use `--output-root` to send bulk runs somewhere with room.
 

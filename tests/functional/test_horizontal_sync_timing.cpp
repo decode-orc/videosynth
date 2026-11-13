@@ -34,13 +34,14 @@
 namespace videosynth {
 namespace {
 
-// CVBS File Format Specification, Stored Frame and Line Origin: 0H falls
-// midway between two samples, half a sample before the frame's first sample.
-constexpr double kFrameOriginSamples = -0.5;
+// CVBS File Format Specification, Stored Frame and Line Origin: 0H lies just
+// before the frame's first sample, midway between two samples on 625 lines
+// and PAL-M and 57/90 sample before it on NTSC (ZeroHOffsetSamples).
 constexpr double kOriginTolerance = 0.02;
 
 // Linear interpolation across the three-sample 525-line sync edge misplaces
 // a crossing that falls between samples by up to 0.03 sample.
+constexpr double kEdgeInterpolationError = 0.03;
 constexpr double kPulseWidthTolerance = 0.05;
 
 constexpr double kPi = 3.14159265358979323846;
@@ -150,15 +151,16 @@ MeasuredFrame MeasureFrame(Standard standard) {
   return frame;
 }
 
-// Every line's 0H sits half a sample before its storage line's first sample:
-// the orthogonal 525-line standards have a whole number of samples per line.
-TEST(HorizontalSyncTimingTest, OrthogonalStandardsPlace0HHalfASampleEarly) {
+// Every line's 0H sits the same distance before its storage line's first
+// sample: the orthogonal 525-line standards have a whole number of samples per
+// line. That distance is 0.5 sample on PAL-M and 57/90 on NTSC.
+TEST(HorizontalSyncTimingTest, OrthogonalStandardsPlace0HJustBeforeLineStart) {
   for (Standard standard : {Standard::kNtsc, Standard::kPalM}) {
     const MeasuredFrame frame = MeasureFrame(standard);
     ASSERT_FALSE(frame.origin_after_line_start.empty());
     for (std::size_t k = 0; k < frame.origin_after_line_start.size(); ++k) {
-      EXPECT_NEAR(frame.origin_after_line_start[k], kFrameOriginSamples,
-                  kOriginTolerance)
+      EXPECT_NEAR(frame.origin_after_line_start[k],
+                  ZeroHOffsetSamples(standard), kOriginTolerance)
           << "line " << (k + 1);
     }
   }
@@ -172,19 +174,19 @@ TEST(HorizontalSyncTimingTest, Pal625LineSyncFallsOnTheLattice) {
   for (Standard standard : {Standard::kPal, Standard::kSecam}) {
     const MeasuredFrame frame = MeasureFrame(standard);
     ASSERT_EQ(frame.absolute.size(), 625U);
-    EXPECT_NEAR(frame.absolute[0], kFrameOriginSamples, kOriginTolerance);
+    const double origin = ZeroHOffsetSamples(standard);
+    EXPECT_NEAR(frame.absolute[0], origin, kOriginTolerance);
 
     for (std::size_t k = 0; k < frame.absolute.size(); ++k) {
       const int line = static_cast<int>(k) + 1;
-      EXPECT_NEAR(
-          frame.origin_after_line_start[k],
-          kFrameOriginSamples + LatticeLineDelay(standard, line).Samples(),
-          kOriginTolerance)
+      EXPECT_NEAR(frame.origin_after_line_start[k],
+                  origin + LatticeLineDelay(standard, line).Samples(),
+                  kOriginTolerance)
           << "line " << line;
-      const double lattice = kFrameOriginSamples +
-                             (static_cast<double>(k) *
-                              static_cast<double>(kPalLatticeSamplesPerFrame) /
-                              kLatticeDelayDenominator);
+      const double lattice =
+          origin + (static_cast<double>(k) *
+                    static_cast<double>(kPalLatticeSamplesPerFrame) /
+                    kLatticeDelayDenominator);
       EXPECT_NEAR(frame.absolute[k], lattice, kOriginTolerance)
           << "line " << line;
     }
@@ -194,8 +196,8 @@ TEST(HorizontalSyncTimingTest, Pal625LineSyncFallsOnTheLattice) {
 
 // ITU-R BT.1700 Part B Table 1 and SMPTE 170M-2004 Table 2 measure sync
 // pulse widths between the half-amplitude points of their edges. Every pulse
-// kind, at the line start and at the half-line point, falls half a sample
-// before its nominal time (0H, or 0H + H/2) and is its nominal width long.
+// kind, at the line start and at the half-line point, falls at its nominal
+// time (0H, or 0H + H/2) and is its nominal width long.
 TEST(HorizontalSyncTimingTest, SyncPulsesFallOnTimeAndHaveNominalWidths) {
   struct PulseCase {
     Standard standard;
@@ -234,7 +236,7 @@ TEST(HorizontalSyncTimingTest, SyncPulsesFallOnTimeAndHaveNominalWidths) {
       }
       const auto index = static_cast<std::size_t>(pulse.line - 1);
       const double nominal_fall =
-          frame.line_offsets[index] + kFrameOriginSamples +
+          frame.line_offsets[index] + ZeroHOffsetSamples(standard) +
           LatticeLineDelay(standard, pulse.line).Samples() +
           (pulse.mid_line ? 0.5 * line_period : 0.0);
       const auto search = static_cast<std::int64_t>(std::floor(nominal_fall));
@@ -282,7 +284,8 @@ TEST(HorizontalSyncTimingTest, PalBurstIsLockedToTheLatticeOnEveryLine) {
 }
 
 // Sc/H of the first frame, measured from the generated signal: the burst
-// phase extrapolated along the lattice to the measured 0H.
+// phase extrapolated along the lattice to the measured 0H. The tolerance is
+// the edge measurement's interpolation error in subcarrier degrees.
 // - PAL and PAL-M (EBU Tech. 3280-E Section 1.1.1): the +U axis, the burst
 //   less its +/-135 degree swing, is at zero phase at 0H of line 1.
 // - NTSC (SMPTE 170M-2004 Section 13.2): 0H of line 10 in colour frame A is a
@@ -304,9 +307,30 @@ TEST(HorizontalSyncTimingTest, FirstFrameIsAtZeroScH) {
           0, BuildLineTimingPrimitive(standard, kBurstLine));
       sch = burst_phase - swing + ((kPi / 2.0) * frame.absolute[0]);
     }
-    EXPECT_NEAR(WrapRad(sch, 0.0), 0.0, 1.0 * kDegree)
+    EXPECT_NEAR(WrapRad(sch, 0.0), 0.0, kEdgeInterpolationError * kPi / 2.0)
         << StandardToString(standard);
   }
+}
+
+// SMPTE 244M-2003 Section 3.1 and 4.1.2: NTSC is sampled along the I and Q
+// axes, and its sample 0 of line 10 in colour frame A, stored sample 125 of
+// stored line 9, is a +I sample. With the burst on the -(B-Y) axis at 180
+// degrees and I at 123 degrees, the burst-locked sine wave is at 147 degrees
+// there, and every other sample is 90 degrees on (Table 5: 112 sin 33 and
+// 112 cos 33 about blanking). Read from the burst alone, so exact.
+TEST(HorizontalSyncTimingTest, NtscSamplesFallOnTheIAndQAxes) {
+  const MeasuredFrame frame = MeasureFrame(Standard::kNtsc);
+  ASSERT_FALSE(frame.c.empty());
+  const double fs = GetTimingConstants(Standard::kNtsc).sample_rate_4fsc_hz;
+  constexpr int kStoredLine = 9;
+  constexpr int kReferenceSample = 125;
+  const int line_offset = frame.line_offsets[kStoredLine];
+  const double burst_phase =
+      BurstLatticePhaseRad(frame.c, line_offset, Standard::kNtsc, fs);
+  const double reference_phase =
+      burst_phase +
+      ((kPi / 2.0) * static_cast<double>(line_offset + kReferenceSample));
+  EXPECT_NEAR(WrapRad(reference_phase, 147.0 * kDegree), 0.0, 0.1 * kDegree);
 }
 
 // Centre of a rising step, as the first moment of its first differences.
@@ -338,9 +362,10 @@ constexpr double kFeatureSpreadTolerance = 0.05;
 // Features placed after 0H keep their place once the line is delayed onto
 // the lattice: the burst envelope and the picture lie the same distance
 // after the measured 0H on every line. The generator places them at whole
-// samples after the storage line's first sample, which is half a sample after
-// 0H (the midway convention): the burst gate opens at BurstStartSamples and
-// reaches half amplitude half an envelope ramp later.
+// samples after the storage line's first sample, which lies
+// -ZeroHOffsetSamples after 0H (half a sample, or 57/90 on NTSC): the burst
+// gate opens at BurstStartSamples and reaches half amplitude half an envelope
+// ramp later.
 TEST(HorizontalSyncTimingTest, BurstAndPictureFollow0H) {
   for (Standard standard : {Standard::kPal, Standard::kNtsc, Standard::kPalM}) {
     const MeasuredFrame frame = MeasureFrame(standard);
@@ -352,7 +377,7 @@ TEST(HorizontalSyncTimingTest, BurstAndPictureFollow0H) {
     const double burst_ramp = RiseTimeToRampSamples(300.0e-9, fs);
     const double nominal_burst_half =
         static_cast<double>(BurstStartSamples(standard, fs)) +
-        (0.5 * (burst_ramp - 1.0)) - kFrameOriginSamples;
+        (0.5 * (burst_ramp - 1.0)) - ZeroHOffsetSamples(standard);
     std::vector<double> burst_after_0h;
     std::vector<double> picture_after_0h;
 

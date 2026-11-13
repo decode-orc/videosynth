@@ -37,6 +37,13 @@ The output resolution is fixed by the standard and cannot be set in the project.
 
 Generation always happens on the 4fsc lattice. The raw presets are produced by resampling that lattice to the requested rate in the output stage.
 
+Where each line starts follows the CVBS File Format Specification's stored frame and line origin:
+
+- **0H of line 1** falls just before the frame's first sample: half a sample before it on PAL, SECAM and PAL-M, and 57/90 of a sample (0.633) before it on NTSC. 0H is the half-amplitude point of the line-sync pulse's leading edge. The NTSC figure is what SMPTE 244M's sampling phase requires: with 0H on a zero crossing of the burst, the samples fall on the I and Q colour axes.
+- **Times after 0H.** Every timing in this manual given as a time after 0H (the burst, the active window, the BT.601 *t*₀, VBI and VITS signals) is measured from that 0H. Sync edges fall exactly on time. The other signals start on the sample their time gives counted from the line's first sample, which puts them that same fraction of a sample (28 ns on PAL, 35 ns on PAL-M, 44 ns on NTSC) after their nominal time.
+- **NTSC and PAL-M** lines are a whole number of samples, so 0H sits the same distance before the first sample of every stored line.
+- **PAL and SECAM** lines are 1135.0064 samples. 0H of frame line *k* (counting from 0) falls *k* × 709,379 / 625 samples after 0H of line 0, which does not land on a sample boundary. Within its stored line, 0H is −0.5 + *d* samples from the first sample, where *d* grows by 4/625 sample per line, from 0 on line 1 to 1.997 on line 313, and starts again from 0.003 on line 314. Each line's waveform, sync and picture together, is delayed by its *d*, while the colour subcarrier and the LaserDisc pilot stay locked to the sample clock. A decoder that assumes 0H at a fixed sample on every PAL line sees the sync drift by up to 2 samples (113 ns) through each field.
+
 ### Which one to choose
 
 Start with `CVBS_U10_4FSC`. It is what the decoding tool chain expects and it is the smallest of the 4fsc formats in practice.

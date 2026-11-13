@@ -27,10 +27,11 @@ namespace videosynth {
 constexpr std::size_t kSubcarrierLatticeSamples = 4U;
 
 // Phase added to the subcarrier lattice so that disc frame 0 is the first
-// frame of the colour sequence at 0 degrees Sc/H, with 0H half a sample before
-// the frame's first sample (CVBS File Format Specification, Stored Frame and
-// Line Origin). The lattice phase of absolute sample n is (pi/2) n; the
-// quadrature encoder carries U on sin(lattice + offset) and V on cos.
+// frame of the colour sequence at 0 degrees Sc/H, with 0H at
+// ZeroHOffsetSamples before the frame's first sample (CVBS File Format
+// Specification, Stored Frame and Line Origin). The lattice phase of absolute
+// sample n is (pi/2) n; the quadrature encoder carries U on
+// sin(lattice + offset) and V on cos.
 //
 // - PAL: EBU Tech. 3280-E §1.1.1 and Fig. 1 put the +U axis at zero phase at
 //   0H of line 1, field 1. 0H is at sample -0.5, where the lattice is at
@@ -42,8 +43,11 @@ constexpr std::size_t kSubcarrierLatticeSamples = 4U;
 // - NTSC: SMPTE 170M-2004 §13.2. 0H coincides with a zero crossing of the
 //   burst-locked sine wave, and on line 10 of field I (colour frame A) that
 //   crossing is positive-going. The burst is sin(lattice + anchor + pi/4)
-//   (BurstPhaseRad). 0H of line 10 is lattice sample 8189.5, at phase
-//   3pi/4 mod 2pi, so the anchor is pi.
+//   (BurstPhaseRad). 0H of line 10 is lattice sample 8190 + z, z =
+//   ZeroHOffsetSamples = -57/90, at phase pi + (pi/2) z, so the anchor is
+//   3pi/4 - (pi/2) z = 192 degrees. The samples then fall on the I and Q axes
+//   (SMPTE 244M-2003 Section 3.1): stored sample 125 of stored line 9 in
+//   colour frame A, SMPTE 244M's sample 0 of line 10, is a +I sample.
 constexpr double SubcarrierAnchorRad(Standard standard) {
   constexpr double kPi = 3.14159265358979323846;
   switch (standard) {
@@ -51,7 +55,8 @@ constexpr double SubcarrierAnchorRad(Standard standard) {
     case Standard::kPalM:
       return kPi / 4.0;
     case Standard::kNtsc:
-      return kPi;
+      return (3.0 * kPi / 4.0) -
+             ((kPi / 2.0) * ZeroHOffsetSamples(Standard::kNtsc));
     default:
       return 0.0;
   }

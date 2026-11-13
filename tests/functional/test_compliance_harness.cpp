@@ -278,9 +278,18 @@ TEST(ComplianceHarnessTest, NtscPulseAndEdgeTimingRemainWithinTolerance) {
   EXPECT_NEAR(
       SampleFixedToMillivolts(c_mv[static_cast<std::size_t>(burst_end - 1)]),
       0.0, kGateEdgeToleranceMv);
-  EXPECT_GT(std::abs(SampleFixedToMillivolts(
-                c_mv[static_cast<std::size_t>((burst_start + burst_end) / 2)])),
-            100.0);
+  // SMPTE 244M-2003 samples NTSC along the I and Q axes, 33 and 57 degrees
+  // from the burst's peaks, so the largest of any four burst samples is
+  // 20 IRE x cos 33 degrees (about 120 mV).
+  const auto burst_middle =
+      static_cast<std::size_t>((burst_start + burst_end) / 2);
+  double burst_peak_mv = 0.0;
+  for (std::size_t i = 0; i < 4U; ++i) {
+    burst_peak_mv =
+        std::max(burst_peak_mv,
+                 std::abs(SampleFixedToMillivolts(c_mv[burst_middle + i])));
+  }
+  EXPECT_GT(burst_peak_mv, 100.0);
 
   const double level_10 =
       levels.blanking_mv + (levels.sync_tip_mv - levels.blanking_mv) * 0.1;
