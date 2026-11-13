@@ -16,6 +16,7 @@
 #include "videosynth/fixed_point.h"
 #include "videosynth/model.h"
 #include "videosynth/timing_constants.h"
+#include "videosynth/video_band_limit.h"
 
 namespace videosynth {
 
@@ -34,6 +35,13 @@ namespace videosynth {
 // ASCII 0x20–0x7F.  Scale=N expands each font pixel to an N×N output block.
 // Pixels that fall outside [active_sample_start, active_sample_end) or outside
 // [active_line_start, active_line_end) are silently clipped.
+//
+// Without a band limiter each pixel's samples are overwritten, so text edges
+// are hard steps. With one, each overlay is keyed in as a band-limited change:
+// on every line it covers, the difference between the hard-keyed text and the
+// samples beneath (luma and chroma) is passed through the band limiter and
+// added back, so text edges are no faster than the picture's and the change
+// reaches reach() samples either side of the text.
 //
 // Thread-safety: NOT thread-safe.  Concurrent calls to Render() on the same
 // instance result in undefined behaviour.  Different instances may be used
@@ -65,31 +73,22 @@ class OsdRenderer {
   //                        line's neutral chroma, indexed by sample within the
   //                        line. Null, or a null entry, writes zero chroma.
   //                        Not owned; must outlive the call.
-  void Render(const OsdConfig& config,
-              const std::vector<std::string>& resolved_texts,
-              std::vector<SampleFixed>* out_y_mv,
-              std::vector<SampleFixed>* out_c_mv, int frame_sample_base,
-              const std::vector<int>& line_sample_offsets,
-              int active_line_start, int active_line_end,
-              int active_sample_start, int active_sample_end,
-              const SignalLevels& levels,
-              const std::vector<const SampleFixed*>* neutral_chroma_lines =
-                  nullptr) const;
+  //   band_limiter:        Optional; when set, overlays are keyed in band
+  //                        limited (see the class comment). Every line must
+  //                        then hold active_sample_end + reach() samples.
+  //                        Not owned; must outlive the call.
+  void Render(
+      const OsdConfig& config, const std::vector<std::string>& resolved_texts,
+      std::vector<SampleFixed>* out_y_mv, std::vector<SampleFixed>* out_c_mv,
+      int frame_sample_base, const std::vector<int>& line_sample_offsets,
+      int active_line_start, int active_line_end, int active_sample_start,
+      int active_sample_end, const SignalLevels& levels,
+      const std::vector<const SampleFixed*>* neutral_chroma_lines = nullptr,
+      const VideoBandLimiter* band_limiter = nullptr) const;
 
  private:
   // Converts a gamma-corrected E_Y' luma value [0.0, 1.0] to SampleFixed.
   static SampleFixed LumaToSample(double luma, const SignalLevels& levels);
-
-  // Writes a single scaled glyph pixel block into out_y_mv and neutral chroma
-  // into out_c_mv. row_base and col_base are the top-left active-area
-  // coordinates of the N×N block.  Out-of-bounds pixels are silently skipped.
-  void WriteBlock(
-      std::vector<SampleFixed>* out_y_mv, std::vector<SampleFixed>* out_c_mv,
-      int frame_sample_base, const std::vector<int>& line_sample_offsets,
-      int row_base, int col_base, int scale, int active_line_start,
-      int active_line_end, int active_sample_start, int active_sample_end,
-      SampleFixed sample_value,
-      const std::vector<const SampleFixed*>* neutral_chroma_lines) const;
 };
 
 }  // namespace videosynth

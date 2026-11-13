@@ -10,6 +10,8 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
+#include <complex>
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -18,6 +20,7 @@
 #include "videosynth/model.h"
 #include "videosynth/osd_renderer.h"
 #include "videosynth/timing_constants.h"
+#include "videosynth/video_band_limit.h"
 
 namespace videosynth {
 namespace {
@@ -391,6 +394,82 @@ TEST(OsdRendererTest, ChromaZeroedAtOsdPixels) {
   }
   // A pixel well outside the glyph must retain the original chroma fill.
   EXPECT_EQ(SampleAt(cbuf, 20, 50), chromaFill);
+}
+
+// OsdRenderer_BandLimitedKeyingShapesTextEdges
+// With a band limiter the text is keyed in as a band-limited change: samples
+// beyond the limiter's reach of the text cell are untouched, the keyed line
+// carries nothing above the stopband edge, and chroma is cut under the text.
+TEST(OsdRendererTest, BandLimitedKeyingShapesTextEdges) {
+  const double fs = GetTimingConstants(Standard::kPal).sample_rate_4fsc_hz;
+  const VideoBandLimiter limiter(Standard::kPal, fs);
+  const int reach = limiter.reach();
+  constexpr int kLineSamples = 400;
+  constexpr int kLineCount = 16;
+  const int window_start = reach + 20;
+  const int window_end = kLineSamples - reach - 20;
+  std::vector<int> offsets(static_cast<std::size_t>(kLineCount));
+  for (int i = 0; i < kLineCount; ++i) {
+    offsets[static_cast<std::size_t>(i)] = i * kLineSamples;
+  }
+  const SampleFixed picture = MillivoltsToSampleFixed(200.0);
+  std::vector<SampleFixed> y(
+      static_cast<std::size_t>(kLineCount * kLineSamples), picture);
+  std::vector<SampleFixed> c(y.size(), MillivoltsToSampleFixed(30.0));
+  // 'A' at scale 2: glyph row 3 (0x7E) is foreground over 12 samples from
+  // text sample 2, on lines 6 and 7; a black background fills the rest of
+  // its 16-sample cell.
+  constexpr int kTextX = 100;
+  const auto cfg = MakeSingleOverlay("A", kTextX, 0, 2, OsdFgLevel::kWhite,
+                                     OsdBgLevel::kBlack);
+  OsdRenderer().Render(cfg, {cfg.overlays[0].text}, &y, &c, 0, offsets, 0,
+                       kLineCount, window_start, window_end, PalLevels(),
+                       nullptr, &limiter);
+
+  const int text_first = window_start + kTextX;
+  const int text_end = text_first + 16;
+  for (int line = 0; line < kLineCount; ++line) {
+    for (int sample = 0; sample < kLineSamples; ++sample) {
+      const std::size_t idx = (static_cast<std::size_t>(line) * kLineSamples) +
+                              static_cast<std::size_t>(sample);
+      // The cell covers all 16 lines (8 glyph rows at scale 2).
+      const bool near_text =
+          sample >= text_first - reach && sample < text_end + reach;
+      if (!near_text) {
+        ASSERT_EQ(y[idx], picture) << line << " " << sample;
+      }
+    }
+  }
+
+  // Line 6, glyph row 3: the keyed line, measured as a change from the
+  // picture, has nothing above the stopband edge.
+  const std::size_t line_base = std::size_t{6} * kLineSamples;
+  double total = 0.0;
+  double above = 0.0;
+  for (int k = 1; k <= kLineSamples / 2; ++k) {
+    const double f = fs * k / kLineSamples;
+    std::complex<double> sum = 0.0;
+    for (int n = 0; n < kLineSamples; ++n) {
+      sum +=
+          SampleFixedToMillivolts(y[line_base + static_cast<std::size_t>(n)] -
+                                  picture) *
+          std::polar(1.0, -2.0 * 3.14159265358979323846 * k * n / kLineSamples);
+    }
+    total += std::norm(sum);
+    if (f >= NominalVideoBandwidth(Standard::kPal).stopband_edge_hz) {
+      above += std::norm(sum);
+    }
+  }
+  ASSERT_GT(total, 0.0);
+  EXPECT_LT(10.0 * std::log10(above / total), -60.0);
+
+  // Chroma under the text is cut to zero, band-limited the same way: the
+  // middle of the cell is near zero and far samples keep the picture chroma.
+  EXPECT_NEAR(SampleFixedToMillivolts(
+                  c[line_base + static_cast<std::size_t>(text_first + 8)]),
+              0.0, 3.0);
+  EXPECT_EQ(c[line_base + static_cast<std::size_t>(text_end + reach)],
+            MillivoltsToSampleFixed(30.0));
 }
 
 }  // namespace

@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "videosynth/chroma_encoder.h"
+#include "videosynth/colour_sequence.h"
 #include "videosynth/fixed_point.h"
 #include "videosynth/generation_stage.h"
 #include "videosynth/signal_shaping.h"
@@ -28,11 +29,12 @@ namespace {
 
 constexpr double kPi = 3.14159265358979323846;
 
-// Matches kPalSubcarrierAnchorRad in generation_stage.cpp: the 625-line PAL
-// subcarrier lattice is rotated 270° so the burst-blanking meander pairs with
-// the subcarrier phase of colour fields 1/2 (ITU-R BT.1700 Annex 1 Part B
-// Figure 8 with Table 1 item 10f).
-constexpr double kPalSubcarrierAnchorRad = 3.0 * kPi / 2.0;
+// The 625-line PAL subcarrier anchor: +U at 0 degrees at 0H of line 1 in disc
+// frame 0 (EBU Tech. 3280-E Section 1.1.1, see colour_sequence.h).
+constexpr double kPalSubcarrierAnchorRad = SubcarrierAnchorRad(Standard::kPal);
+
+// How far a burst gate's first and last samples may stray from zero.
+constexpr double kGateEdgeToleranceMv = 0.1;
 
 Project MakeProject(Standard standard, const std::string& source = "") {
   const std::string selected_source =
@@ -106,26 +108,12 @@ int MeasureLeadingPulseWidth(const std::vector<SampleFixed>& y_mv,
   return width;
 }
 
+// Samples at or below half amplitude in a sync pulse: its nominal width,
+// which ITU-R BT.1700 and SMPTE 170M measure between the half-amplitude
+// points of its edges.
 int ExpectedThresholdPulseWidth(SyncPulseKind kind, Standard standard,
-                                const TimingConstants& timing,
-                                double threshold_mv,
-                                const SignalLevels& levels) {
-  const int pulse_width =
-      PulseWidthSamples(kind, standard, timing.sample_rate_4fsc_hz);
-  const double rise_time_seconds =
-      (standard == Standard::kNtsc) ? 140.0e-9 : 200.0e-9;
-  const int ramp_samples =
-      RiseTimeToRampSamples(rise_time_seconds, timing.sample_rate_4fsc_hz);
-
-  int count = 0;
-  for (int i = 0; i < pulse_width; ++i) {
-    const double shaped_level = ShapedPulseLevel(
-        i, pulse_width, ramp_samples, levels.blanking_mv, levels.sync_tip_mv);
-    if (shaped_level <= threshold_mv) {
-      ++count;
-    }
-  }
-  return count;
+                                const TimingConstants& timing) {
+  return PulseWidthSamples(kind, standard, timing.sample_rate_4fsc_hz);
 }
 
 int FindFirstCrossingIndex(const std::vector<SampleFixed>& y_mv, int start,
@@ -263,29 +251,33 @@ TEST(ComplianceHarnessTest, NtscPulseAndEdgeTimingRemainWithinTolerance) {
   const int vsync_width =
       MeasureLeadingPulseWidth(y_mv, 5, ntsc, pulse_threshold);
 
-  EXPECT_NEAR(
-      hsync_width,
-      ExpectedThresholdPulseWidth(SyncPulseKind::kHorizontal, Standard::kNtsc,
-                                  ntsc, pulse_threshold, levels),
-      1);
-  EXPECT_NEAR(
-      eq_width,
-      ExpectedThresholdPulseWidth(SyncPulseKind::kEqualizing, Standard::kNtsc,
-                                  ntsc, pulse_threshold, levels),
-      1);
-  EXPECT_NEAR(
-      vsync_width,
-      ExpectedThresholdPulseWidth(SyncPulseKind::kVerticalSync, Standard::kNtsc,
-                                  ntsc, pulse_threshold, levels),
-      1);
+  EXPECT_NEAR(hsync_width,
+              ExpectedThresholdPulseWidth(SyncPulseKind::kHorizontal,
+                                          Standard::kNtsc, ntsc),
+              1);
+  EXPECT_NEAR(eq_width,
+              ExpectedThresholdPulseWidth(SyncPulseKind::kEqualizing,
+                                          Standard::kNtsc, ntsc),
+              1);
+  EXPECT_NEAR(vsync_width,
+              ExpectedThresholdPulseWidth(SyncPulseKind::kVerticalSync,
+                                          Standard::kNtsc, ntsc),
+              1);
 
   const int line_start = (20 - 1) * ntsc.samples_per_line_4fsc;
   const int burst_start =
       line_start + BurstStartSamples(Standard::kNtsc, ntsc.sample_rate_4fsc_hz);
   const int burst_end =
       line_start + BurstEndSamples(Standard::kNtsc, ntsc.sample_rate_4fsc_hz);
-  EXPECT_EQ(c_mv[static_cast<std::size_t>(burst_start)], 0);
-  EXPECT_EQ(c_mv[static_cast<std::size_t>(burst_end - 1)], 0);
+  // The gate envelope opens from and closes to zero. On PAL the line is then
+  // delayed onto the 4fsc lattice, so the end samples pick up a trace of
+  // their neighbours.
+  EXPECT_NEAR(
+      SampleFixedToMillivolts(c_mv[static_cast<std::size_t>(burst_start)]), 0.0,
+      kGateEdgeToleranceMv);
+  EXPECT_NEAR(
+      SampleFixedToMillivolts(c_mv[static_cast<std::size_t>(burst_end - 1)]),
+      0.0, kGateEdgeToleranceMv);
   EXPECT_GT(std::abs(SampleFixedToMillivolts(
                 c_mv[static_cast<std::size_t>((burst_start + burst_end) / 2)])),
             100.0);
@@ -295,9 +287,9 @@ TEST(ComplianceHarnessTest, NtscPulseAndEdgeTimingRemainWithinTolerance) {
   const double level_90 =
       levels.blanking_mv + (levels.sync_tip_mv - levels.blanking_mv) * 0.9;
   const int cross_10 =
-      FindFirstCrossingIndex(y_mv, line_start, line_start + 20, level_10);
+      FindFirstCrossingIndex(y_mv, line_start - 8, line_start + 20, level_10);
   const int cross_90 =
-      FindFirstCrossingIndex(y_mv, line_start, line_start + 20, level_90);
+      FindFirstCrossingIndex(y_mv, line_start - 8, line_start + 20, level_90);
   ASSERT_GE(cross_10, 0);
   ASSERT_GE(cross_90, 0);
 
@@ -326,28 +318,32 @@ TEST(ComplianceHarnessTest, PalPulseAndEdgeTimingRemainWithinTolerance) {
   const int vsync_width =
       MeasureLeadingPulseWidth(y_mv, 1, pal, pulse_threshold);
 
-  EXPECT_NEAR(
-      hsync_width,
-      ExpectedThresholdPulseWidth(SyncPulseKind::kHorizontal, Standard::kPal,
-                                  pal, pulse_threshold, levels),
-      1);
-  EXPECT_NEAR(
-      eq_width,
-      ExpectedThresholdPulseWidth(SyncPulseKind::kEqualizing, Standard::kPal,
-                                  pal, pulse_threshold, levels),
-      1);
-  EXPECT_NEAR(
-      vsync_width,
-      ExpectedThresholdPulseWidth(SyncPulseKind::kVerticalSync, Standard::kPal,
-                                  pal, pulse_threshold, levels),
-      1);
+  EXPECT_NEAR(hsync_width,
+              ExpectedThresholdPulseWidth(SyncPulseKind::kHorizontal,
+                                          Standard::kPal, pal),
+              1);
+  EXPECT_NEAR(eq_width,
+              ExpectedThresholdPulseWidth(SyncPulseKind::kEqualizing,
+                                          Standard::kPal, pal),
+              1);
+  EXPECT_NEAR(vsync_width,
+              ExpectedThresholdPulseWidth(SyncPulseKind::kVerticalSync,
+                                          Standard::kPal, pal),
+              1);
 
   const int line_start = (23 - 1) * pal.samples_per_line_4fsc;
   const int burst_start =
       line_start + BurstStartSamples(pal.sample_rate_4fsc_hz);
   const int burst_end = line_start + BurstEndSamples(pal.sample_rate_4fsc_hz);
-  EXPECT_EQ(c_mv[static_cast<std::size_t>(burst_start)], 0);
-  EXPECT_EQ(c_mv[static_cast<std::size_t>(burst_end - 1)], 0);
+  // The gate envelope opens from and closes to zero. On PAL the line is then
+  // delayed onto the 4fsc lattice, so the end samples pick up a trace of
+  // their neighbours.
+  EXPECT_NEAR(
+      SampleFixedToMillivolts(c_mv[static_cast<std::size_t>(burst_start)]), 0.0,
+      kGateEdgeToleranceMv);
+  EXPECT_NEAR(
+      SampleFixedToMillivolts(c_mv[static_cast<std::size_t>(burst_end - 1)]),
+      0.0, kGateEdgeToleranceMv);
   double burst_peak_mv = 0.0;
   for (int bi = burst_start + 1; bi < burst_end - 1; ++bi) {
     burst_peak_mv = std::max(
@@ -361,9 +357,9 @@ TEST(ComplianceHarnessTest, PalPulseAndEdgeTimingRemainWithinTolerance) {
   const double level_90 =
       levels.blanking_mv + (levels.sync_tip_mv - levels.blanking_mv) * 0.9;
   const int cross_10 =
-      FindFirstCrossingIndex(y_mv, line_start, line_start + 20, level_10);
+      FindFirstCrossingIndex(y_mv, line_start - 8, line_start + 20, level_10);
   const int cross_90 =
-      FindFirstCrossingIndex(y_mv, line_start, line_start + 20, level_90);
+      FindFirstCrossingIndex(y_mv, line_start - 8, line_start + 20, level_90);
   ASSERT_GE(cross_10, 0);
   ASSERT_GE(cross_90, 0);
 

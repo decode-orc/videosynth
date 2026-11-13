@@ -65,5 +65,30 @@ TEST(SignalShapingTest, ProducesCurvedLeadingEdgeWithGentleEndpointSlope) {
   EXPECT_NEAR(depths[2], 1.0 - depths[5], 1e-9);
 }
 
+// A pulse evaluated at fractional times crosses half amplitude exactly at its
+// fall and rise times, is flat between its edges and is at baseline outside
+// them, so its half-amplitude width is rise - fall.
+TEST(SignalShapingTest, FractionalPulseCrossesHalfAmplitudeAtItsEdgeTimes) {
+  constexpr double kBaseline = 0.0;
+  constexpr double kSyncTip = -300.0;
+  constexpr int kRampSamples = 7;
+  constexpr double kFall = -0.5;
+  constexpr double kRise = 82.85;
+  auto level = [&](double t) {
+    return ShapedPulseLevelAt(t, kFall, kRise, kRampSamples, kBaseline,
+                              kSyncTip);
+  };
+  EXPECT_DOUBLE_EQ(level(kFall), 0.5 * kSyncTip);
+  EXPECT_DOUBLE_EQ(level(kRise), 0.5 * kSyncTip);
+  EXPECT_DOUBLE_EQ(level(kFall - 3.0), kBaseline);
+  EXPECT_DOUBLE_EQ(level(kFall + 3.0), kSyncTip);
+  EXPECT_DOUBLE_EQ(level(40.0), kSyncTip);
+  EXPECT_DOUBLE_EQ(level(kRise + 3.0), kBaseline);
+  // Samples either side of a mid-sample 0H are symmetric about half
+  // amplitude.
+  EXPECT_NEAR(level(-1.0) - (0.5 * kSyncTip), (0.5 * kSyncTip) - level(0.0),
+              1e-9);
+}
+
 }  // namespace
 }  // namespace videosynth

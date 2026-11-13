@@ -26,15 +26,36 @@ namespace videosynth {
 // Implementation".
 constexpr std::size_t kSubcarrierLatticeSamples = 4U;
 
-// ITU-R BT.1700 Annex 1 Part B Figure 8 with Table 1 item 10f: the 8-field
-// PAL sequence pairs each burst-blanking meander position with a specific
-// subcarrier-to-frame phase. Rotating the subcarrier lattice by 270° anchors
-// disc frame 0 (meander parity 0, fields I/II) to the subcarrier phase that
-// decoders identify as colour fields 1/2. Validated against the
-// ld-decode/decode-orc field-phase detection: without this anchor the two
-// fields of a frame decode as non-consecutive field IDs. The anchor applies
-// to 625-line PAL only; PAL-M keeps a zero anchor.
-constexpr double kPalSubcarrierAnchorRad = 3.0 * 3.14159265358979323846 / 2.0;
+// Phase added to the subcarrier lattice so that disc frame 0 is the first
+// frame of the colour sequence at 0 degrees Sc/H, with 0H half a sample before
+// the frame's first sample (CVBS File Format Specification, Stored Frame and
+// Line Origin). The lattice phase of absolute sample n is (pi/2) n; the
+// quadrature encoder carries U on sin(lattice + offset) and V on cos.
+//
+// - PAL: EBU Tech. 3280-E §1.1.1 and Fig. 1 put the +U axis at zero phase at
+//   0H of line 1, field 1. 0H is at sample -0.5, where the lattice is at
+//   -pi/4, so the anchor is pi/4. The samples then fall at 45, 135, 225 and
+//   315 degrees of the U axis, as §1.2 requires. Disc frame 0 has burst
+//   meander parity 0 (fields 1 and 2, ITU-R BT.1700 Part B Figure 8).
+// - PAL-M: the PAL convention on the 525-line structure (BT.470-6 Table 2),
+//   with the same anchor.
+// - NTSC: SMPTE 170M-2004 §13.2. 0H coincides with a zero crossing of the
+//   burst-locked sine wave, and on line 10 of field I (colour frame A) that
+//   crossing is positive-going. The burst is sin(lattice + anchor + pi/4)
+//   (BurstPhaseRad). 0H of line 10 is lattice sample 8189.5, at phase
+//   3pi/4 mod 2pi, so the anchor is pi.
+constexpr double SubcarrierAnchorRad(Standard standard) {
+  constexpr double kPi = 3.14159265358979323846;
+  switch (standard) {
+    case Standard::kPal:
+    case Standard::kPalM:
+      return kPi / 4.0;
+    case Standard::kNtsc:
+      return kPi;
+    default:
+      return 0.0;
+  }
+}
 
 // Number of frames after which a clean synthesised frame repeats exactly for
 // identical source content. The subcarrier lattice position advances by
@@ -98,16 +119,16 @@ inline bool PalInvertVAxisForLine(std::size_t frame_index,
 
 // The offset generation adds to the subcarrier lattice phase when it
 // modulates a line's picture chroma: U (NTSC b-y) rides sin(lattice +
-// offset) and V (r-y) cos(lattice + offset). SMPTE 170M-2004 Section 10
-// places NTSC picture chroma at burst + 180°; PAL carries its subcarrier
-// anchor; PAL-M has none.
+// offset) and V (r-y) cos(lattice + offset). Every standard carries its
+// subcarrier anchor. SMPTE 170M-2004 Section 10 also places NTSC picture
+// chroma at burst + 180°.
 inline double PictureChromaPhaseOffsetRad(Standard standard,
                                           const LineTimingPrimitive& line) {
   constexpr double kPi = 3.14159265358979323846;
   if (standard == Standard::kNtsc) {
-    return line.burst_phase_rad + kPi;
+    return line.burst_phase_rad + kPi + SubcarrierAnchorRad(standard);
   }
-  return standard == Standard::kPal ? kPalSubcarrierAnchorRad : 0.0;
+  return SubcarrierAnchorRad(standard);
 }
 
 }  // namespace videosynth

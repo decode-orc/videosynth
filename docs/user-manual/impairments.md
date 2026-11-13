@@ -316,7 +316,7 @@ Players and transfers differ in how much luma detail they pass. A section's `lum
 ```
 
 - The low-pass is −6 dB at `cutoff_mhz`. Over the `transition_mhz` band centred on the cutoff it falls from the passband to a stopband at least 60 dB down. It is flat (within 0.003 dB) below the band.
-- Only the active picture luma is filtered. Sync, blanking, the VBI, the VITS lines and the chroma are bit-identical to an unfiltered section, and OSD text is drawn afterwards and stays sharp.
+- Only the active picture luma is filtered. Sync, blanking, the VBI, the VITS lines and the chroma are bit-identical to an unfiltered section, and OSD text is drawn afterwards and is limited only by the standard's [video band limit](video-signal.md#horizontal-mapping).
 - Noise, dropouts and the channel impairments are added after the filter and keep their full bandwidth.
 
 The [band-limited sets](../misc/example-projects.md#band-limited-luma) play a multi-burst at three bandwidths on PAL, NTSC and PAL-M. See [sections](../reference/sections.md#luma_bandwidth) for the full reference.

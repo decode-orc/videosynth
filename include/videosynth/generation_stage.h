@@ -163,6 +163,11 @@ class GenerationStage final : public IGenerationStage {
       std::size_t sequence_phase, SampleFixed* y_out, SampleFixed* c_out,
       PictureTruthFrame* truth);
 
+  // Moves a finished frame (each plane frame_samples long) from its
+  // 0H-relative render onto the 4fsc sampling lattice (LatticeLineShifter).
+  static void ShiftOntoLattice(SynthesisResources& resources,
+                               SampleFixed* y_frame, SampleFixed* c_frame);
+
   // Shared body of GenerateFrameBatch and GenerateFrameBatchWithTruth;
   // out_truth may be null.
   bool GenerateFrames(const Project& project,

@@ -19,6 +19,7 @@
 #include "videosynth/fixed_point.h"
 #include "videosynth/frame_line_layout.h"
 #include "videosynth/generation_stage.h"
+#include "videosynth/picture_truth.h"
 #include "videosynth/signal_timing_model.h"
 #include "videosynth/timing_constants.h"
 
@@ -63,6 +64,36 @@ std::vector<SampleFixed> ActiveLuma(const std::vector<SampleFixed>& y,
   return {y.begin() + start, y.begin() + end};
 }
 
+// The 0H-relative picture truth of the project's first frame: the picture
+// each line carries before it is delayed onto the 4fsc lattice.
+PictureTruthFrame GenerateTruth(const Project& project) {
+  GenerationStage stage;
+  std::vector<IGenerationStage::FrameScheduleItem> schedule;
+  std::vector<std::string> errors;
+  std::vector<SampleFixed> y;
+  std::vector<SampleFixed> c;
+  std::vector<PictureTruthFrame> truth;
+  if (!stage.BuildFrameSchedule(project, &schedule, &errors) ||
+      !stage.GenerateFrameBatchWithTruth(project, schedule, 0, 1, &y, &c,
+                                         &truth, &errors) ||
+      truth.empty()) {
+    ADD_FAILURE() << (errors.empty() ? "truth generation failed" : errors[0]);
+    return {};
+  }
+  return truth[0];
+}
+
+// The luma truth row of frame line `line_1based`.
+std::vector<float> TruthLuma(const PictureTruthFrame& truth,
+                             const PictureTruthLayout& layout,
+                             int line_1based) {
+  const auto first =
+      truth.y_mv.begin() +
+      (static_cast<std::ptrdiff_t>(layout.RowForLine(line_1based)) *
+       layout.samples_per_line);
+  return {first, first + layout.samples_per_line};
+}
+
 TEST(Field2OffsetFunctionalTest, WholeFieldLineOffsetMovesOnlyField2) {
   Project clean_project = MakeTestCardProject();
   std::vector<SampleFixed> clean_y;
@@ -84,8 +115,18 @@ TEST(Field2OffsetFunctionalTest, WholeFieldLineOffsetMovesOnlyField2) {
   for (int line = 40; line < 300; ++line) {
     ASSERT_EQ(ActiveLuma(y, line), ActiveLuma(clean_y, line)) << line;
   }
+  // Neighbouring storage lines are delayed onto the 4fsc lattice by
+  // different amounts, so field 2 is compared through its 0H-relative truth.
+  const PictureTruthLayout layout =
+      BuildPictureTruthLayout(project.cvbs_presets);
+  const PictureTruthFrame truth = GenerateTruth(project);
+  const PictureTruthFrame clean_truth = GenerateTruth(clean_project);
+  ASSERT_FALSE(truth.y_mv.empty());
+  ASSERT_FALSE(clean_truth.y_mv.empty());
   for (int line = 350; line < 610; ++line) {
-    ASSERT_EQ(ActiveLuma(y, line), ActiveLuma(clean_y, line - 1)) << line;
+    ASSERT_EQ(TruthLuma(truth, layout, line),
+              TruthLuma(clean_truth, layout, line - 1))
+        << line;
   }
   EXPECT_NE(y, clean_y);
 }

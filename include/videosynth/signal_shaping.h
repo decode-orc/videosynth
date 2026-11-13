@@ -28,6 +28,16 @@ double ShapedPulseLevel(int relative_index, int pulse_width_samples,
                         int ramp_samples, double baseline_level,
                         double pulse_level);
 
+// Level at time `t` (in samples) of a pulse from baseline_level to
+// pulse_level whose falling and rising edges cross half amplitude at
+// `fall_half_time` and `rise_half_time`. Each edge is the S-curve
+// ShapedPulseLevel uses, spanning ramp_samples - 1 sample periods centred on
+// its half-amplitude time, so the half-amplitude points and the pulse width
+// between them may fall between samples.
+double ShapedPulseLevelAt(double t, double fall_half_time,
+                          double rise_half_time, int ramp_samples,
+                          double baseline_level, double pulse_level);
+
 double ShapedGateEnvelope(int relative_index, int gate_width_samples,
                           int ramp_samples);
 

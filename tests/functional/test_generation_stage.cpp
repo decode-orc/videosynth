@@ -19,8 +19,11 @@
 #include <utility>
 #include <vector>
 
+#include "lattice_delay_reference.h"
+#include "video_band_limit_reference.h"
 #include "videosynth/active_sample_mapping.h"
 #include "videosynth/chroma_encoder.h"
+#include "videosynth/colour_sequence.h"
 #include "videosynth/fixed_point.h"
 #include "videosynth/frame_line_layout.h"
 #include "videosynth/generation_stage.h"
@@ -42,11 +45,9 @@ int BurstEndSamples(double sample_rate_hz) {
   return static_cast<int>(std::lround(sample_rate_hz * 8.0e-6));
 }
 
-// Matches kPalSubcarrierAnchorRad in generation_stage.cpp: the 625-line PAL
-// subcarrier lattice is rotated 270° so the burst-blanking meander pairs with
-// the subcarrier phase of colour fields 1/2 (ITU-R BT.1700 Annex 1 Part B
-// Figure 8 with Table 1 item 10f).
-constexpr double kPalSubcarrierAnchorRad = 3.0 * 3.14159265358979323846 / 2.0;
+// The 625-line PAL subcarrier anchor: +U at 0 degrees at 0H of line 1 in disc
+// frame 0 (EBU Tech. 3280-E Section 1.1.1, see colour_sequence.h).
+constexpr double kPalSubcarrierAnchorRad = SubcarrierAnchorRad(Standard::kPal);
 
 std::string DefaultBarsExrPath(Standard standard) {
   return (std::filesystem::path(VIDEOSYNTH_SOURCE_DIR) /
@@ -950,17 +951,25 @@ TEST(GenerationStageTimingTest, ShapesSyncEdgesInsteadOfHardSteps) {
   const int line_start = (line_1based - 1) * ntsc.samples_per_line_4fsc;
 
   ASSERT_LT(line_start + 3, static_cast<int>(y.size()));
-  EXPECT_DOUBLE_EQ(y[line_start - 1], levels.blanking_mv);
+  auto mv = [&](int index) {
+    return SampleFixedToMillivolts(y[static_cast<std::size_t>(index)]);
+  };
+  EXPECT_DOUBLE_EQ(mv(line_start - 2), levels.blanking_mv);
 
   // SMPTE 170M-2004 specifies finite sync rise/fall times, so the pulse edge
-  // should move through intermediate levels rather than a single hard step.
-  const double first_pulse_sample = SampleFixedToMillivolts(y[line_start]);
-  const double second_pulse_sample = SampleFixedToMillivolts(y[line_start + 1]);
-  const double third_pulse_sample = SampleFixedToMillivolts(y[line_start + 2]);
-  EXPECT_DOUBLE_EQ(first_pulse_sample, levels.blanking_mv);
-  EXPECT_LT(second_pulse_sample, levels.blanking_mv);
-  EXPECT_GT(second_pulse_sample, levels.sync_tip_mv);
-  EXPECT_LT(third_pulse_sample, second_pulse_sample);
+  // moves through intermediate levels rather than a single hard step. 0H
+  // falls midway between the storage line's first sample and the one before
+  // it, so those two samples sit symmetrically either side of half
+  // amplitude.
+  const double before_0h = mv(line_start - 1);
+  const double after_0h = mv(line_start);
+  const double half_amplitude = 0.5 * (levels.blanking_mv + levels.sync_tip_mv);
+  EXPECT_LT(before_0h, levels.blanking_mv);
+  EXPECT_GT(before_0h, half_amplitude);
+  EXPECT_LT(after_0h, half_amplitude);
+  EXPECT_GT(after_0h, levels.sync_tip_mv);
+  EXPECT_NEAR(before_0h - half_amplitude, half_amplitude - after_0h, 1e-3);
+  EXPECT_NEAR(mv(line_start + 1), levels.sync_tip_mv, 1e-3);
 }
 
 TEST(GenerationStageTimingTest, AppliesBurstEnvelopeRampAtBurstWindowEdges) {
@@ -1077,9 +1086,12 @@ TEST(GenerationStageChromaTest,
   // SMPTE 170M-2004 Table 1: burst amplitude = 40 IRE p-p = 20 IRE peak.
   // 1 IRE = 1000/140 mV → peak burst = 20 × 1000/140 ≈ 142.857 mV.
   constexpr double kNtscBurstPeakMv = 20.0 * 1000.0 / 140.0;
+  // The burst rides the anchored lattice (SMPTE 170M-2004 Section 13.2 Sc/H,
+  // see SubcarrierAnchorRad).
   const double expected_burst =
       kNtscBurstPeakMv *
-      std::sin((2.0 * M_PI * subcarrier_hz * burst_t) + line.burst_phase_rad);
+      std::sin((2.0 * M_PI * subcarrier_hz * burst_t) + line.burst_phase_rad +
+               SubcarrierAnchorRad(Standard::kNtsc));
   EXPECT_NEAR(SampleFixedToMillivolts(c[burst_mid]), expected_burst, 1e-6);
 
   const int active_start =
@@ -1113,7 +1125,7 @@ TEST(GenerationStageChromaTest,
       (line_1based - 1) * ntsc.samples_per_line_4fsc;
   const double phase_start =
       (M_PI / 2.0) * static_cast<double>(line_start_absolute + active_start) +
-      line.burst_phase_rad + M_PI;
+      line.burst_phase_rad + M_PI + SubcarrierAnchorRad(Standard::kNtsc);
   chroma_encoder->EncodeLineFromPhaseStart(source_line, phase_start,
                                            &expected_active_line);
 
@@ -1284,21 +1296,36 @@ void ExpectUpperFieldSamplesEvenSourceRows(Standard standard,
       geometry.first_active_line_field2 + selected_field_line - 1)];
   const int sample_offset = active_start + selected_x_sample;
 
-  const double even_row_mv = LumaMillivoltsFromCodeForTest(
-      source_frame
-          ->PixelAt(pixel_x, source_frame->active_y + (2 * selected_field_line))
-          .y,
-      levels);
-  const double odd_row_mv = LumaMillivoltsFromCodeForTest(
-      source_frame
-          ->PixelAt(pixel_x,
-                    source_frame->active_y + (2 * selected_field_line + 1))
-          .y,
-      levels);
-  const double expected_field1 =
-      (upper_field_index_1based == 1) ? even_row_mv : odd_row_mv;
-  const double expected_field2 =
-      (upper_field_index_1based == 1) ? odd_row_mv : even_row_mv;
+  // The stored sample of a line painted from source row `row`: the line's
+  // active-window render, blanking outside it, band-limited to the
+  // standard's video bandwidth and delayed onto the 4fsc lattice.
+  auto stored_mv = [&](int line_1based, int row) {
+    auto render = [&](int j) {
+      const int x = j - active_start;
+      if (x < 0 || x >= active_window_samples) {
+        return levels.blanking_mv;
+      }
+      const int column = MapActiveSampleToSourcePixel(
+          x, active_window_samples, source_frame->active_width,
+          source_frame->active_x);
+      return LumaMillivoltsFromCodeForTest(
+          source_frame->PixelAt(column, source_frame->active_y + row).y,
+          levels);
+    };
+    return test_support::LatticeDelayedLine(
+        standard, line_1based, sample_offset, 1,
+        test_support::BandLimitedRender(standard, render))[0];
+  };
+  const int field1_line =
+      geometry.first_active_line_field1 + selected_field_line;
+  const int field2_line =
+      geometry.first_active_line_field2 + selected_field_line;
+  const int even_row = 2 * selected_field_line;
+  const int odd_row = even_row + 1;
+  const double expected_field1 = stored_mv(
+      field1_line, (upper_field_index_1based == 1) ? even_row : odd_row);
+  const double expected_field2 = stored_mv(
+      field2_line, (upper_field_index_1based == 1) ? odd_row : even_row);
 
   EXPECT_NEAR(
       SampleFixedToMillivolts(
@@ -1538,6 +1565,10 @@ TEST(GenerationStageTest, PalLaserdiscPilotBurstAppliedToEqualizingPulses) {
       << "Pilot burst must also be applied to equalizing pulses";
 }
 
+// How far a PAL sync tip may stray from the nominal level once its line has
+// been delayed onto the 4fsc lattice.
+constexpr double kSyncTipFlatnessMv = 0.5;
+
 // Broad (vertical) sync pulses (lines 1–3, 314–315) must carry the burst for
 // exactly q = 13.5 periods, then remain at constant sync tip (IEC 60856 fig
 // 6iii).
@@ -1581,17 +1612,17 @@ TEST(GenerationStageTest, PalLaserdiscPilotBurstAppliedToBroadSyncPulses) {
   EXPECT_TRUE(oscillates)
       << "First 13.5 periods of broad sync pulse must carry the pilot burst";
 
-  // After the burst the pulse must stay at constant sync tip.
-  const SampleFixed sync_tip_fixed =
-      MillivoltsToSampleFixed(levels.sync_tip_mv);
-  bool all_at_sync_tip = true;
+  // After the burst the pulse must stay at constant sync tip. Line 2 is
+  // delayed onto the 4fsc lattice by 0.0064 sample, so the burst's last
+  // half-cycle leaks a fraction of a millivolt into the samples just after it.
+  double worst_mv = 0.0;
   for (int i = burst_end; i < flat_end; ++i) {
-    if (y_mv[static_cast<std::size_t>(i)] != sync_tip_fixed) {
-      all_at_sync_tip = false;
-      break;
-    }
+    worst_mv = std::max(
+        worst_mv,
+        std::abs(SampleFixedToMillivolts(y_mv[static_cast<std::size_t>(i)]) -
+                 levels.sync_tip_mv));
   }
-  EXPECT_TRUE(all_at_sync_tip)
+  EXPECT_LT(worst_mv, kSyncTipFlatnessMv)
       << "Broad sync pulse after the 13.5-period burst must remain at sync tip";
 }
 
@@ -1647,16 +1678,17 @@ TEST(GenerationStageTest, PalSyncSamplesAreConstantWithoutPilotBurst) {
   const int flat_end = line_offset + pulse_samples - ramp_samples;
   ASSERT_LT(flat_start, flat_end);
 
-  const SampleFixed sync_tip_fixed =
-      MillivoltsToSampleFixed(levels.sync_tip_mv);
-  bool all_at_sync_tip = true;
+  // Line 10 is delayed onto the 4fsc lattice by 0.0576 sample; the
+  // band-limited delay of the shaped edges leaves the tip flat to within a
+  // fraction of a millivolt.
+  double worst_mv = 0.0;
   for (int i = flat_start; i < flat_end; ++i) {
-    if (y_mv[static_cast<std::size_t>(i)] != sync_tip_fixed) {
-      all_at_sync_tip = false;
-      break;
-    }
+    worst_mv = std::max(
+        worst_mv,
+        std::abs(SampleFixedToMillivolts(y_mv[static_cast<std::size_t>(i)]) -
+                 levels.sync_tip_mv));
   }
-  EXPECT_TRUE(all_at_sync_tip)
+  EXPECT_LT(worst_mv, kSyncTipFlatnessMv)
       << "Without pilot burst, flat sync region must be constant at sync tip";
 }
 

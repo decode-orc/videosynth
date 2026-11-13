@@ -37,6 +37,7 @@
 #include "videosynth/frame_enrichment.h"
 #include "videosynth/frame_line_layout.h"
 #include "videosynth/horizontal_resampler.h"
+#include "videosynth/lattice_line_shifter.h"
 #include "videosynth/luma_bandwidth_filter.h"
 #include "videosynth/osd_renderer.h"
 #include "videosynth/osd_token_resolver.h"
@@ -49,6 +50,7 @@
 #include "videosynth/source_frame_range.h"
 #include "videosynth/source_pixel_grid.h"
 #include "videosynth/timing_constants.h"
+#include "videosynth/video_band_limit.h"
 
 namespace videosynth {
 
@@ -57,8 +59,9 @@ namespace videosynth {
 // SynthesisResources — a member of an externally-linked class — can hold them.
 namespace generation_detail {
 
+// A sync pulse that starts at the line's 0H, or at its half-line point.
 struct LinePulseSegment {
-  int offset_samples = 0;
+  bool mid_line = false;
   SyncPulseKind kind = SyncPulseKind::kHorizontal;
 };
 
@@ -74,13 +77,23 @@ struct LinePulsePlan {
   std::array<LinePulseSegment, kMaxLinePulseSegments> segments{};
 };
 
-// One shaped sync pulse, rendered once per (standard, pulse kind, levels).
-// A pulse truncated by the end of its line has a different S-curve to the
-// nominal one, so the sample loop only copies the table when the widths agree.
+// One shaped sync pulse, rendered once per (standard, pulse kind, placement,
+// levels) in the line's 0H-relative render. Its falling and rising edges cross
+// half amplitude at fall_half_time and rise_half_time, in samples from the
+// line's first sample; levels[i] is render sample first_sample + i. A
+// line-start pulse holds only the samples from 0 on: the part of its edge
+// before 0H is the shared sync lead-in (SynthesisResources::sync_lead_in),
+// which the lattice line shifter adds into the previous line.
 struct SyncPulseWaveform {
-  int width_samples = 0;
+  double fall_half_time = 0.0;
+  double rise_half_time = 0.0;
+  int first_sample = 0;
   std::vector<SampleFixed> levels;
 };
+
+// Sync pulse tables indexed [placement][kind]; placement 0 is the line start
+// and 1 the half-line point.
+constexpr std::size_t kSyncPulsePlacements = 2;
 
 // One rendered LaserDisc pilot burst, as fixed-point additions to the sync tip.
 //
@@ -100,6 +113,10 @@ struct PilotBurstLine {
 // Count of SyncPulseKind enumerators, used to size the pulse waveform table.
 constexpr int kSyncPulseKindCount = 3;
 
+using SyncPulseTables =
+    std::array<std::array<SyncPulseWaveform, kSyncPulseKindCount>,
+               kSyncPulsePlacements>;
+
 struct SampledSynthesisContext {
   Standard standard = Standard::kUnknown;
   double sample_rate_hz = 0.0;
@@ -109,6 +126,10 @@ struct SampledSynthesisContext {
   int max_line_samples = 0;
   std::vector<LineTimingPrimitive> frame_lines;
   std::vector<LinePulsePlan> line_pulse_plans;
+  // Nominal line period (frame samples / lines), which places the half-line
+  // sync pulses, and each line's lattice delay (LatticeLineDelay).
+  double line_period_samples = 0.0;
+  std::vector<double> line_lattice_delays;
   int burst_start_samples = 0;
   int burst_end_samples = 0;
   int sync_rise_samples = 0;
@@ -223,8 +244,7 @@ constexpr double kPilotBurstAmplitudeMv = 300.0;
 double SyncEdgeRiseTimeSeconds(Standard standard);
 double BurstEnvelopeRiseTimeSeconds(Standard standard);
 std::vector<generation_detail::LinePulsePlan> BuildLinePulsePlans(
-    Standard standard, const std::vector<LineTimingPrimitive>& frame_lines,
-    const std::vector<int>& line_sample_counts);
+    Standard standard, const std::vector<LineTimingPrimitive>& frame_lines);
 
 std::string Lowercase(std::string value) {
   std::transform(
@@ -256,8 +276,15 @@ SampledSynthesisContext BuildSampledSynthesisContext(Standard standard) {
       BuildLineSampleOffsets(context.line_sample_counts);
   context.max_line_samples = MaxLineSamples(context.line_sample_counts);
   context.frame_lines = BuildFrameTimingPrimitives(standard);
-  context.line_pulse_plans = BuildLinePulsePlans(standard, context.frame_lines,
-                                                 context.line_sample_counts);
+  context.line_pulse_plans = BuildLinePulsePlans(standard, context.frame_lines);
+  context.line_period_samples = static_cast<double>(context.frame_samples) /
+                                static_cast<double>(timing.lines_per_frame);
+  context.line_lattice_delays.resize(context.line_sample_counts.size());
+  for (std::size_t index = 0; index < context.line_lattice_delays.size();
+       ++index) {
+    context.line_lattice_delays[index] =
+        LatticeLineDelay(standard, static_cast<int>(index) + 1).Samples();
+  }
   context.burst_start_samples =
       BurstStartSamples(standard, context.sample_rate_hz);
   context.burst_end_samples = BurstEndSamples(standard, context.sample_rate_hz);
@@ -510,47 +537,38 @@ double PulseWidthSeconds(SyncPulseKind kind, Standard standard) {
   return 27.3e-6;
 }
 
-int PulseWidthSamples(SyncPulseKind kind, Standard standard,
-                      double sample_rate_hz) {
-  const double pulse_seconds = PulseWidthSeconds(kind, standard);
-  return std::max(
-      1, static_cast<int>(std::lround(sample_rate_hz * pulse_seconds)));
-}
-
 LinePulsePlan OnePulse(SyncPulseKind kind) {
   return LinePulsePlan{
       .segment_count = 1,
-      .segments = {LinePulseSegment{.offset_samples = 0, .kind = kind},
+      .segments = {LinePulseSegment{.mid_line = false, .kind = kind},
                    LinePulseSegment{}},
   };
 }
 
-LinePulsePlan TwoPulses(SyncPulseKind first_kind, SyncPulseKind second_kind,
-                        int half_line_samples) {
+LinePulsePlan TwoPulses(SyncPulseKind first_kind, SyncPulseKind second_kind) {
   return LinePulsePlan{
       .segment_count = 2,
-      .segments = {LinePulseSegment{.offset_samples = 0, .kind = first_kind},
-                   LinePulseSegment{.offset_samples = half_line_samples,
-                                    .kind = second_kind}},
+      .segments = {LinePulseSegment{.mid_line = false, .kind = first_kind},
+                   LinePulseSegment{.mid_line = true, .kind = second_kind}},
   };
 }
 
 LinePulsePlan BuildLinePulseSchedule(const LineTimingPrimitive& line,
-                                     Standard standard, int half_line_samples) {
+                                     Standard standard) {
   if (Is625LineStandard(standard)) {
     const int line_1based = line.line_number_1based;
     if (line_1based == 1 || line_1based == 2 || line_1based == 314 ||
         line_1based == 315) {
       return TwoPulses(SyncPulseKind::kVerticalSync,
-                       SyncPulseKind::kVerticalSync, half_line_samples);
+                       SyncPulseKind::kVerticalSync);
     }
     if (line_1based == 3) {
-      return TwoPulses(SyncPulseKind::kVerticalSync, SyncPulseKind::kEqualizing,
-                       half_line_samples);
+      return TwoPulses(SyncPulseKind::kVerticalSync,
+                       SyncPulseKind::kEqualizing);
     }
     if (line_1based == 313) {
-      return TwoPulses(SyncPulseKind::kEqualizing, SyncPulseKind::kVerticalSync,
-                       half_line_samples);
+      return TwoPulses(SyncPulseKind::kEqualizing,
+                       SyncPulseKind::kVerticalSync);
     }
     if (line_1based == 6 || line_1based == 318) {
       return OnePulse(SyncPulseKind::kEqualizing);
@@ -558,14 +576,12 @@ LinePulsePlan BuildLinePulseSchedule(const LineTimingPrimitive& line,
     if (line_1based == 4 || line_1based == 5 || line_1based == 311 ||
         line_1based == 312 || line_1based == 316 || line_1based == 317 ||
         line_1based == 624 || line_1based == 625) {
-      return TwoPulses(SyncPulseKind::kEqualizing, SyncPulseKind::kEqualizing,
-                       half_line_samples);
+      return TwoPulses(SyncPulseKind::kEqualizing, SyncPulseKind::kEqualizing);
     }
     if (line_1based == 623) {
       // ITU-R BT.1700 Annex 1 Part B Figure 3: field 1's pre-equalizing
       // sequence starts at mid-line 623, after the line's half of picture.
-      return TwoPulses(SyncPulseKind::kHorizontal, SyncPulseKind::kEqualizing,
-                       half_line_samples);
+      return TwoPulses(SyncPulseKind::kHorizontal, SyncPulseKind::kEqualizing);
     }
   }
 
@@ -573,8 +589,7 @@ LinePulsePlan BuildLinePulseSchedule(const LineTimingPrimitive& line,
       line.line_number_1based == 263) {
     // SMPTE 170M-2004 / ITU-R BT.470-6 System M: line 263 is the field-2
     // transition half-line in System M (NTSC and PAL-M share this structure).
-    return TwoPulses(SyncPulseKind::kHorizontal, SyncPulseKind::kEqualizing,
-                     half_line_samples);
+    return TwoPulses(SyncPulseKind::kHorizontal, SyncPulseKind::kEqualizing);
   }
 
   if (!line.has_two_half_line_pulses) {
@@ -587,55 +602,36 @@ LinePulsePlan BuildLinePulseSchedule(const LineTimingPrimitive& line,
     // occur around frame lines 263/266/269/272. PAL-M uses the same System M
     // sync structure as M/NTSC.
     if (line.line_number_1based == 266) {
-      return TwoPulses(SyncPulseKind::kEqualizing, SyncPulseKind::kVerticalSync,
-                       half_line_samples);
+      return TwoPulses(SyncPulseKind::kEqualizing,
+                       SyncPulseKind::kVerticalSync);
     }
     if (line.line_number_1based == 269) {
-      return TwoPulses(SyncPulseKind::kVerticalSync, SyncPulseKind::kEqualizing,
-                       half_line_samples);
+      return TwoPulses(SyncPulseKind::kVerticalSync,
+                       SyncPulseKind::kEqualizing);
     }
     if (line.line_number_1based == 272) {
       return OnePulse(SyncPulseKind::kEqualizing);
     }
   }
 
-  return TwoPulses(line.sync_pulse_kind, line.sync_pulse_kind,
-                   half_line_samples);
+  return TwoPulses(line.sync_pulse_kind, line.sync_pulse_kind);
 }
 
-// Where one scheduled sync pulse starts and ends within its line.
-//
-// Shared by frame synthesis and the pilot burst table builder so the two can
-// never disagree about where a pulse sits.
-struct PulseSegmentBounds {
-  int start_in_line = 0;
-  int end_in_line = 0;
-};
-
-PulseSegmentBounds ResolvePulseSegmentBounds(const LinePulseSegment& segment,
-                                             int nominal_width_samples,
-                                             int line_samples) {
-  const int start = std::min(segment.offset_samples, line_samples - 1);
-  return PulseSegmentBounds{
-      .start_in_line = start,
-      .end_in_line = std::min(start + nominal_width_samples, line_samples),
-  };
+// The table of one scheduled sync pulse.
+const SyncPulseWaveform& PulseWaveformFor(
+    const generation_detail::SyncPulseTables& tables,
+    const LinePulseSegment& segment) {
+  return tables[segment.mid_line ? 1U : 0U]
+               [static_cast<std::size_t>(segment.kind)];
 }
 
 // Resolves the sync pulse schedule of every frame line once per run.
 std::vector<LinePulsePlan> BuildLinePulsePlans(
-    Standard standard, const std::vector<LineTimingPrimitive>& frame_lines,
-    const std::vector<int>& line_sample_counts) {
+    Standard standard, const std::vector<LineTimingPrimitive>& frame_lines) {
   std::vector<LinePulsePlan> plans;
   plans.reserve(frame_lines.size());
   for (const LineTimingPrimitive& line : frame_lines) {
-    const auto line_index =
-        static_cast<std::size_t>(line.line_number_1based - 1);
-    const int line_samples = (line_index < line_sample_counts.size())
-                                 ? line_sample_counts[line_index]
-                                 : 0;
-    plans.push_back(
-        BuildLinePulseSchedule(line, standard, (line_samples + 1) / 2));
+    plans.push_back(BuildLinePulseSchedule(line, standard));
   }
   return plans;
 }
@@ -651,10 +647,14 @@ std::vector<LinePulsePlan> BuildLinePulsePlans(
 // offset rather than from the absolute sample index makes every frame's pilot
 // identical by construction and keeps the phase bounded, where the absolute
 // index both drifted and — held in an int — overflowed past ~3,000 frames.
+//
+// The pilot is tied to absolute time, like the colour subcarrier, so each
+// burst is rendered with its phase advanced by the line's lattice delay: once
+// the lattice line shifter delays the line by that amount, the burst lands on
+// the lattice.
 std::vector<generation_detail::PilotBurstLine> BuildPilotBurstLines(
     const SampledSynthesisContext& synth,
-    const std::array<SyncPulseWaveform, generation_detail::kSyncPulseKindCount>&
-        pulse_waveforms,
+    const generation_detail::SyncPulseTables& pulse_waveforms,
     double pilot_omega, int pilot_q_samples, int pilot_r_samples) {
   std::vector<generation_detail::PilotBurstLine> pilot_lines(
       synth.line_sample_counts.size());
@@ -676,17 +676,20 @@ std::vector<generation_detail::PilotBurstLine> BuildPilotBurstLines(
       const LinePulseSegment& segment =
           plan.segments[static_cast<std::size_t>(segment_index)];
       const SyncPulseWaveform& waveform =
-          pulse_waveforms[static_cast<std::size_t>(segment.kind)];
-      const PulseSegmentBounds bounds = ResolvePulseSegmentBounds(
-          segment, waveform.width_samples, line_samples);
+          PulseWaveformFor(pulse_waveforms, segment);
 
       const int max_burst_samples = (segment.kind == SyncPulseKind::kEqualizing)
                                         ? pilot_r_samples
                                         : pilot_q_samples;
-      const int flat_start = bounds.start_in_line + synth.sync_rise_samples;
-      const int flat_end =
-          std::min(bounds.end_in_line - synth.sync_rise_samples,
-                   flat_start + max_burst_samples);
+      // The burst rides the pulse's flat sync tip: from one sample past the
+      // end of the falling edge to the start of the rising edge.
+      const double half_edge =
+          0.5 * static_cast<double>(synth.sync_rise_samples - 1);
+      const auto flat_start = static_cast<int>(
+          std::ceil(waveform.fall_half_time + half_edge + 1.0));
+      const int flat_end = std::min(
+          {static_cast<int>(std::floor(waveform.rise_half_time - half_edge)),
+           line_samples, flat_start + max_burst_samples});
       if (flat_start >= flat_end) {
         continue;
       }
@@ -700,7 +703,8 @@ std::vector<generation_detail::PilotBurstLine> BuildPilotBurstLines(
           static_cast<std::size_t>(flat_end - flat_start));
 
       double phase = WrapPhaseRad(
-          pilot_omega * static_cast<double>(line_offset + flat_start));
+          pilot_omega * (static_cast<double>(line_offset + flat_start) +
+                         synth.line_lattice_delays[line_index]));
       for (int i = flat_start; i < flat_end; ++i) {
         const double phase_frac = phase / kTwoPi;
         const double triangle = (phase_frac < 0.5) ? (4.0 * phase_frac - 1.0)
@@ -938,12 +942,12 @@ struct GenerationStage::SynthesisResources {
   // source with a different active raster.
   generation_detail::ActiveSampleColumnMap column_map;
 
-  // Shaped sync pulses, indexed by SyncPulseKind, and the burst gate envelope
-  // pre-scaled by the burst amplitude. Both are pure functions of the standard
-  // and the signal levels.
-  std::array<generation_detail::SyncPulseWaveform,
-             generation_detail::kSyncPulseKindCount>
-      pulse_waveforms;
+  // Shaped sync pulses, indexed [placement][SyncPulseKind], the part of every
+  // line-start sync edge that falls before the line's first sample, and the
+  // burst gate envelope pre-scaled by the burst amplitude. All are pure
+  // functions of the standard and the signal levels.
+  generation_detail::SyncPulseTables pulse_waveforms;
+  std::vector<SampleFixed> sync_lead_in;
   int burst_width_samples = 0;
   std::vector<double> burst_envelope_mv;
 
@@ -955,6 +959,13 @@ struct GenerationStage::SynthesisResources {
   int pilot_r_samples = 0;
   // Pre-rendered pilot bursts per frame line; empty unless the pilot is on.
   std::vector<generation_detail::PilotBurstLine> pilot_burst_lines;
+
+  // Moves each finished frame from the 0H-relative render onto the 4fsc
+  // lattice, and this worker's workspace for it.
+  std::unique_ptr<LatticeLineShifter> lattice_shifter;
+  LatticeLineShifter::Workspace lattice_workspace;
+  // A patched frame's render, held while its lattice planes are updated.
+  std::vector<SampleFixed> patched_render;
 
   // Exactly one chroma encoder is set: the quadrature encoder for PAL, NTSC
   // and PAL-M, or the SECAM encoder for SECAM.
@@ -985,6 +996,12 @@ struct GenerationStage::SynthesisResources {
   std::unique_ptr<LumaBandwidthFilter> luma_filter;
   std::vector<SampleFixed> line_luma;
   std::vector<SampleFixed> filtered_line_luma;
+
+  // The standard's video band limit, applied to every painted line and to
+  // OSD text, and its line workspaces.
+  std::unique_ptr<VideoBandLimiter> band_limiter;
+  VideoBandLimiter::Workspace band_limit_workspace;
+  std::vector<SampleFixed> band_limited_line;
 
   // Picture response of the section most recently synthesised by this
   // worker, redesigned only when a section brings in different settings; the
@@ -1091,6 +1108,10 @@ bool GenerationStage::SynthesisResourceCache::Build(
   out->timing = GetTimingConstants(standard);
   out->levels = GetSignalLevels(project.cvbs_presets);
   out->synth = BuildSampledSynthesisContext(standard);
+  out->lattice_shifter = std::make_unique<LatticeLineShifter>(
+      standard, out->synth.line_sample_counts);
+  out->band_limiter =
+      std::make_unique<VideoBandLimiter>(standard, out->synth.sample_rate_hz);
 
   out->active_window_start =
       std::max(0, std::min(out->synth.active.active_window_start_samples,
@@ -1116,23 +1137,57 @@ bool GenerationStage::SynthesisResourceCache::Build(
     out->burst_amplitude_mv = (3.0 / 7.0) * 714.3 / 2.0;
   }
 
-  // Sync pulses are pure functions of (standard, pulse kind, signal levels), so
-  // each shape is rendered once here and copied into place per line instead of
-  // being evaluated sample by sample (~52 k S-curve evaluations per frame).
-  for (int kind_index = 0; kind_index < generation_detail::kSyncPulseKindCount;
-       ++kind_index) {
-    const auto kind = static_cast<SyncPulseKind>(kind_index);
-    const int width =
-        PulseWidthSamples(kind, standard, out->timing.sample_rate_4fsc_hz);
-    generation_detail::SyncPulseWaveform& waveform =
-        out->pulse_waveforms[static_cast<std::size_t>(kind_index)];
-    waveform.width_samples = width;
-    waveform.levels.assign(static_cast<std::size_t>(width), 0);
-    for (int index = 0; index < width; ++index) {
-      waveform.levels[static_cast<std::size_t>(index)] =
-          MillivoltsToSampleFixed(ShapedPulseLevel(
-              index, width, out->synth.sync_rise_samples,
-              out->levels.blanking_mv, out->levels.sync_tip_mv));
+  // Sync pulses are pure functions of (standard, pulse kind, placement,
+  // signal levels), so each shape is rendered once here and copied into place
+  // per line instead of being evaluated sample by sample.
+  //
+  // CVBS File Format Specification, Stored Frame and Line Origin, with EBU
+  // Tech. 3280-E §1.2 and SMPTE 244M-2003 §4.1: 0H (the half-amplitude point
+  // of the falling sync edge) lies midway between two samples, half a sample
+  // before the line's first sample. A half-line pulse falls half a nominal
+  // line period after 0H. Widths are measured between the half-amplitude
+  // points (ITU-R BT.1700 Part B Table 1, SMPTE 170M Table 2).
+  const double half_edge =
+      0.5 * static_cast<double>(out->synth.sync_rise_samples - 1);
+  out->sync_lead_in.clear();
+  for (std::size_t placement = 0;
+       placement < generation_detail::kSyncPulsePlacements; ++placement) {
+    const double fall_half_time =
+        -0.5 + ((placement == 0U) ? 0.0 : 0.5 * out->synth.line_period_samples);
+    for (int kind_index = 0;
+         kind_index < generation_detail::kSyncPulseKindCount; ++kind_index) {
+      const auto kind = static_cast<SyncPulseKind>(kind_index);
+      generation_detail::SyncPulseWaveform& waveform =
+          out->pulse_waveforms[placement][static_cast<std::size_t>(kind_index)];
+      waveform.fall_half_time = fall_half_time;
+      waveform.rise_half_time =
+          fall_half_time +
+          (PulseWidthSeconds(kind, standard) * out->timing.sample_rate_4fsc_hz);
+      // Samples strictly inside the two edges' outer ends differ from
+      // blanking.
+      const int first =
+          static_cast<int>(std::floor(fall_half_time - half_edge)) + 1;
+      const int last =
+          static_cast<int>(std::ceil(waveform.rise_half_time + half_edge)) - 1;
+      std::vector<SampleFixed> lead_in;
+      waveform.first_sample = (placement == 0U) ? 0 : first;
+      waveform.levels.clear();
+      for (int n = first; n <= last; ++n) {
+        const SampleFixed level = MillivoltsToSampleFixed(ShapedPulseLevelAt(
+            static_cast<double>(n), waveform.fall_half_time,
+            waveform.rise_half_time, out->synth.sync_rise_samples,
+            out->levels.blanking_mv, out->levels.sync_tip_mv));
+        if (n < waveform.first_sample) {
+          lead_in.push_back(level);
+        } else {
+          waveform.levels.push_back(level);
+        }
+      }
+      // Every line-start pulse shares the same falling edge, so the lead-in
+      // is the same whatever pulse opens the line.
+      if (placement == 0U) {
+        out->sync_lead_in = lead_in;
+      }
     }
   }
 
@@ -1278,8 +1333,12 @@ bool GenerationStage::SynthesisResourceCache::Build(
 // One cached clean frame: everything except the per-frame VBI and OSD
 // patches. Immutable once published by the template cache.
 struct GenerationStage::FrameTemplate {
+  // The clean frame in its 0H-relative render, which the VBI and OSD patches
+  // are drawn onto, and the same frame delayed onto the 4fsc lattice.
   std::vector<SampleFixed> y_mv;
   std::vector<SampleFixed> c_mv;
+  std::vector<SampleFixed> y_lattice_mv;
+  std::vector<SampleFixed> c_lattice_mv;
   // Filled only when the cache was populated for truth-producing requests.
   PictureTruthFrame truth;
 };
@@ -1925,27 +1984,14 @@ void GenerationStage::SynthesiseTemplate(
       const LinePulseSegment& segment =
           pulse_plan.segments[static_cast<std::size_t>(segment_index)];
       const generation_detail::SyncPulseWaveform& pulse_waveform =
-          resources.pulse_waveforms[static_cast<std::size_t>(segment.kind)];
-      const int pulse_offset = segment.offset_samples;
-      const int pulse_start =
-          line_base + std::min(pulse_offset, line_samples - 1);
+          PulseWaveformFor(resources.pulse_waveforms, segment);
+      // Every pulse ends well inside its line; the clamp only guards that.
+      const int pulse_start = line_base + pulse_waveform.first_sample;
       const int pulse_end =
-          std::min(pulse_start + pulse_waveform.width_samples, line_end);
-      const int pulse_width_samples = pulse_end - pulse_start;
-
-      if (pulse_width_samples == pulse_waveform.width_samples) {
-        std::copy(pulse_waveform.levels.begin(), pulse_waveform.levels.end(),
-                  y_out + pulse_start);
-      } else {
-        // A pulse clipped by the end of its line has a different S-curve to
-        // the nominal shape, so it is still shaped sample by sample.
-        for (int i = pulse_start; i < pulse_end; ++i) {
-          const int relative_index = i - pulse_start;
-          y_out[i] = MillivoltsToSampleFixed(ShapedPulseLevel(
-              relative_index, pulse_width_samples, synth.sync_rise_samples,
-              levels.blanking_mv, levels.sync_tip_mv));
-        }
-      }
+          std::min(pulse_start + static_cast<int>(pulse_waveform.levels.size()),
+                   line_end);
+      std::copy_n(pulse_waveform.levels.begin(),
+                  std::max(0, pulse_end - pulse_start), y_out + pulse_start);
     }
 
     if (pal_pilot_burst) {
@@ -1968,6 +2014,12 @@ void GenerationStage::SynthesiseTemplate(
 
     const bool is_pal = video_standard == Standard::kPal;
     const bool is_pal_m = video_standard == Standard::kPalM;
+    // The colour subcarrier is tied to absolute time, not to 0H. The line is
+    // rendered from its 0H and later delayed onto the lattice by its lattice
+    // delay, so its carrier is rendered that much further on in phase.
+    const double lattice_phase_rad =
+        kQuarterWaveRad *
+        synth.line_lattice_delays[static_cast<std::size_t>(line_index)];
     bool burst_enabled = line.burst_enabled;
     double burst_phase_rad = line.burst_phase_rad;
     if (is_pal) {
@@ -2004,11 +2056,9 @@ void GenerationStage::SynthesiseTemplate(
       // the burst; this requires burst_phase_rad to remain ±135° so decoders
       // can extract the sign. NTSC burst_phase_rad is kept at π/4 (45°) per
       // the constant-reference convention in signal_timing_model.h.
-      const double subcarrier_anchor_rad =
-          is_pal ? kPalSubcarrierAnchorRad : 0.0;
-      const double burst_start_phase_rad =
-          WrapPhaseRad(SubcarrierPhaseRad(burst_sample_start_absolute) +
-                       subcarrier_anchor_rad + burst_phase_rad);
+      const double burst_start_phase_rad = WrapPhaseRad(
+          SubcarrierPhaseRad(burst_sample_start_absolute) + lattice_phase_rad +
+          SubcarrierAnchorRad(video_standard) + burst_phase_rad);
       double burst_sin = std::sin(burst_start_phase_rad);
       double burst_cos = std::cos(burst_start_phase_rad);
 
@@ -2073,7 +2123,7 @@ void GenerationStage::SynthesiseTemplate(
             PictureChromaPhaseOffsetRad(video_standard, line);
         const double phase_start =
             WrapPhaseRad(SubcarrierPhaseRad(active_window_line_start_absolute) +
-                         phase_offset);
+                         lattice_phase_rad + phase_offset);
 
         // Map field lines onto progressive source rows by interleaving
         // fields: the upper field consumes even rows and the lower field odd
@@ -2117,8 +2167,6 @@ void GenerationStage::SynthesiseTemplate(
         const bool bandlimited =
             section.horizontal_resample == HorizontalResample::kBandlimited &&
             painted_sample_count > 0;
-        const bool collect_luma = luma_filter != nullptr || bandlimited ||
-                                  picture_response != nullptr;
         const SampleFixed* const response_plane =
             response_planes[line.field_index_1based == 1 ? 0U : 1U];
         std::vector<std::int32_t>& line_u_axis = resources.line_u_axis;
@@ -2201,19 +2249,7 @@ void GenerationStage::SynthesiseTemplate(
                   v_switch_sign * ChromaAxisFromCode(pixel.cr);
             }
 
-            if (collect_luma) {
-              line_luma[sample_slot] = LumaFixedFromCode(pixel.y);
-              continue;
-            }
-
-            // Preserve any sync-domain sample already placed for this line;
-            // only paint active luma where the waveform is at/above blanking
-            // level.
-            SampleFixed& luma_sample =
-                y_out[static_cast<std::size_t>(sample_index)];
-            if (luma_sample >= blanking_fixed) {
-              luma_sample = LumaFixedFromCode(pixel.y);
-            }
+            line_luma[sample_slot] = LumaFixedFromCode(pixel.y);
           }
 
           if (apply_line_sign) {
@@ -2252,10 +2288,10 @@ void GenerationStage::SynthesiseTemplate(
               painted_sample_count, line_luma.begin());
         }
 
-        // A band-limited, resampled or shaped line paints its luma once it
-        // is complete, under the same blanking-level guard. The picture
-        // response (the source chain) comes before the luma bandwidth limit.
-        if (collect_luma && painted_sample_count > 0) {
+        // The line paints its luma once it is complete. The picture response
+        // (the source chain) comes before the section's luma bandwidth limit,
+        // and the standard's video band limit comes last.
+        if (painted_sample_count > 0) {
           const SampleFixed* painted_luma = line_luma.data();
           if (response_horizontal) {
             picture_response->ApplyHorizontal(
@@ -2269,11 +2305,35 @@ void GenerationStage::SynthesiseTemplate(
                                filtered_line_luma.data());
             painted_luma = filtered_line_luma.data();
           }
-          for (int x_sample = 0; x_sample < painted_sample_count; ++x_sample) {
-            SampleFixed& luma_sample = y_out[static_cast<std::size_t>(
-                active_line_sample_base + x_sample)];
+          // The band limit sees the picture as a run on a blanking-level
+          // line, so the edges of the picture against the porches are shaped
+          // too and its output reaches reach() samples into either porch. A
+          // half-picture line's picture stops at the end of its picture, where
+          // its saved blanking tail is restored below.
+          const int band_input_count = std::max(
+              0, std::min(painted_sample_count, picture_end - painted_start));
+          const int reach = resources.band_limiter->reach();
+          resources.band_limited_line.resize(
+              static_cast<std::size_t>(band_input_count) +
+              (2U * static_cast<std::size_t>(reach)));
+          resources.band_limiter->Apply(
+              painted_luma, static_cast<std::size_t>(band_input_count),
+              blanking_fixed, &resources.band_limit_workspace,
+              resources.band_limited_line.data());
+          const int band_first = painted_start - reach;
+          const int write_end =
+              std::min(band_first + band_input_count + (2 * reach),
+                       (tail_samples > 0) ? picture_end : line_samples);
+          // Preserve any sync-domain sample already placed for this line;
+          // only paint where the waveform is at or above blanking level.
+          for (int position = std::max(0, band_first); position < write_end;
+               ++position) {
+            SampleFixed& luma_sample =
+                y_out[static_cast<std::size_t>(line_base + position)];
             if (luma_sample >= blanking_fixed) {
-              luma_sample = painted_luma[static_cast<std::size_t>(x_sample)];
+              luma_sample =
+                  resources.band_limited_line[static_cast<std::size_t>(
+                      position - band_first)];
             }
           }
         }
@@ -2408,6 +2468,19 @@ void GenerationStage::SynthesiseTemplate(
   }
 }
 
+// Moves a finished frame from its 0H-relative render onto the 4fsc lattice,
+// adding each line's pre-0H sync edge into the line before it. Chroma has no
+// lead-in and is zero outside its lines.
+void GenerationStage::ShiftOntoLattice(SynthesisResources& resources,
+                                       SampleFixed* y_frame,
+                                       SampleFixed* c_frame) {
+  resources.lattice_shifter->Apply(y_frame, resources.blanking_fixed,
+                                   resources.sync_lead_in,
+                                   &resources.lattice_workspace);
+  resources.lattice_shifter->Apply(c_frame, SampleFixed{0}, {},
+                                   &resources.lattice_workspace);
+}
+
 bool GenerationStage::GenerateFrameBatch(
     const Project& project, const std::vector<FrameScheduleItem>& schedule,
     std::size_t start_frame, std::size_t frame_count,
@@ -2502,7 +2575,7 @@ bool GenerationStage::GenerateFrames(
     out_truth->resize(frame_count);
   }
   const std::size_t template_bytes =
-      (frame_span * sizeof(SampleFixed) * 2U) +
+      (frame_span * sizeof(SampleFixed) * 4U) +
       (with_truth ? truth_layout.PlaneSamples() * sizeof(float) * 3U : 0U);
 
   for (std::size_t local_frame_index = 0; local_frame_index < frame_count;
@@ -2649,21 +2722,35 @@ bool GenerationStage::GenerateFrames(
               SynthesiseTemplate(*resources, *section, field_sources,
                                  sequence_phase, out->y_mv.data(),
                                  out->c_mv.data(), truth);
+              out->y_lattice_mv = out->y_mv;
+              out->c_lattice_mv = out->c_mv;
+              ShiftOntoLattice(*resources, out->y_lattice_mv.data(),
+                               out->c_lattice_mv.data());
             });
     PictureTruthFrame* const frame_truth =
         with_truth ? &(*out_truth)[local_frame_index] : nullptr;
+    // VBI code words and OSD text are drawn onto the clean frame's
+    // 0H-relative render, before the frame is delayed onto the 4fsc lattice.
+    const bool patched =
+        (enrichment != nullptr && !enrichment->vbi_lines.empty()) ||
+        !section->osd.overlays.empty();
     if (frame_template != nullptr) {
-      // Cached clean frame: delivery is a copy, no line-loop work.
+      // Cached clean frame: delivery is a copy, no line-loop work. An
+      // unpatched frame is the template's lattice planes as they stand.
+      const std::vector<SampleFixed>& y_source =
+          patched ? frame_template->y_mv : frame_template->y_lattice_mv;
+      const std::vector<SampleFixed>& c_source =
+          patched ? frame_template->c_mv : frame_template->c_lattice_mv;
       if (single_frame_request) {
         // Copy-assignment writes each destination sample exactly once,
         // avoiding the zero-fill a resize of a fresh buffer would perform
         // before the copy overwrote it.
-        *out_y_mv = frame_template->y_mv;
-        *out_c_mv = frame_template->c_mv;
+        *out_y_mv = y_source;
+        *out_c_mv = c_source;
       } else {
-        std::copy(frame_template->y_mv.begin(), frame_template->y_mv.end(),
+        std::copy(y_source.begin(), y_source.end(),
                   out_y_mv->data() + local_frame_base);
-        std::copy(frame_template->c_mv.begin(), frame_template->c_mv.end(),
+        std::copy(c_source.begin(), c_source.end(),
                   out_c_mv->data() + local_frame_base);
       }
       if (frame_truth != nullptr) {
@@ -2706,7 +2793,8 @@ bool GenerationStage::GenerateFrames(
       osd_renderer_.Render(section->osd, field_texts[0], out_y_mv, out_c_mv,
                            local_frame_base, synth.line_sample_offsets,
                            field1_start, field1_end, active_window_start,
-                           active_window_end, osd_levels, neutral_chroma_lines);
+                           active_window_end, osd_levels, neutral_chroma_lines,
+                           resources->band_limiter.get());
       const int field2_start = synth.active.first_active_line_field2 - 1;
       int field2_end = field2_start + synth.active.active_lines_per_field;
       // Text is not drawn on a closing half-picture line: its second half
@@ -2717,7 +2805,33 @@ bool GenerationStage::GenerateFrames(
       osd_renderer_.Render(section->osd, field_texts[1], out_y_mv, out_c_mv,
                            local_frame_base, synth.line_sample_offsets,
                            field2_start, field2_end, active_window_start,
-                           active_window_end, osd_levels, neutral_chroma_lines);
+                           active_window_end, osd_levels, neutral_chroma_lines,
+                           resources->band_limiter.get());
+    }
+
+    // Every line is complete in its 0H-relative render: move the frame onto
+    // the 4fsc lattice. A frame synthesised in place is delayed whole; a
+    // patched template frame starts from the template's lattice planes and
+    // re-delays only the lines the patches changed, which gives the same
+    // samples.
+    SampleFixed* const y_frame = out_y_mv->data() + local_frame_base;
+    SampleFixed* const c_frame = out_c_mv->data() + local_frame_base;
+    if (frame_template == nullptr) {
+      ShiftOntoLattice(*resources, y_frame, c_frame);
+    } else if (patched) {
+      std::vector<SampleFixed>& render = resources->patched_render;
+      const LatticeLineShifter& shifter = *resources->lattice_shifter;
+      render.assign(y_frame, y_frame + frame_span);
+      std::copy(frame_template->y_lattice_mv.begin(),
+                frame_template->y_lattice_mv.end(), y_frame);
+      shifter.Update(frame_template->y_mv.data(), render.data(), y_frame,
+                     resources->blanking_fixed, resources->sync_lead_in,
+                     &resources->lattice_workspace);
+      render.assign(c_frame, c_frame + frame_span);
+      std::copy(frame_template->c_lattice_mv.begin(),
+                frame_template->c_lattice_mv.end(), c_frame);
+      shifter.Update(frame_template->c_mv.data(), render.data(), c_frame,
+                     SampleFixed{0}, {}, &resources->lattice_workspace);
     }
   }
 

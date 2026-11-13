@@ -187,6 +187,8 @@ add_library(videosynth_core
     src/fm_beat_model.cpp
     src/picture_chroma.cpp
     src/timing_offset_filter.cpp
+    src/lattice_line_shifter.cpp
+    src/video_band_limit.cpp
     src/dropout_injection_stage.cpp
     src/output_stage.cpp
     src/path_resolution.cpp

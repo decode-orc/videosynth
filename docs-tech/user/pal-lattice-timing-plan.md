@@ -1,13 +1,21 @@
 # 4fsc Horizontal Timing — Implementation Plan
 
 Bring the horizontal timing of generated output into line with CVBS File
-Format Specification v1.8.0. This plan fixes two problems:
+Format Specification v1.8.0. This plan fixes two problems, and a third that
+the second exposed:
 
 - **0H origin, all standards:** 0H of stored line 0 must sit at −0.5 samples,
   midway before the first stored sample.
 - **PAL lattice, PAL and SECAM:** 0H of frame line *k* (0-based) must fall
   *k* × 1135.0064 samples after 0H of line 0, on the subcarrier-locked 4fsc
   lattice.
+- **Picture band limit, all standards:** nothing limits how fast picture
+  luma changes. A nearest-pixel mapping makes every pixel boundary a
+  one-sample step, and OSD text is keyed the same way. Sampled on the old
+  whole-sample grid the steps hid their ringing between samples; the
+  fractional lattice delay samples it, so a hard edge overshoots by up to
+  about 14 % (97 mV on a 700 mV step) and the overshoot differs from line to
+  line with *d*ₖ.
 
 References:
 
@@ -137,7 +145,47 @@ line-timing stages' hashes depend on.
    *Accept:* the throughput change per standard is reported to the user before
    continuing.
 
-## Phase 3 — Consumers of line positions
+## Phase 3 — Video band limit
+
+Measured on a 700 mV step (scratchpad study, 2026-11-13): a filter with no
+overshoot (a sin² T-step, T = 100 ns) brings the overshoot after the delay down
+to about 2 mV but costs 2.3 dB at 3 MHz and 5 dB at 4.43 MHz. Any filter flat to
+the video bandwidth overshoots by about 9 % (Gibbs). The user chose the flat
+band limit: pictures keep their sharpness and every line carries the same
+band-limited waveform, and a bright hard edge may still set
+`has_nonstandard_values`.
+
+1. **Band limit.** Add `VideoBandLimiter`
+   (`include/videosynth/video_band_limit.h`, `src/video_band_limit.cpp`) and
+   `NominalVideoBandwidth`: passband to the widest ITU-R BT.470-6 Table 1
+   item 6 bandwidth (6.0 MHz on PAL/SECAM, 4.2 MHz on NTSC/PAL-M), stopband
+   from 8.0 MHz (625) / 6.5 MHz (525), `LumaBandwidthFilter`'s Kaiser design.
+   It filters a run of samples padded with a background level and returns the
+   run plus `reach()` samples of spill either side.
+   *Accept:* unit tests: band edges; passband within 0.003 dB, stopband below
+   −69.5 dB; a background run stays background; a hard step overshoots by less
+   than 10 %.
+2. **Picture.** In `SynthesiseTemplate`, band-limit every painted line last,
+   after the picture response and any `luma_bandwidth`, as a run on a
+   blanking-level line, and paint it with its spill into the porches under the
+   blanking-level guard. A half-picture line stops at the end of its picture.
+   *Accept:* functional test: on 100 % bars (nearest mapping) every sampled
+   picture line of PAL, NTSC and PAL-M holds less than −60 dB of its energy
+   above the stopband edge. Tests that predict painted samples use
+   `tests/support/video_band_limit_reference.h`.
+3. **OSD.** `OsdRenderer::Render` takes an optional limiter. With one, each
+   overlay is keyed as a band-limited change of luma and chroma per line.
+   `GenerationStage` passes its limiter.
+   *Accept:* unit test: samples beyond `reach()` of the text cell are untouched,
+   the keyed line holds less than −60 dB above the stopband edge, and chroma
+   is cut under the text. The functional test above also runs with OSD text
+   over the bars. Template-cache-on and -off output stay byte-identical.
+4. **Cost and docs.** Run `scripts/benchmark.sh`; update the HLD and the
+   published horizontal-mapping docs.
+   *Accept:* the throughput change is reported; `mkdocs build --strict` is
+   clean.
+
+## Phase 4 — Consumers of line positions
 
 1. **Picture windows.** `picture_chroma.cpp` (`ChromaErrorStage`'s picture and
    burst windows) and `line_timing_stage.cpp` (line start and slope pivot) add
@@ -148,8 +196,10 @@ line-timing stages' hashes depend on.
    The line-timing stage's existing tests pass.
 2. **Picture truth.** Confirm the truth path takes the 0H-relative render, not
    the delayed planes.
-   *Accept:* `.truth` and `.truth.meta` hashes are unchanged from the Phase 1
-   baseline.
+   *Accept:* the `.truth` and `.truth.meta` files were byte-identical to the
+   Phase 1 baseline after Phase 2 (checked). Phase 3's band limit changes the
+   truth's Y on purpose, so confirm instead that a truth row equals the
+   painted 0H-relative line, not the delayed one.
 3. **GUI preview.** In `src/gui/preview_render.cpp`, offset each line of the
    encoded raster and the line scope by round(*d*ₖ), so sync lines up
    vertically.
@@ -161,13 +211,13 @@ line-timing stages' hashes depend on.
    reason in a comment where it isn't obvious.
    *Accept:* a list of call sites with their status in the task report.
 
-## Phase 4 — Documentation, decode-orc check and baselines
+## Phase 5 — Documentation, decode-orc check and baselines
 
 1. **HLD.** Add a "4fsc horizontal timing" subsection covering the 0H origin,
    the centred sync edges, the storage layout, *d*ₖ, the line delay, the
    carrier phase advance, the SECAM exception and Sc/H. Update line 158, line
    398, the sync-generation section and the PAL chroma and SECAM sections.
-   *Accept:* every behaviour from Phases 2–3 is described. No text says
+   *Accept:* every behaviour from Phases 2–4 is described. No text says
    sample 0 is 0H, or that 0H sits at a fixed position on every PAL line.
 2. **Published docs.** `docs/user-manual/video-signal.md` (4fsc paragraph and
    0H-relative timings), `docs/user-manual/outputs.md` (frame-size table:

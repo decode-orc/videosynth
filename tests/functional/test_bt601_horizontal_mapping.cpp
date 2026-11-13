@@ -22,6 +22,8 @@
 #include <string>
 #include <vector>
 
+#include "lattice_delay_reference.h"
+#include "video_band_limit_reference.h"
 #include "videosynth/active_sample_mapping.h"
 #include "videosynth/fixed_point.h"
 #include "videosynth/frame_line_layout.h"
@@ -66,9 +68,10 @@ double LumaMillivoltsFromCodeForTest(int y_code, const SignalLevels& levels) {
   return levels.black_mv + (y_norm * (levels.white_mv - levels.black_mv));
 }
 
-// Checks every painted sample of one field-1 line of frame frame_index
-// against the nearest-pixel BT.601 mapping of its source row, and the
-// samples just outside the painted span against blanking.
+// Checks every painted sample of one field-1 line of frame frame_index, and
+// the samples just outside the painted span, against the nearest-pixel
+// BT.601 mapping of its source row with blanking either side, band-limited
+// and delayed onto the 4fsc lattice as the generator stores it.
 void ExpectLineFollowsBt601Grid(const Project& project,
                                 const std::vector<SampleFixed>& y,
                                 int frame_index, int line_1based,
@@ -113,25 +116,29 @@ void ExpectLineFollowsBt601Grid(const Project& project,
       static_cast<std::size_t>(window_start);
 
   const SignalLevels levels = GetSignalLevels(project.cvbs_presets);
-  // The samples either side of the span carry no picture.
-  for (const int x : {-2, -1, window_samples, window_samples + 1}) {
-    EXPECT_NEAR(SampleFixedToMillivolts(y[static_cast<std::size_t>(
-                    static_cast<std::ptrdiff_t>(line_base) + x)]),
-                levels.blanking_mv, 1e-6)
-        << "outside sample " << x;
-  }
-  for (int x = 0; x < window_samples; ++x) {
-    const double actual =
-        SampleFixedToMillivolts(y[line_base + static_cast<std::size_t>(x)]);
-    if (x >= in_range) {
-      EXPECT_NEAR(actual, levels.blanking_mv, 1e-6) << "sample " << x;
-      continue;
+  // The line's 0H-relative render: the nearest BT.601 pixel inside the
+  // painted span, blanking either side of it and past the source raster.
+  auto render = [&](int j) {
+    const int x = j - window_start;
+    if (x < 0 || x >= window_samples || x >= in_range) {
+      return levels.blanking_mv;
     }
     const int column =
         static_cast<int>(std::floor(SourcePixelCoordinate(grid, x)));
-    const double expected = LumaMillivoltsFromCodeForTest(
+    return LumaMillivoltsFromCodeForTest(
         source->PixelAt(source->active_x + column, source_row).y, levels);
-    ASSERT_NEAR(actual, expected, 1.0) << "sample " << x;
+  };
+  // The generator band-limits that render to the standard's video bandwidth,
+  // and on PAL then delays it onto the 4fsc lattice; the samples either side
+  // of the span carry only the shaped picture edge.
+  const std::vector<double> expected = test_support::LatticeDelayedLine(
+      standard, line_1based, window_start - 2, window_samples + 4,
+      test_support::BandLimitedRender(standard, render));
+  for (int x = -2; x < window_samples + 2; ++x) {
+    const double actual = SampleFixedToMillivolts(y[static_cast<std::size_t>(
+        static_cast<std::ptrdiff_t>(line_base) + x)]);
+    ASSERT_NEAR(actual, expected[static_cast<std::size_t>(x + 2)], 1.0)
+        << "sample " << x;
   }
 }
 

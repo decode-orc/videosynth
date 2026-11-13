@@ -146,6 +146,16 @@ double ShapedPulseLevel(int relative_index, int pulse_width_samples,
   return baseline_level + ((pulse_level - baseline_level) * depth);
 }
 
+double ShapedPulseLevelAt(double t, double fall_half_time,
+                          double rise_half_time, int ramp_samples,
+                          double baseline_level, double pulse_level) {
+  const auto span = static_cast<double>(std::max(1, ramp_samples - 1));
+  const double leading = SCurve01(((t - fall_half_time) / span) + 0.5);
+  const double trailing = SCurve01(((rise_half_time - t) / span) + 0.5);
+  const double depth = std::min(leading, trailing);
+  return baseline_level + ((pulse_level - baseline_level) * depth);
+}
+
 double ShapedGateEnvelope(int relative_index, int gate_width_samples,
                           int ramp_samples) {
   if (relative_index < 0 || relative_index >= gate_width_samples ||

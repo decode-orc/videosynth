@@ -12,6 +12,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <filesystem>
@@ -23,6 +24,8 @@
 #include "videosynth/picture_chroma.h"
 #include "videosynth/project_validator.h"
 #include "videosynth/timing_constants.h"
+#include "videosynth/timing_offset_filter.h"
+#include "videosynth/video_band_limit.h"
 
 namespace videosynth {
 namespace {
@@ -124,9 +127,24 @@ TEST_P(LumaBandwidthTest, StopbandIsSixtyDbDownAndBlankingIsUntouched) {
   EXPECT_EQ(c, clean_c);
   const std::vector<PictureLineWindow> windows =
       BuildPictureLineWindows(project, standard);
+  // The standard's video band limit carries a picture change reach()
+  // samples past the window. On the 625-line standards each line is then
+  // delayed onto the 4fsc lattice, and the delay kernel carries it on by its
+  // half-length (plus the whole-sample part of the delay).
+  const double sample_rate_hz =
+      GetTimingConstants(standard).sample_rate_4fsc_hz;
+  const std::size_t reach =
+      static_cast<std::size_t>(
+          VideoBandLimiter(standard, sample_rate_hz).reach()) +
+      (Is625LineStandard(standard)
+           ? static_cast<std::size_t>(kTimingOffsetHalfTaps + 2)
+           : 0U);
   std::vector<bool> in_window(y.size(), false);
   for (const PictureLineWindow& window : windows) {
-    for (std::size_t s = window.start; s < window.start + window.count; ++s) {
+    const std::size_t first = window.start - std::min(window.start, reach);
+    const std::size_t last =
+        std::min(y.size(), window.start + window.count + reach);
+    for (std::size_t s = first; s < last; ++s) {
       in_window[s] = true;
     }
   }

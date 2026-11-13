@@ -20,6 +20,7 @@
 #include <string>
 #include <vector>
 
+#include "lattice_delay_reference.h"
 #include "videosynth/fixed_point.h"
 #include "videosynth/frame_line_layout.h"
 #include "videosynth/generation_stage.h"
@@ -27,11 +28,22 @@
 #include "videosynth/picture_truth.h"
 #include "videosynth/progressive_frame_source.h"
 #include "videosynth/timing_constants.h"
+#include "videosynth/timing_offset_filter.h"
 
 namespace videosynth {
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
+
+// How closely the stored signal matches the picture truth: fixed-point
+// rounding and float truth, and on PAL, where the truth is delayed onto the
+// 4fsc lattice before the comparison, the delay of a modulated carrier
+// against the modulation of delayed axes (under -80 dB of a 300 mV carrier).
+constexpr double kTruthLumaToleranceMv = 1e-3;
+constexpr double kTruthChromaResidualMv = 1e-3;
+constexpr double kTruthDelayedChromaResidualMv = 0.05;
+constexpr double kTruthChromaGainTolerance = 1e-6;
+constexpr double kTruthDelayedChromaGainTolerance = 1e-4;
 
 // Source pictures by name. "flat_v.mkv" is a uniform grey with +V (Cr above
 // 512); "edge.mkv" is a luma and chroma step at the raster's centre column;
@@ -223,23 +235,54 @@ TEST(PictureTruthGenerationTest, TruthReproducesTheModulatedPicture) {
                                  static_cast<std::size_t>(layout.first_sample);
         const std::size_t row_offset =
             static_cast<std::size_t>(row) * layout.samples_per_line;
-        for (int x = 0; x < layout.samples_per_line; ++x) {
-          ASSERT_FLOAT_EQ(truth.y_mv[row_offset + x],
-                          static_cast<float>(SampleFixedToMillivolts(
-                              frames.y_mv[base + x] - blanking)))
+        const int count = layout.samples_per_line;
+        // The truth is the line's 0H-relative picture. On PAL the stored line
+        // is that picture delayed onto the 4fsc lattice, so the truth is
+        // delayed the same way before it is compared. The truth ends at the
+        // window's ends, where chroma is cut off and the band-limited luma
+        // runs on into the porches, so on PAL both comparisons leave the
+        // delay kernel's reach at each end out.
+        auto delayed = [&](const float* plane, double outside) {
+          return test_support::LatticeDelayedLine(
+              standard, line, layout.first_sample, count, [&](int j) {
+                const int x = j - layout.first_sample;
+                return (x >= 0 && x < count)
+                           ? static_cast<double>(plane[row_offset + x]) +
+                                 outside
+                           : outside;
+              });
+        };
+        // The kernel reads up to kTimingOffsetHalfTaps samples either side,
+        // plus the whole-sample part of the delay.
+        const int margin =
+            Is625LineStandard(standard) ? kTimingOffsetHalfTaps + 2 : 0;
+        const std::vector<double> expected_y = delayed(truth.y_mv.data(), 0.0);
+        for (int x = margin; x < count - margin; ++x) {
+          ASSERT_NEAR(expected_y[static_cast<std::size_t>(x)],
+                      SampleFixedToMillivolts(frames.y_mv[base + x] - blanking),
+                      kTruthLumaToleranceMv)
               << StandardToString(standard) << " line " << line;
         }
+        const std::vector<double> u_delayed = delayed(truth.u_mv.data(), 0.0);
+        const std::vector<double> v_delayed = delayed(truth.v_mv.data(), 0.0);
+        const std::vector<float> u_fit(u_delayed.begin(), u_delayed.end());
+        const std::vector<float> v_fit(v_delayed.begin(), v_delayed.end());
         const LineFit plus =
-            FitLine(&frames.c_mv[base], &truth.u_mv[row_offset],
-                    &truth.v_mv[row_offset], layout.samples_per_line, 1);
+            FitLine(&frames.c_mv[base + margin], &u_fit[margin], &v_fit[margin],
+                    count - (2 * margin), 1);
         const LineFit minus =
-            FitLine(&frames.c_mv[base], &truth.u_mv[row_offset],
-                    &truth.v_mv[row_offset], layout.samples_per_line, -1);
+            FitLine(&frames.c_mv[base + margin], &u_fit[margin], &v_fit[margin],
+                    count - (2 * margin), -1);
         const LineFit& best =
             plus.max_residual_mv <= minus.max_residual_mv ? plus : minus;
-        ASSERT_LT(best.max_residual_mv, 1e-3)
+        const bool lattice_delayed = Is625LineStandard(standard);
+        ASSERT_LT(best.max_residual_mv, lattice_delayed
+                                            ? kTruthDelayedChromaResidualMv
+                                            : kTruthChromaResidualMv)
             << StandardToString(standard) << " line " << line;
-        ASSERT_NEAR(best.amplitude, 1.0, 1e-6);
+        ASSERT_NEAR(best.amplitude, 1.0,
+                    lattice_delayed ? kTruthDelayedChromaGainTolerance
+                                    : kTruthChromaGainTolerance);
         if (standard == Standard::kNtsc) {
           // NTSC has no V-switch.
           ASSERT_LT(plus.max_residual_mv, 1e-3) << "line " << line;
