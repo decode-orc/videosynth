@@ -596,8 +596,10 @@ TEST(LineTimingStageTest, ShiftsPictureByDrawnErrorAndLeavesTheRestAlone) {
              ++n) {
           touched_y[n] = true;
           touched_c[n] = true;
+          // The slope pivots about the centre after the line's lattice 0H.
           const double relative =
-              static_cast<double>(n) - offsets[index] - centre;
+              static_cast<double>(n) - offsets[index] -
+              LatticeLineDelay(standard, window.line_1based).Samples() - centre;
           const double delay =
               samples_per_ns *
               (error.offset_ns + error.slope_ns * relative / (width / 2.0));

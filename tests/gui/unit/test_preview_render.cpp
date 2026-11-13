@@ -2,8 +2,8 @@
  * File:        test_preview_render.cpp
  * Module:      gui_tests
  * Purpose:     Unit tests for preview raster rendering: field geometry,
- *              10-bit code-space grayscale mapping, and BT.601 source
- *              conversion
+ *              10-bit code-space grayscale mapping, lattice-aligned line
+ *              starts and BT.601 source conversion
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -17,6 +17,7 @@
 
 #include "preview_render.h"
 #include "videosynth/fixed_point.h"
+#include "videosynth/frame_line_layout.h"
 #include "videosynth/model.h"
 #include "videosynth/timing_constants.h"
 
@@ -239,8 +240,42 @@ TEST(PreviewRenderTest, ExtractLineMillivoltsFollowsPalLineLayout) {
       ExtractLineMillivolts(y_mv, Standard::kPal, 313);
   EXPECT_EQ(line313.size(), 1137U);
 
+  // The last line stops at the end of the frame.
+  EXPECT_EQ(ExtractLineMillivolts(y_mv, Standard::kPal, 625).size(), 1135U);
+
   EXPECT_TRUE(ExtractLineMillivolts(y_mv, Standard::kPal, 0).empty());
   EXPECT_TRUE(ExtractLineMillivolts(y_mv, Standard::kPal, 626).empty());
+}
+
+TEST(PreviewRenderTest, PalLinesStartAtTheirLatticeZeroH) {
+  // Line 313's 0H lies d = 1248/625 samples into its storage line (EBU Tech.
+  // 3280-E Section 1.2 lattice), so the scope and the raster start it 2
+  // samples in. Line 1 has d = 0 and starts at its storage line's start.
+  const std::vector<int> offsets =
+      BuildLineSampleOffsets(BuildLineSampleCounts(Standard::kPal, 625, 1135));
+  const auto line313 = static_cast<std::size_t>(offsets[312]);
+  std::vector<SampleFixed> y_mv = MakeFrameBuffer(Standard::kPal, 0.0);
+  y_mv[line313 + 2U] = MillivoltsToSampleFixed(-300.0);
+  y_mv[0] = MillivoltsToSampleFixed(700.0);
+
+  EXPECT_NEAR(ExtractLineMillivolts(y_mv, Standard::kPal, 313).front(), -300.0,
+              0.01);
+  EXPECT_NEAR(ExtractLineMillivolts(y_mv, Standard::kPal, 1).front(), 700.0,
+              0.01);
+
+  const std::vector<SampleFixed> c_mv = MakeFrameBuffer(Standard::kPal, 0.0);
+  const QImage field2 = RenderEncodedFieldImage(y_mv, c_mv, Standard::kPal, 2,
+                                                EncodedImageMode::kLuma);
+  ASSERT_FALSE(field2.isNull());
+  // Row 0 of field 2 is line 313; -300 mV maps below blanking's gray 64.
+  EXPECT_LT(qGray(field2.pixel(0, 0)), 64);
+  EXPECT_EQ(qGray(field2.pixel(1, 0)), 64);
+
+  // NTSC is orthogonal: every line starts at its storage line's start.
+  std::vector<SampleFixed> ntsc = MakeFrameBuffer(Standard::kNtsc, 0.0);
+  ntsc[std::size_t{910} * 100U] = MillivoltsToSampleFixed(700.0);
+  EXPECT_NEAR(ExtractLineMillivolts(ntsc, Standard::kNtsc, 101).front(), 700.0,
+              0.01);
 }
 
 TEST(PreviewRenderTest, SourceImageConvertsBt601ToRgb) {

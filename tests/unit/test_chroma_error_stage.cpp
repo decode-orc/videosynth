@@ -290,6 +290,10 @@ struct ChromaLayout {
   std::size_t samples_per_frame = 0;
   std::vector<int> line_samples;
   std::vector<int> line_offsets;
+  // Whole samples by which each stored line's content sits after its
+  // storage line's start: the line's lattice delay, rounded (0 on NTSC and
+  // PAL-M), as BuildPictureLineWindows and BuildBurstLineWindows place it.
+  std::vector<int> line_shift;
   std::vector<LineTimingPrimitive> lines;
   ActiveRasterGeometry geometry;
   SampleRange burst;
@@ -304,6 +308,10 @@ ChromaLayout MakeLayout(Standard standard) {
   layout.line_samples = BuildLineSampleCounts(standard, timing.lines_per_frame,
                                               timing.samples_per_line_4fsc);
   layout.line_offsets = BuildLineSampleOffsets(layout.line_samples);
+  for (std::size_t li = 0; li < layout.line_samples.size(); ++li) {
+    layout.line_shift.push_back(static_cast<int>(std::lround(
+        LatticeLineDelay(standard, static_cast<int>(li) + 1).Samples())));
+  }
   layout.lines = BuildFrameTimingPrimitives(standard);
   layout.geometry =
       GetActiveRasterGeometry(standard, timing.sample_rate_4fsc_hz);
@@ -313,8 +321,18 @@ ChromaLayout MakeLayout(Standard standard) {
 
 // Picture window of one line; PAL line 623 carries picture on its first half.
 SampleRange ActiveRange(const ChromaLayout& layout, int line_1based) {
-  return SampleRange{layout.geometry.active_window_start_samples,
-                     ActivePictureEndSamples(layout.geometry, line_1based)};
+  const int shift =
+      layout.line_shift[static_cast<std::size_t>(line_1based - 1)];
+  return SampleRange{
+      layout.geometry.active_window_start_samples + shift,
+      ActivePictureEndSamples(layout.geometry, line_1based) + shift};
+}
+
+// Burst gate of one line.
+SampleRange LineBurst(const ChromaLayout& layout, int line_1based) {
+  const int shift =
+      layout.line_shift[static_cast<std::size_t>(line_1based - 1)];
+  return SampleRange{layout.burst.start + shift, layout.burst.end + shift};
 }
 
 bool IsPictureLine(const ChromaLayout& layout, int line_1based,
@@ -345,12 +363,13 @@ std::vector<SampleFixed> MakeChromaFrames(const ChromaLayout& layout,
     for (std::size_t li = 0; li < layout.line_samples.size(); ++li) {
       const int line_1based = static_cast<int>(li) + 1;
       const SampleRange active = ActiveRange(layout, line_1based);
+      const SampleRange burst = LineBurst(layout, line_1based);
       const int base = layout.line_offsets[li];
       for (int s = 0; s < layout.line_samples[li]; ++s) {
         // fsc = fs / 4 on every 4fsc standard.
         const double carrier = kPi / 2.0 * (base + s);
         double mv = 2.0 * std::sin(0.37 * (base + s));
-        if (s >= layout.burst.start && s < layout.burst.end) {
+        if (s >= burst.start && s < burst.end) {
           mv = kBurstMv * std::cos(carrier + BurstPhase(line_1based));
         } else if (s >= active.start && s < active.end) {
           mv = kChromaMv * std::cos(carrier + ChromaPhase(line_1based));
@@ -395,8 +414,9 @@ Demodulated DemodulateAgainstBurst(const SampleFixed* frame,
   int start = active.start + kEdgeMargin;
   int end = active.end - kEdgeMargin;
   end -= (end - start) % 4;
-  int burst_start = layout.burst.start + 4;
-  int burst_end = layout.burst.end - 4;
+  const SampleRange burst_gate = LineBurst(layout, line_1based);
+  int burst_start = burst_gate.start + 4;
+  int burst_end = burst_gate.end - 4;
   burst_end -= (burst_end - burst_start) % 2;
   const std::complex<double> picture =
       Phasor(frame, layout, line_1based, start, end);
@@ -505,9 +525,10 @@ TEST(ChromaErrorStageTest, BurstVitsAndBlankingAreBitIdentical) {
 }
 
 // Burst window of one line, as the stage widens it.
-SampleRange BurstWindow(const ChromaLayout& layout) {
-  return SampleRange{layout.burst.start - kBurstWindowGuardSamples,
-                     layout.burst.end + kBurstWindowGuardSamples};
+SampleRange BurstWindow(const ChromaLayout& layout, int line_1based) {
+  const SampleRange burst = LineBurst(layout, line_1based);
+  return SampleRange{burst.start - kBurstWindowGuardSamples,
+                     burst.end + kBurstWindowGuardSamples};
 }
 
 TEST(ChromaErrorStageTest, IncludeBurstAppliesErrorToBurstOfEveryLine) {
@@ -525,11 +546,12 @@ TEST(ChromaErrorStageTest, IncludeBurstAppliesErrorToBurstOfEveryLine) {
     std::vector<SampleFixed> output = input;
     ChromaErrorStage(1U).ApplyChromaError(project, schedule, 0U, 1U, &output);
 
-    const int burst_start = layout.burst.start + 4;
-    int burst_end = layout.burst.end - 4;
-    burst_end -= (burst_end - burst_start) % 2;
-    const SampleRange burst_window = BurstWindow(layout);
     for (int line = 1; line <= static_cast<int>(layout.lines.size()); ++line) {
+      const SampleRange burst_gate = LineBurst(layout, line);
+      const int burst_start = burst_gate.start + 4;
+      int burst_end = burst_gate.end - 4;
+      burst_end -= (burst_end - burst_start) % 2;
+      const SampleRange burst_window = BurstWindow(layout, line);
       // VBI and VITS lines' bursts take the error too, not just picture lines.
       const std::complex<double> ratio =
           Phasor(output.data(), layout, line, burst_start, burst_end) /
@@ -615,8 +637,9 @@ TEST(ChromaErrorStageTest, IncludeBurstLeavesPictureErrorUnchanged) {
   std::vector<SampleFixed> with_burst = input;
   ChromaErrorStage(1U).ApplyChromaError(project, schedule, 0U, 1U, &with_burst);
 
-  const SampleRange burst_window = BurstWindow(layout);
   for (std::size_t li = 0; li < layout.line_samples.size(); ++li) {
+    const SampleRange burst_window =
+        BurstWindow(layout, static_cast<int>(li) + 1);
     for (int s = 0; s < layout.line_samples[li]; ++s) {
       if (s >= burst_window.start && s < burst_window.end) {
         continue;

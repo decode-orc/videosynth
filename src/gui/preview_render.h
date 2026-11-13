@@ -62,10 +62,11 @@ int LineNumberToFrameRow(Standard standard, int line_1based);
 // Renders one field of the synthesised frame as a grayscale raster: each
 // sample is quantised to the 10-bit CVBS code space exactly as the output
 // stage writes it, then mapped to 8-bit grayscale (code >> 2). The image is
-// samples_per_line wide (PAL long lines 313/625 crop their two trailing
-// extra samples) and field-line-count tall, covering the full field
-// including the VBI region. Returns a null image for empty buffers or an
-// unknown standard.
+// samples_per_line wide and field-line-count tall, covering the full field
+// including the VBI region. Each row starts at its line's storage start plus
+// the line's lattice delay rounded to a whole sample (0 to 2 samples on PAL
+// and SECAM, 0 on NTSC and PAL-M), so sync lines up down the image. Returns
+// a null image for empty buffers or an unknown standard.
 QImage RenderEncodedFieldImage(const std::vector<SampleFixed>& y_mv,
                                const std::vector<SampleFixed>& c_mv,
                                Standard standard, int field_1based,
@@ -73,8 +74,9 @@ QImage RenderEncodedFieldImage(const std::vector<SampleFixed>& y_mv,
 
 // Renders the complete interlaced frame: every line quantised as the output
 // stage writes it, woven into spatial display order (InterlacedLineOrder).
-// The image is samples_per_line wide and lines_per_frame tall. Returns a null
-// image for empty buffers or an unknown standard.
+// The image is samples_per_line wide and lines_per_frame tall, and each row
+// starts as in RenderEncodedFieldImage. Returns a null image for empty
+// buffers or an unknown standard.
 QImage RenderEncodedFrameImage(const std::vector<SampleFixed>& y_mv,
                                const std::vector<SampleFixed>& c_mv,
                                Standard standard, EncodedImageMode mode);
@@ -85,7 +87,10 @@ QImage RenderEncodedFrameImage(const std::vector<SampleFixed>& y_mv,
 QImage RenderSourceImage(const FrameSourceImage& source);
 
 // Extracts one line's samples from a full-frame channel buffer, converted
-// to millivolts. Empty when the line or buffer is out of range.
+// to millivolts: the storage line's sample count, starting at the line's
+// rounded lattice delay into it as the raster does (the frame's last line
+// stops at the end of the buffer). Empty when the line or buffer is out of
+// range.
 std::vector<double> ExtractLineMillivolts(
     const std::vector<SampleFixed>& channel_mv, Standard standard,
     int line_1based);

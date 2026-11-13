@@ -127,6 +127,18 @@ int LineNumberToFrameRow(Standard standard, int line_1based) {
 
 namespace {
 
+// First sample shown for frame line line_1based: its storage line's first
+// sample plus the line's lattice delay rounded to a whole sample, so 0H (and
+// the sync edge) of every line lines up in the raster and the scope.
+std::size_t DisplayLineStart(Standard standard,
+                             const std::vector<int>& line_offsets,
+                             int line_1based) {
+  return static_cast<std::size_t>(
+      line_offsets[static_cast<std::size_t>(line_1based - 1)] +
+      static_cast<int>(
+          std::lround(LatticeLineDelay(standard, line_1based).Samples())));
+}
+
 // Quantises one full-frame sample to the 8-bit grayscale the views display,
 // matching the output stage's 10-bit code mapping for the given mode.
 uchar EncodedSampleToGray(const std::vector<SampleFixed>& y_mv,
@@ -177,9 +189,8 @@ QImage RenderEncodedFieldImage(const std::vector<SampleFixed>& y_mv,
 
   QImage image(width, height, QImage::Format_Grayscale8);
   for (int row = 0; row < height; ++row) {
-    const int line_index = field_range.first_line_1based - 1 + row;
-    const std::size_t line_start =
-        static_cast<std::size_t>(line_offsets[line_index]);
+    const std::size_t line_start = DisplayLineStart(
+        standard, line_offsets, field_range.first_line_1based + row);
     uchar* scanline = image.scanLine(row);
     for (int x = 0; x < width; ++x) {
       scanline[x] = EncodedSampleToGray(
@@ -215,9 +226,8 @@ QImage RenderEncodedFrameImage(const std::vector<SampleFixed>& y_mv,
 
   QImage image(width, height, QImage::Format_Grayscale8);
   for (int row = 0; row < height; ++row) {
-    const int line_index = line_order[static_cast<std::size_t>(row)] - 1;
-    const std::size_t line_start =
-        static_cast<std::size_t>(line_offsets[line_index]);
+    const std::size_t line_start = DisplayLineStart(
+        standard, line_offsets, line_order[static_cast<std::size_t>(row)]);
     uchar* scanline = image.scanLine(row);
     for (int x = 0; x < width; ++x) {
       scanline[x] = EncodedSampleToGray(
@@ -259,13 +269,17 @@ std::vector<double> ExtractLineMillivolts(
   const std::vector<int> line_counts = BuildLineSampleCounts(
       standard, timing.lines_per_frame, timing.samples_per_line_4fsc);
   const std::vector<int> line_offsets = BuildLineSampleOffsets(line_counts);
-  const std::size_t start =
+  const auto storage_start =
       static_cast<std::size_t>(line_offsets[line_1based - 1]);
-  const std::size_t count =
-      static_cast<std::size_t>(line_counts[line_1based - 1]);
-  if (channel_mv.size() < start + count) {
+  std::size_t count = static_cast<std::size_t>(line_counts[line_1based - 1]);
+  if (channel_mv.size() < storage_start + count) {
     return {};
   }
+  // A line's samples run from its displayed 0H; the frame's last line stops
+  // at the end of the buffer.
+  const std::size_t start =
+      DisplayLineStart(standard, line_offsets, line_1based);
+  count = std::min(count, channel_mv.size() - start);
 
   std::vector<double> millivolts(count, 0.0);
   for (std::size_t i = 0; i < count; ++i) {

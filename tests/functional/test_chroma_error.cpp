@@ -6,7 +6,8 @@
  *              shifts by phase_deg and its saturation scales by gain on PAL,
  *              NTSC and PAL-M; the subcarrier reference agrees with the
  *              generated burst; crosstalk mixes the decoded U and V; and
- *              differential gain and phase follow each bar's luma.
+ *              differential gain and phase follow each bar's luma; and the
+ *              picture and burst windows follow the PAL 4fsc lattice.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -14,18 +15,22 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <complex>
 #include <cstddef>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
+#include "sync_edge_measurement.h"
 #include "videosynth/chroma_error_stage.h"
 #include "videosynth/colour_sequence.h"
 #include "videosynth/fixed_point.h"
 #include "videosynth/frame_line_layout.h"
 #include "videosynth/generation_stage.h"
+#include "videosynth/picture_chroma.h"
 #include "videosynth/signal_timing_model.h"
 #include "videosynth/timing_constants.h"
 
@@ -79,6 +84,60 @@ std::complex<double> Phasor(const std::vector<SampleFixed>& c, int start,
            std::polar(1.0, -kPi / 2.0 * s);
   }
   return sum * (2.0 / static_cast<double>(end - start));
+}
+
+TEST(ChromaErrorFunctionalTest, PalWindowsFollowTheLatticeZeroH) {
+  // The generator draws each line 0H-relative, with 0H half a sample before
+  // the line's first sample, and then delays it onto the 4fsc lattice. The
+  // first picture sample is active_window_start after the drawn line start,
+  // so it sits active_window_start + 0.5 after the line's measured 0H; the
+  // burst gate likewise.
+  const Project project = MakeBarsProject(Standard::kPal);
+  std::vector<SampleFixed> y;
+  std::vector<SampleFixed> c;
+  std::vector<std::string> errors;
+  ASSERT_TRUE(GenerationStage().Generate(project, &y, &c, &errors))
+      << (errors.empty() ? "" : errors[0]);
+  const TimingConstants timing = GetTimingConstants(Standard::kPal);
+  y.resize(static_cast<std::size_t>(SamplesPerFrame4fsc(Standard::kPal)));
+  const std::vector<int> offsets = BuildLineSampleOffsets(BuildLineSampleCounts(
+      Standard::kPal, timing.lines_per_frame, timing.samples_per_line_4fsc));
+  const SignalLevels levels = GetSignalLevels(project.cvbs_presets);
+  const std::vector<std::optional<double>> edges =
+      test_support::MeasureLineSyncEdges(y, offsets, levels.blanking_mv,
+                                         levels.sync_tip_mv);
+  const ActiveRasterGeometry geometry =
+      GetActiveRasterGeometry(Standard::kPal, timing.sample_rate_4fsc_hz);
+  const std::vector<PictureLineWindow> pictures =
+      BuildPictureLineWindows(project, Standard::kPal);
+  const std::vector<PictureLineWindow> bursts =
+      BuildBurstLineWindows(Standard::kPal);
+  const int burst_gate_start =
+      BurstStartSamples(Standard::kPal, timing.sample_rate_4fsc_hz) -
+      kBurstWindowGuardSamples;
+
+  for (const int line : {23, 157, 310}) {
+    const auto index = static_cast<std::size_t>(line - 1);
+    ASSERT_TRUE(edges[index].has_value()) << "line " << line;
+    const double zero_h = edges[index].value_or(0.0);
+    const auto picture = std::find_if(
+        pictures.begin(), pictures.end(),
+        [line](const PictureLineWindow& w) { return w.line_1based == line; });
+    ASSERT_NE(picture, pictures.end()) << "line " << line;
+    EXPECT_NEAR(static_cast<double>(picture->start),
+                zero_h + 0.5 + geometry.active_window_start_samples, 0.5)
+        << "line " << line;
+    EXPECT_NEAR(static_cast<double>(bursts[index].start),
+                zero_h + 0.5 + burst_gate_start, 0.5)
+        << "line " << line;
+  }
+  // Line 310's lattice delay is nearly two samples: the windows moved.
+  const auto line310 = std::find_if(
+      pictures.begin(), pictures.end(),
+      [](const PictureLineWindow& w) { return w.line_1based == 310; });
+  EXPECT_EQ(line310->start,
+            static_cast<std::size_t>(offsets[309] +
+                                     geometry.active_window_start_samples + 2));
 }
 
 TEST(ChromaErrorFunctionalTest, BarsHueAndSaturationShiftAgainstBurst) {

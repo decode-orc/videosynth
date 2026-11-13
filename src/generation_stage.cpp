@@ -2770,6 +2770,9 @@ bool GenerationStage::GenerateFrames(
                          out_c_mv->data() + local_frame_base, frame_truth);
     }
 
+    // Biphase/FM codes and OSD text are placed by storage-line offset, which
+    // is right here: the frame is still its 0H-relative render, and the
+    // lattice shift below delays them with their lines.
     if (enrichment != nullptr) {
       resources->vbi_renderer->Render(
           *enrichment, out_y_mv, local_frame_base, synth.line_sample_offsets,

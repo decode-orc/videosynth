@@ -59,14 +59,17 @@ constexpr int kBurstWindowGuardSamples = 8;
 
 // Picture lines of one 4fsc frame in frame order: the active window of every
 // horizontal-sync active picture line of the active raster, less any line a
-// project VITS is placed on.
+// project VITS is placed on. Each window sits where the generated frame
+// holds it: on PAL and SECAM, moved by the line's lattice delay
+// (LatticeLineDelay) rounded to a whole sample.
 //
 // Thread-safety: stateless; safe to call concurrently.
 std::vector<PictureLineWindow> BuildPictureLineWindows(const Project& project,
                                                        Standard standard);
 
 // Burst windows of one 4fsc frame, one per frame line in frame order: the
-// burst gate widened by kBurstWindowGuardSamples on each side. A line that
+// burst gate widened by kBurstWindowGuardSamples on each side and, like the
+// picture windows, moved by the line's rounded lattice delay. A line that
 // carries no burst on a given frame has zero chroma there.
 //
 // Thread-safety: stateless; safe to call concurrently.

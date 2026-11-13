@@ -292,6 +292,38 @@ TEST(PictureTruthGenerationTest, TruthReproducesTheModulatedPicture) {
   }
 }
 
+TEST(PictureTruthGenerationTest, PalTruthIsTheUndelayedLine) {
+  // The truth is taken from the 0H-relative render, before the lattice line
+  // shifter. On line 310 (d = 1236/625 samples) it lags the stored line at
+  // the edge by about two samples, so read as stored samples from
+  // first_sample it misses the edge by far more than rounding.
+  const Project project = MakeProject(Standard::kPal, "edge.mkv");
+  const GeneratedFrames frames = Generate(project, 1, true);
+  ASSERT_EQ(frames.truth.size(), 1U);
+  const PictureTruthLayout layout =
+      BuildPictureTruthLayout(project.cvbs_presets);
+  const TimingConstants timing = GetTimingConstants(Standard::kPal);
+  const std::vector<int> offsets = BuildLineSampleOffsets(BuildLineSampleCounts(
+      Standard::kPal, timing.lines_per_frame, timing.samples_per_line_4fsc));
+  const SampleFixed blanking = MillivoltsToSampleFixed(
+      GetSignalLevels(project.cvbs_presets).blanking_mv);
+  constexpr int kLine = 310;
+  const int row = layout.RowForLine(kLine);
+  ASSERT_GE(row, 0);
+  const std::size_t base = static_cast<std::size_t>(offsets[kLine - 1]) +
+                           static_cast<std::size_t>(layout.first_sample);
+  const std::size_t row_offset =
+      static_cast<std::size_t>(row) * layout.samples_per_line;
+  double worst_mv = 0.0;
+  for (int x = 0; x < layout.samples_per_line; ++x) {
+    worst_mv = std::max(
+        worst_mv,
+        std::abs(static_cast<double>(frames.truth[0].y_mv[row_offset + x]) -
+                 SampleFixedToMillivolts(frames.y_mv[base + x] - blanking)));
+  }
+  EXPECT_GT(worst_mv, 50.0);
+}
+
 TEST(PictureTruthGenerationTest, TruthRequestDoesNotChangeTheSignal) {
   const Project project = MakeProject(Standard::kPal, "edge.mkv");
   const GeneratedFrames plain = Generate(project, 4, false);

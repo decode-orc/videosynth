@@ -212,7 +212,12 @@ void LineTimingStage::ApplyLineTiming(
         const double offset = error.offset_ns * samples_per_ns;
         const double slope =
             error.slope_ns * samples_per_ns / (active_width / 2.0);
-        const auto line_start = static_cast<double>(line_offsets[line_index]);
+        // The slope pivots about the active-line centre after the line's
+        // 0H, which the lattice line shifter put d_k after its storage
+        // line's first sample.
+        const double line_start =
+            static_cast<double>(line_offsets[line_index]) +
+            LatticeLineDelay(standard, window.line_1based).Samples();
         ShiftWindow(interpolator_, source.data(), samples_per_frame, window,
                     line_start, centre, offset, slope, frame);
         if (luma) {

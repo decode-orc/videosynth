@@ -12,6 +12,7 @@
 #include "videosynth/picture_chroma.h"
 
 #include <algorithm>
+#include <cmath>
 #include <set>
 
 #include "videosynth/frame_line_layout.h"
@@ -24,6 +25,15 @@ namespace videosynth {
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
+
+// Whole samples by which the generator's lattice line shifter moves frame
+// line line_1based's content after it is drawn 0H-relative: its lattice
+// delay d_k (0 on NTSC and PAL-M, under 2 on PAL and SECAM), rounded, as the
+// windows here are whole samples.
+int LatticeShiftSamples(Standard standard, int line_1based) {
+  return static_cast<int>(
+      std::lround(LatticeLineDelay(standard, line_1based).Samples()));
+}
 
 }  // namespace
 
@@ -86,11 +96,12 @@ std::vector<PictureLineWindow> BuildPictureLineWindows(const Project& project,
     }
     const auto index = static_cast<std::size_t>(line.line_number_1based - 1);
     const int samples = line_samples[index];
+    const int shift = LatticeShiftSamples(standard, line.line_number_1based);
     const int start =
-        std::clamp(geometry.active_window_start_samples, 0, samples);
-    const int end =
-        std::clamp(ActivePictureEndSamples(geometry, line.line_number_1based),
-                   start, samples);
+        std::clamp(geometry.active_window_start_samples + shift, 0, samples);
+    const int end = std::clamp(
+        ActivePictureEndSamples(geometry, line.line_number_1based) + shift,
+        start, samples);
     windows.push_back(PictureLineWindow{
         .start = static_cast<std::size_t>(line_offsets[index] + start),
         .count = static_cast<std::size_t>(end - start),
@@ -113,8 +124,10 @@ std::vector<PictureLineWindow> BuildBurstLineWindows(Standard standard) {
   std::vector<PictureLineWindow> windows;
   windows.reserve(line_samples.size());
   for (std::size_t index = 0; index < line_samples.size(); ++index) {
-    const int start = std::clamp(gate_start, 0, line_samples[index]);
-    const int end = std::clamp(gate_end, start, line_samples[index]);
+    const int shift =
+        LatticeShiftSamples(standard, static_cast<int>(index) + 1);
+    const int start = std::clamp(gate_start + shift, 0, line_samples[index]);
+    const int end = std::clamp(gate_end + shift, start, line_samples[index]);
     windows.push_back(PictureLineWindow{
         .start = static_cast<std::size_t>(line_offsets[index] + start),
         .count = static_cast<std::size_t>(end - start),

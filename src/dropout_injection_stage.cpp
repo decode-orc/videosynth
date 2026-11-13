@@ -45,7 +45,9 @@ constexpr int kSeverityVisible = 75;
 // PAL: lines 23–622 active (fields 1 and 2 combined).
 //   First active sample: line 22 * 1135 = 24 970. (0-based: line index 22)
 //   Last  active sample: end of line 622 = line 622 * 1135 + 1134 = 706 404.
-// These are used for severity assignment and boundary splitting.
+// These are used for severity assignment and boundary splitting. They are
+// whole-line bounds of the frame's picture lines, so the PAL lattice delay
+// (under 2 samples, LatticeLineDelay) does not move them.
 constexpr int kPalActivePictureStart = 22 * 1135;        // 24970
 constexpr int kPalActivePictureEnd = 622 * 1135 + 1134;  // 706404
 
