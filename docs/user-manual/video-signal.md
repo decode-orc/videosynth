@@ -33,7 +33,7 @@ The output resolution is fixed by the standard and cannot be set in the project.
 | `RAW_S16_28M` | 28 MHz | Signed 16-bit millivolts | Resampled from the 4fsc lattice |
 | `RAW_S16_40M` | 40 MHz | Signed 16-bit millivolts | Resampled from the 4fsc lattice |
 
-**4fsc** means the sample clock is phase-locked to the colour subcarrier at four times its frequency: 17,734,475 Hz for PAL and 14,318,180 Hz for NTSC. SECAM has no single subcarrier and is stored on the PAL 4fsc lattice, as the CVBS file format specifies. NTSC is orthogonal at 4fsc — 910 samples × 525 lines = 477,750 samples per frame. PAL is not: it has 1135.0064 samples per line, so a frame is 709,379 samples — 1135 per line plus four extra samples per frame, two on line 313 and two on line 625. PAL-M has exactly 909 samples per line, 477,225 per frame.
+**4fsc** means the sample clock is phase-locked to the colour subcarrier at four times its frequency: 17,734,475 Hz for PAL and 14,318,180 Hz for NTSC. SECAM has no single subcarrier and is stored on the PAL 4fsc lattice, as the CVBS file format specifies. NTSC is orthogonal at 4fsc — 910 samples × 525 lines = 477,750 samples per frame. PAL is not: it has 1135.0064 samples per line, so a frame is 709,379 samples — 1135 per line plus four extra samples per frame, two on line 313 and two on line 625 (1137 samples each), as placed by EBU Tech. 3280-E §1.2. PAL-M has exactly 909 samples per line, 477,225 per frame.
 
 Generation always happens on the 4fsc lattice. The raw presets are produced by resampling that lattice to the requested rate in the output stage.
 
