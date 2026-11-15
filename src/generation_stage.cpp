@@ -989,6 +989,8 @@ struct GenerationStage::SynthesisResources {
   std::vector<int> active_sample_indices;
   std::vector<SampleFixed> encoded_line_chroma;
   std::vector<SampleFixed> secam_line_chroma;
+  // SECAM truth only: the low-passed D'R and D'B of the line being drawn.
+  std::array<std::vector<double>, 2> secam_truth_colour_difference;
 
   // Luma bandwidth limit of the section most recently synthesised by this
   // worker, redesigned only when a section brings in different settings, and
@@ -1788,6 +1790,13 @@ void GenerationStage::SynthesiseTemplate(
   // line sequence and the subcarrier phase inversion both repeat every two
   // frames, which divides the 4-frame colour sequence period.
   const int secam_frame_parity = static_cast<int>(sequence_phase % 2U);
+  if (truth != nullptr && secam_encoder != nullptr) {
+    // Frame 0 of the cycle carries D'R on its odd lines (line 7 first).
+    truth->dr_line_parity =
+        SecamComponentForLine(1, secam_frame_parity) == SecamLineComponent::kDr
+            ? 1
+            : 0;
+  }
   const int active_window_start = resources.active_window_start;
   const int active_window_samples = resources.active_window_samples;
   // The run of each line the section paints with picture: the active window,
@@ -2385,12 +2394,11 @@ void GenerationStage::SynthesiseTemplate(
                       c_out + line_base + picture_end);
         }
 
-        if (truth != nullptr && secam_encoder == nullptr) {
+        if (truth != nullptr) {
           // The truth row is the progressive row the line was drawn from.
           // Y is read back from the painted line (after the picture response
-          // and the luma bandwidth limit) and U/V are the encoder's filtered
-          // axes, exactly as modulated, with the V-switch removed. Samples past
-          // the end of a half-picture line carry no picture and stay zero.
+          // and the luma bandwidth limit). Samples past the end of a
+          // half-picture line carry no picture and stay zero.
           const int truth_row =
               (2 * field_line) +
               ((line.field_index_1based == upper_field_index_1based) ? 0 : 1);
@@ -2405,33 +2413,63 @@ void GenerationStage::SynthesiseTemplate(
                                     line_samples - active_window_start}));
           const int truth_slot_offset = active_window_start - painted_start;
           const int truth_line_sample_base = line_base + active_window_start;
-          const std::vector<std::int32_t>& filtered_u =
-              chroma_encoder->filtered_sin_axis();
-          const std::vector<std::int32_t>& filtered_v =
-              chroma_encoder->filtered_cos_axis();
-          const double u_mv_per_unit = chroma_encoder->sin_scale_mv() /
-                                       static_cast<double>(kChromaAxisScale);
-          const double v_mv_per_unit = static_cast<double>(v_switch_sign) *
-                                       chroma_encoder->cos_scale_mv() /
-                                       static_cast<double>(kChromaAxisScale);
           float* const truth_y = truth->y_mv.data() + row_offset;
-          float* const truth_u = truth->u_mv.data() + row_offset;
-          float* const truth_v = truth->v_mv.data() + row_offset;
           for (int x_sample = 0; x_sample < truth_samples; ++x_sample) {
-            const std::size_t slot = static_cast<std::size_t>(x_sample);
-            const int painted_slot = x_sample + truth_slot_offset;
-            truth_y[slot] = static_cast<float>(SampleFixedToMillivolts(
-                y_out[static_cast<std::size_t>(truth_line_sample_base +
-                                               x_sample)] -
-                blanking_fixed));
-            truth_u[slot] = static_cast<float>(
-                static_cast<double>(
-                    filtered_u[static_cast<std::size_t>(painted_slot)]) *
-                u_mv_per_unit);
-            truth_v[slot] = static_cast<float>(
-                static_cast<double>(
-                    filtered_v[static_cast<std::size_t>(painted_slot)]) *
-                v_mv_per_unit);
+            truth_y[static_cast<std::size_t>(x_sample)] =
+                static_cast<float>(SampleFixedToMillivolts(
+                    y_out[static_cast<std::size_t>(truth_line_sample_base +
+                                                   x_sample)] -
+                    blanking_fixed));
+          }
+          if (secam_encoder != nullptr) {
+            // ITU-R BT.1700 Annex 1 Part C Table 4 items 9 and 10c: both
+            // colour differences, low-passed exactly as the encoder does
+            // before precorrection, on every row; the line transmits only one.
+            std::array<std::vector<double>, 2>& colour_difference =
+                resources.secam_truth_colour_difference;
+            secam_encoder->ColourDifferenceLine(
+                SecamLineComponent::kDr, line_source_samples, painted_start,
+                line_samples, &colour_difference[0]);
+            secam_encoder->ColourDifferenceLine(
+                SecamLineComponent::kDb, line_source_samples, painted_start,
+                line_samples, &colour_difference[1]);
+            float* const truth_dr = truth->dr.data() + row_offset;
+            float* const truth_db = truth->db.data() + row_offset;
+            for (int x_sample = 0; x_sample < truth_samples; ++x_sample) {
+              const std::size_t slot = static_cast<std::size_t>(x_sample);
+              const std::size_t line_slot =
+                  static_cast<std::size_t>(active_window_start) + slot;
+              truth_dr[slot] =
+                  static_cast<float>(colour_difference[0][line_slot]);
+              truth_db[slot] =
+                  static_cast<float>(colour_difference[1][line_slot]);
+            }
+          } else {
+            // U/V are the encoder's filtered axes, exactly as modulated, with
+            // the V-switch removed.
+            const std::vector<std::int32_t>& filtered_u =
+                chroma_encoder->filtered_sin_axis();
+            const std::vector<std::int32_t>& filtered_v =
+                chroma_encoder->filtered_cos_axis();
+            const double u_mv_per_unit = chroma_encoder->sin_scale_mv() /
+                                         static_cast<double>(kChromaAxisScale);
+            const double v_mv_per_unit = static_cast<double>(v_switch_sign) *
+                                         chroma_encoder->cos_scale_mv() /
+                                         static_cast<double>(kChromaAxisScale);
+            float* const truth_u = truth->u_mv.data() + row_offset;
+            float* const truth_v = truth->v_mv.data() + row_offset;
+            for (int x_sample = 0; x_sample < truth_samples; ++x_sample) {
+              const std::size_t slot = static_cast<std::size_t>(x_sample);
+              const int painted_slot = x_sample + truth_slot_offset;
+              truth_u[slot] = static_cast<float>(
+                  static_cast<double>(
+                      filtered_u[static_cast<std::size_t>(painted_slot)]) *
+                  u_mv_per_unit);
+              truth_v[slot] = static_cast<float>(
+                  static_cast<double>(
+                      filtered_v[static_cast<std::size_t>(painted_slot)]) *
+                  v_mv_per_unit);
+            }
           }
         }
       }
@@ -2569,7 +2607,7 @@ bool GenerationStage::GenerateFrames(
   if (with_truth) {
     if (truth_layout.rows <= 0) {
       errors->push_back(
-          "Truth output is only available for PAL, NTSC and PAL-M projects.");
+          "Truth output is not available for this video standard.");
       return false;
     }
     // Recycled frames keep their plane storage; Reset re-zeroes it.

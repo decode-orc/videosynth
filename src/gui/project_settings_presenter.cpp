@@ -175,7 +175,6 @@ ProjectSettingsFormState BuildProjectSettingsFormState(const Project& project) {
   const bool has_efm_channel = StandardHasLaserdiscDigitalAudio(standard);
   const LaserdiscParameters& laserdisc = project.laserdisc;
   state.efm_output_editable = has_efm_channel && !laserdisc.efm_data.enabled;
-  state.truth_editable = standard != Standard::kSecam;
   state.efm_pair_editable = has_efm_channel && laserdisc.efm_audio.enabled;
   state.efm_status = ClassifyEfmOutput(project);
 
@@ -206,14 +205,6 @@ CvbsPresets NormalizeCvbsPresetsForStandard(CvbsPresets presets) {
     presets.ntsc_black_setup_ire = 7.5;
   }
   return presets;
-}
-
-OutputTargets NormalizeOutputTargetsForStandard(OutputTargets output,
-                                                Standard standard) {
-  if (standard == Standard::kSecam) {
-    output.truth = false;
-  }
-  return output;
 }
 
 LaserdiscParameters NormalizeLaserdiscForStandard(LaserdiscParameters laserdisc,

@@ -67,14 +67,14 @@ Every dock can be hidden, floated or rearranged; **View → Panels** toggles the
 
 - **Project** — name, version, description.
 - **CVBS Presets** — video standard, sample encoding, signal state, and the standard-specific options (NTSC black setup override, SECAM field identification). The signal state follows the standard: `STANDARD_STABLE_UNLOCKED` for [SECAM](video-signal.md#secam-chroma), `STANDARD_STABLE_LOCKED` otherwise. Options that do not apply to the selected standard are disabled rather than hidden.
-- **Output** — video path and signal type, and **Picture truth**, which writes the [component picture](../reference/output.md#truth) beside the video (not offered for SECAM).
+- **Output** — video path and signal type, and **Picture truth**, which writes the [component picture](../reference/output.md#truth) beside the video.
 - **VITS** — the VITS **Placement** policy (*Standard (broadcast lines)*, *Laserdisc (IEC 60856/60857)* or *Custom (choose lines)*) and the VITS checklist. SECAM has no laserdisc placement. See [VITS](vits.md).
 - **LaserDisc** — the [LaserDisc settings](#laserdisc), for disc projects only.
 - **Channel (pressing)** — the [`channel:` block](../reference/channel.md): a sub-sample **timing offset**, plus optional **Edge smear** (fraction and time constant). These describe the pressing, so every project of one pressing should use the same values.
 - **Chroma error (capture)** — the [`chroma_error:` block](../reference/chroma-error.md): chroma **gain** and **phase**, **Include burst**, plus optional **Per-line jitter** (phase and gain deviations, with an optional fixed seed), **Differential gain and phase** (gain and phase curves against luma level, in IRE) and **Crosstalk** (V into U, U into V, and **Alternate with PAL V-switch**, which NTSC cannot carry). It is not available for SECAM.
 - **Line timing (capture)** — the [`line_timing:` block](../reference/line-timing.md): the per-line timing error left after time-base correction, as **Per line**, **Line correlation**, **Per field** and **Slope** figures with an optional fixed seed, **Include burst** (not available for SECAM), and an optional **Recorded on the disc (pressing)** group with the same figures and a fixed seed. For a pressing-only error, set the capture figures to 0: a capture layer whose figures are all 0 does nothing.
 
-Ticking a group that was off fills in typical values, which you can then edit. Changing the standard in the New Project dialog clears the settings the new standard cannot carry: the picture truth, chroma error and line timing **Include burst** on SECAM, and the LaserDisc settings described below.
+Ticking a group that was off fills in typical values, which you can then edit. Changing the standard in the New Project dialog clears the settings the new standard cannot carry: the chroma error and line timing **Include burst** on SECAM, and the LaserDisc settings described below.
 
 ### LaserDisc
 

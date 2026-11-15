@@ -332,18 +332,39 @@ TEST(PictureTruthGenerationTest, TruthRequestDoesNotChangeTheSignal) {
   EXPECT_EQ(plain.c_mv, with_truth.c_mv);
 }
 
-TEST(PictureTruthGenerationTest, SecamHasNoTruth) {
+TEST(PictureTruthGenerationTest, SecamTruthCarriesDrAndDbOnEveryRow) {
+  // A uniform +V (Cr above 512) grey: D'R = -1.902 (R'-Y') is negative on
+  // every row, including the rows whose lines transmit D'B, and D'B is zero.
   const Project project = MakeProject(Standard::kSecam, "flat_v.mkv");
-  auto stage = MakeStage(Standard::kSecam);
-  std::vector<IGenerationStage::FrameScheduleItem> schedule;
-  std::vector<std::string> errors;
-  ASSERT_TRUE(stage->BuildFrameSchedule(project, &schedule, &errors));
-  std::vector<SampleFixed> y_mv;
-  std::vector<SampleFixed> c_mv;
-  std::vector<PictureTruthFrame> truth;
-  EXPECT_FALSE(stage->GenerateFrameBatchWithTruth(
-      project, schedule, 0, 1, &y_mv, &c_mv, &truth, &errors));
-  ASSERT_FALSE(errors.empty());
+  const GeneratedFrames frames = Generate(project, 2, true);
+  ASSERT_EQ(frames.truth.size(), 2U);
+  const PictureTruthLayout layout =
+      BuildPictureTruthLayout(project.cvbs_presets);
+  const int x = layout.samples_per_line / 2;
+  for (std::size_t frame = 0; frame < 2U; ++frame) {
+    const PictureTruthFrame& truth = frames.truth[frame];
+    EXPECT_TRUE(truth.u_mv.empty());
+    EXPECT_TRUE(truth.v_mv.empty());
+    ASSERT_EQ(truth.dr.size(), layout.PlaneSamples());
+    ASSERT_EQ(truth.db.size(), layout.PlaneSamples());
+    EXPECT_EQ(truth.dr_line_parity, frame == 0U ? 1 : 0);
+    const float reference = truth.dr[x];
+    EXPECT_LT(reference, -0.1F);
+    for (int row = 0; row < layout.rows - 1; ++row) {
+      const std::size_t index =
+          (static_cast<std::size_t>(row) * layout.samples_per_line) + x;
+      ASSERT_FLOAT_EQ(truth.dr[index], reference) << "row " << row;
+      ASSERT_NEAR(truth.db[index], 0.0F, 1e-6F) << "row " << row;
+    }
+  }
+}
+
+TEST(PictureTruthGenerationTest, SecamTruthRequestDoesNotChangeTheSignal) {
+  const Project project = MakeProject(Standard::kSecam, "flat_v.mkv");
+  const GeneratedFrames plain = Generate(project, 2, false);
+  const GeneratedFrames with_truth = Generate(project, 2, true);
+  EXPECT_EQ(plain.y_mv, with_truth.y_mv);
+  EXPECT_EQ(plain.c_mv, with_truth.c_mv);
 }
 
 // Counts the rows (sampled at column x) whose truth value is positive and

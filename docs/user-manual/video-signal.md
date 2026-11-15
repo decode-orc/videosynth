@@ -199,7 +199,7 @@ The switch sign belongs to the line and flips every frame for a given frame line
 
 ### Picture truth
 
-[`output.truth: true`](../reference/output.md#truth) writes the Y, U and V that went into the modulator — after the horizontal mapping, the picture response, the luma bandwidth limit, the chroma low-pass and any chroma line sign regions, and before any impairment — as planar `float32` at 4fsc over the active window, with a SQLite sidecar like the other `.meta` files. A decoder's output can then be scored against exactly what was encoded rather than against a re-derivation of videosynth's filters, which could drift silently from them. PAL, NTSC and PAL-M only; OSD text is not included. See [Output files](outputs.md#picture-truth).
+[`output.truth: true`](../reference/output.md#truth) writes the Y and colour difference (U and V, or SECAM D′R and D′B) that went into the modulator — after the horizontal mapping, the picture response, the luma bandwidth limit, the chroma low-pass and any chroma line sign regions, and before any impairment — as planar `float32` at 4fsc over the active window, with a SQLite sidecar like the other `.meta` files. A decoder's output can then be scored against exactly what was encoded rather than against a re-derivation of videosynth's filters, which could drift silently from them. SECAM's D′R and D′B are given on every row, before precorrection and FM, so both the transmitted lines and a decoder's reconstruction of the other component can be scored. OSD text is not included. See [Output files](outputs.md#picture-truth).
 
 ## Field and line structure
 

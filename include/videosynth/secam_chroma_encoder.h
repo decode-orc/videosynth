@@ -17,6 +17,16 @@
 
 namespace videosynth {
 
+// ITU-R BT.1700 Annex 1 Part C Table 4 item 10e: nominal deviation for a
+// precorrected colour difference D* of 1.
+constexpr double kSecamNominalDrDeviationHz = 280.0e3;
+constexpr double kSecamNominalDbDeviationHz = 230.0e3;
+
+// ITU-R BT.1700 Annex 1 Part C Table 4 item 9: D'R = −1.902 (E'R − E'Y) and
+// D'B = 1.505 (E'B − E'Y).
+constexpr double kSecamDrPerRMinusY = -1.902;
+constexpr double kSecamDbPerBMinusY = 1.505;
+
 // Colour-difference component carried by one SECAM line.
 //
 // ITU-R BT.1700 Annex 1 Part C Table 4 item 10d: D'R and D'B are transmitted
@@ -83,6 +93,29 @@ class ISecamChromaEncoder {
                           int active_start_sample, int line_samples,
                           std::vector<SampleFixed>* out_chroma_mv) const = 0;
 
+  // Returns the low-passed colour difference of one line, the signal the
+  // low-frequency precorrection consumes: D'R or D'B (item 9) after the
+  // colour-difference low-pass (item 10c), from 0H, zero outside the picture.
+  // On this scale 1.0 is the nominal deviation (item 10e) at low frequency.
+  // EncodeLine is ColourDifferenceLine followed by EncodeColourDifferenceLine.
+  //
+  // Args are as for EncodeLine; out_colour_difference receives line_samples
+  // values and must be non-null.
+  virtual void ColourDifferenceLine(
+      SecamLineComponent component,
+      const std::vector<YCbCr444Pixel>& active_pixels, int active_start_sample,
+      int line_samples, std::vector<double>* out_colour_difference) const = 0;
+
+  // Encodes one line from its low-passed colour difference (as returned by
+  // ColourDifferenceLine): low-frequency precorrection (item 10f), frequency
+  // modulation with the deviation limits (items 5, 10e), the bell filter
+  // (item 10d) and the subcarrier blanking gate. Samples of colour_difference
+  // past its end are taken as zero.
+  virtual void EncodeColourDifferenceLine(
+      SecamLineComponent component, double initial_phase_rad,
+      const std::vector<double>& colour_difference, int line_samples,
+      std::vector<SampleFixed>* out_chroma_mv) const = 0;
+
   // Encodes one field identification line.
   //
   // ITU-R BT.1700 Annex 1 Part C Table 4 item 13 and Figure 17: D'R* rises
@@ -129,6 +162,17 @@ class SecamChromaEncoder final : public ISecamChromaEncoder {
                   const std::vector<YCbCr444Pixel>& active_pixels,
                   int active_start_sample, int line_samples,
                   std::vector<SampleFixed>* out_chroma_mv) const override;
+
+  void ColourDifferenceLine(
+      SecamLineComponent component,
+      const std::vector<YCbCr444Pixel>& active_pixels, int active_start_sample,
+      int line_samples,
+      std::vector<double>* out_colour_difference) const override;
+
+  void EncodeColourDifferenceLine(
+      SecamLineComponent component, double initial_phase_rad,
+      const std::vector<double>& colour_difference, int line_samples,
+      std::vector<SampleFixed>* out_chroma_mv) const override;
 
   // The identification ramp starts at the back edge of line blanking. The
   // trapezoid is already the precorrected D* signal, so neither the low-pass

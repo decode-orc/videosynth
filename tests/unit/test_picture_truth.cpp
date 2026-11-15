@@ -80,8 +80,27 @@ TEST(PictureTruthLayoutTest, NtscEvenRowsComeFromField2) {
   EXPECT_GT(layout.black_mv, 50.0);
 }
 
-TEST(PictureTruthLayoutTest, SecamHasNoLayout) {
-  EXPECT_EQ(BuildPictureTruthLayout(PresetsFor(Standard::kSecam)).rows, 0);
+TEST(PictureTruthLayoutTest, SecamSharesThePalRaster) {
+  const PictureTruthLayout pal =
+      BuildPictureTruthLayout(PresetsFor(Standard::kPal));
+  const PictureTruthLayout secam =
+      BuildPictureTruthLayout(PresetsFor(Standard::kSecam));
+  EXPECT_EQ(secam.standard, Standard::kSecam);
+  EXPECT_DOUBLE_EQ(secam.sample_rate_hz, pal.sample_rate_hz);
+  EXPECT_EQ(secam.samples_per_line, 922);
+  EXPECT_EQ(secam.first_sample, 177);
+  EXPECT_EQ(secam.rows, 576);
+  EXPECT_EQ(secam.first_line_field1, 23);
+  EXPECT_EQ(secam.first_line_field2, 336);
+  EXPECT_EQ(secam.upper_field, 1);
+  EXPECT_EQ(secam.half_picture_line, pal.half_picture_line);
+  EXPECT_EQ(secam.half_picture_end_sample, pal.half_picture_end_sample);
+  EXPECT_DOUBLE_EQ(secam.black_mv, pal.black_mv);
+  EXPECT_DOUBLE_EQ(secam.white_mv, pal.white_mv);
+}
+
+TEST(PictureTruthLayoutTest, UnknownStandardHasNoLayout) {
+  EXPECT_EQ(BuildPictureTruthLayout(PresetsFor(Standard::kUnknown)).rows, 0);
 }
 
 TEST(PictureTruthLayoutTest, ResetSizesAndZeroesThePlanes) {
@@ -96,6 +115,24 @@ TEST(PictureTruthLayoutTest, ResetSizesAndZeroesThePlanes) {
   for (const float value : frame.y_mv) {
     ASSERT_EQ(value, 0.0F);
   }
+  EXPECT_TRUE(frame.dr.empty());
+  EXPECT_TRUE(frame.db.empty());
+  EXPECT_EQ(frame.dr_line_parity, -1);
+}
+
+TEST(PictureTruthLayoutTest, SecamResetSizesTheColourDifferencePlanes) {
+  const PictureTruthLayout layout =
+      BuildPictureTruthLayout(PresetsFor(Standard::kSecam));
+  PictureTruthFrame frame;
+  frame.u_mv.assign(3, 5.0F);
+  frame.dr_line_parity = 1;
+  frame.Reset(layout);
+  EXPECT_EQ(frame.y_mv.size(), layout.PlaneSamples());
+  EXPECT_EQ(frame.dr.size(), layout.PlaneSamples());
+  EXPECT_EQ(frame.db.size(), layout.PlaneSamples());
+  EXPECT_TRUE(frame.u_mv.empty());
+  EXPECT_TRUE(frame.v_mv.empty());
+  EXPECT_EQ(frame.dr_line_parity, -1);
 }
 
 TEST(PictureTruthPathTest, SitsBesideTheVideoOutput) {
@@ -296,9 +333,9 @@ TEST(ChromaLineSignValidationTest, RejectsARegionThatChangesNothing) {
   EXPECT_TRUE(AnyContains(result.errors, "changes nothing"));
 }
 
-TEST(PictureTruthValidationTest, AcceptsQuadratureStandards) {
+TEST(PictureTruthValidationTest, AcceptsEveryStandard) {
   for (const Standard standard :
-       {Standard::kPal, Standard::kNtsc, Standard::kPalM}) {
+       {Standard::kPal, Standard::kNtsc, Standard::kPalM, Standard::kSecam}) {
     Project project = ValidProject(standard);
     project.output.truth = true;
     const ValidationResult result = ProjectValidator().Validate(project);
@@ -306,14 +343,6 @@ TEST(PictureTruthValidationTest, AcceptsQuadratureStandards) {
         << (result.errors.empty() ? "" : result.errors[0]);
     EXPECT_FALSE(AnyContains(result.warnings, "output.truth"));
   }
-}
-
-TEST(PictureTruthValidationTest, RejectsSecam) {
-  Project project = ValidProject(Standard::kSecam);
-  project.output.truth = true;
-  const ValidationResult result = ProjectValidator().Validate(project);
-  EXPECT_FALSE(result.is_valid);
-  EXPECT_TRUE(AnyContains(result.errors, "output.truth requires a PAL"));
 }
 
 TEST(PictureTruthValidationTest, WarnsThatOsdIsExcluded) {

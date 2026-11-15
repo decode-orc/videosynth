@@ -33,19 +33,19 @@ constexpr double kSecamFobHz = 4250000.0;
 
 // ITU-R BT.1700 Annex 1 Part C Table 4 item 10e: nominal deviation for D* = 1
 // and the maximum deviations.
-constexpr double kSecamDeltaForHz = 280.0e3;
-constexpr double kSecamDeltaFobHz = 230.0e3;
+constexpr double kSecamDeltaForHz = kSecamNominalDrDeviationHz;
+constexpr double kSecamDeltaFobHz = kSecamNominalDbDeviationHz;
 constexpr double kSecamDrMaxPositiveHz = 350.0e3;
 constexpr double kSecamDrMaxNegativeHz = -506.0e3;
 constexpr double kSecamDbMaxPositiveHz = 506.0e3;
 constexpr double kSecamDbMaxNegativeHz = -350.0e3;
 
-// ITU-R BT.1700 Annex 1 Part C Table 4 item 9: D'R = −1.902 (E'R − E'Y) and
-// D'B = 1.505 (E'B − E'Y). BT.601 normalises Cb as (B−Y)/(2(1−Kb)) and Cr as
-// (R−Y)/(2(1−Kr)) into ±448 10-bit codes, so (B−Y) = 0.886 × cb_norm and
-// (R−Y) = 0.701 × cr_norm for cb_norm, cr_norm in [−1, 1].
-constexpr double kSecamDrPerCrNorm = -1.902 * 0.701;
-constexpr double kSecamDbPerCbNorm = 1.505 * 0.886;
+// ITU-R BT.1700 Annex 1 Part C Table 4 item 9 (see kSecamDrPerRMinusY). BT.601
+// normalises Cb as (B−Y)/(2(1−Kb)) and Cr as (R−Y)/(2(1−Kr)) into ±448 10-bit
+// codes, so (B−Y) = 0.886 × cb_norm and (R−Y) = 0.701 × cr_norm for cb_norm,
+// cr_norm in [−1, 1].
+constexpr double kSecamDrPerCrNorm = kSecamDrPerRMinusY * 0.701;
+constexpr double kSecamDbPerCbNorm = kSecamDbPerBMinusY * 0.886;
 
 // ITU-R BT.1700 Annex 1 Part C Table 4 item 10c: colour-difference attenuation
 // ≤ 3 dB at 1.3 MHz and ≥ 30 dB at 3.5 MHz. A 33-tap Hamming-windowed sinc
@@ -209,6 +209,24 @@ void SecamChromaEncoder::EncodeLine(
     out_chroma_mv->clear();
     return;
   }
+  ColourDifferenceLine(component, active_pixels, active_start_sample,
+                       line_samples, &filtered_);
+  EncodeColourDifferenceLine(component, initial_phase_rad, filtered_,
+                             line_samples, out_chroma_mv);
+}
+
+void SecamChromaEncoder::ColourDifferenceLine(
+    SecamLineComponent component,
+    const std::vector<YCbCr444Pixel>& active_pixels, int active_start_sample,
+    int line_samples, std::vector<double>* out_colour_difference) const {
+  if (out_colour_difference == nullptr) {
+    throw std::invalid_argument(
+        "Output colour difference pointer must not be null");
+  }
+  if (line_samples <= 0) {
+    out_colour_difference->clear();
+    return;
+  }
 
   const std::size_t count = static_cast<std::size_t>(line_samples);
   const bool dr_line = component == SecamLineComponent::kDr;
@@ -234,7 +252,8 @@ void SecamChromaEncoder::EncodeLine(
   // Colour-difference low-pass (item 10c). Outside the line the signal is the
   // zero reference, so the kernel is zero-padded.
   const int half_width = static_cast<int>(low_pass_taps_.size()) / 2;
-  filtered_.assign(count, 0.0);
+  std::vector<double>& filtered = *out_colour_difference;
+  filtered.assign(count, 0.0);
   for (int index = 0; index < line_samples; ++index) {
     double acc = 0.0;
     for (int tap = 0; tap < static_cast<int>(low_pass_taps_.size()); ++tap) {
@@ -244,16 +263,31 @@ void SecamChromaEncoder::EncodeLine(
                colour_difference_[static_cast<std::size_t>(source)];
       }
     }
-    filtered_[static_cast<std::size_t>(index)] = acc;
+    filtered[static_cast<std::size_t>(index)] = acc;
+  }
+}
+
+void SecamChromaEncoder::EncodeColourDifferenceLine(
+    SecamLineComponent component, double initial_phase_rad,
+    const std::vector<double>& colour_difference, int line_samples,
+    std::vector<SampleFixed>* out_chroma_mv) const {
+  if (out_chroma_mv == nullptr) {
+    throw std::invalid_argument("Output chroma line pointer must not be null");
+  }
+  if (line_samples <= 0) {
+    out_chroma_mv->clear();
+    return;
   }
 
   // Low-frequency precorrection (item 10f). The filter starts at rest on the
   // zero reference at 0H.
+  const std::size_t count = static_cast<std::size_t>(line_samples);
   deviation_norm_.assign(count, 0.0);
   double x1 = 0.0;
   double y1 = 0.0;
   for (std::size_t index = 0; index < count; ++index) {
-    const double x0 = filtered_[index];
+    const double x0 =
+        index < colour_difference.size() ? colour_difference[index] : 0.0;
     const double y0 = (lf_b0_ * x0) + (lf_b1_ * x1) - (lf_a1_ * y1);
     deviation_norm_[index] = y0;
     x1 = x0;

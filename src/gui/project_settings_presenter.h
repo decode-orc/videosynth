@@ -185,10 +185,6 @@ struct ProjectSettingsFormState {
   // the compact-disc mode pre-standard AIV discs record.
   std::vector<int> efm_data_q_mode_options;
   EfmDataStatus efm_data_status = EfmDataStatus::kDisabled;
-
-  // The picture truth (output.truth) carries the quadrature U/V components,
-  // so it is offered for PAL, NTSC and PAL-M but not SECAM.
-  bool truth_editable = true;
 };
 
 // Builds the form state (catalogues + enablement) for the given project.
@@ -200,12 +196,6 @@ ProjectSettingsFormState BuildProjectSettingsFormState(const Project& project);
 // signal state is set to the one the standard requires
 // (GeneratedSignalStatePreset). Returns the adjusted presets.
 CvbsPresets NormalizeCvbsPresetsForStandard(CvbsPresets presets);
-
-// Clears output selections the given standard cannot carry, mirroring
-// ProjectValidator: the picture truth carries quadrature U/V components, so
-// it is cleared for SECAM. Returns the adjusted targets.
-OutputTargets NormalizeOutputTargetsForStandard(OutputTargets output,
-                                                Standard standard);
 
 // Clears laserdisc settings the given standard cannot carry, mirroring
 // ProjectValidator: there is no SECAM LaserVision format (the whole block is

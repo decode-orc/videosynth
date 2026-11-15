@@ -450,10 +450,6 @@ The image sectors whose pictures fall in sections without `laserdisc.efm_data`, 
 
 decode-orc skips lead-in sections until its timeline settles, so it reports the image sectors placed in the lead-in as missing. The `.efm` stream does carry them.
 
-### `output.truth requires a PAL, NTSC or PAL-M project`
-
-SECAM carries its colour as frequency-modulated subcarriers, with no U/V quadrature components for the truth to record. Remove `truth: true` from SECAM projects.
-
 ### `output.truth excludes OSD overlays`
 
 OSD text is drawn after the truth is taken, so the truth shows the picture under the text. Remove the overlays from projects whose decoded picture will be scored against the truth.

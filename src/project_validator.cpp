@@ -1975,20 +1975,12 @@ void ValidateChromaLineSign(const videosynth::Section& section,
   }
 }
 
-// Checks `output.truth:`. The truth carries the quadrature colour-difference
-// components, which SECAM does not transmit; OSD text is drawn after the
-// truth is taken, so a project with overlays gets a warning.
+// Checks `output.truth:`. Every standard has a truth (SECAM's carries D'R and
+// D'B in place of U and V); OSD text is drawn after the truth is taken, so a
+// project with overlays gets a warning.
 void ValidateTruthOutput(const videosynth::Project& project,
                          videosynth::ValidationResult* result) {
   if (result == nullptr || !project.output.truth) {
-    return;
-  }
-  if (project.cvbs_presets.video_standard_preset ==
-      videosynth::Standard::kSecam) {
-    result->is_valid = false;
-    result->errors.push_back(
-        "Project configuration error: output.truth requires a PAL, NTSC or "
-        "PAL-M project; SECAM has no U/V quadrature components.");
     return;
   }
   for (const videosynth::Section& section : project.sections) {

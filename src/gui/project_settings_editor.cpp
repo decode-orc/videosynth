@@ -237,14 +237,16 @@ void ProjectSettingsEditor::BuildUi() {
 
   // The component picture that went into the modulator, for scoring
   // decoders against the source rather than against their own decode.
-  truth_check_ =
-      new QCheckBox(tr("Write the component picture (Y, U, V)"), output_group);
+  truth_check_ = new QCheckBox(tr("Write the component picture (Y and colour "
+                                  "difference)"),
+                               output_group);
   truth_check_->setToolTip(
       tr("Writes “.truth” and its “.truth.meta” sidecar beside the video "
-         "output: the Y, U and V that went into the composite at 4fsc over "
-         "the active window, after the horizontal mapping, luma bandwidth "
-         "limit, chroma low-pass and chroma line sign, and before any "
-         "channel, chroma error, line timing, noise or dropout "
+         "output: the Y and colour difference (U and V, or SECAM D′R and "
+         "D′B on every line) that went into the chroma modulator at 4fsc "
+         "over the active window, after the horizontal mapping, luma "
+         "bandwidth limit, chroma low-pass and chroma line sign, and before "
+         "any channel, chroma error, line timing, noise or dropout "
          "impairment."));
 
   output_form->addRow(tr("Signal type:"), signal_type_combo_);
@@ -1258,7 +1260,6 @@ void ProjectSettingsEditor::ApplyEnablement() {
                                        line_timing_burst_check_->isChecked());
 
   ApplyLaserdiscEnablement(state);
-  truth_check_->setEnabled(state.truth_editable || truth_check_->isChecked());
 }
 
 void ProjectSettingsEditor::ApplyLaserdiscEnablement(
@@ -1399,12 +1400,10 @@ void ProjectSettingsEditor::CommitCvbsPresets() {
   const Standard new_standard = presets.video_standard_preset;
   if (new_standard != old_standard) {
     // Clear the settings the new standard cannot carry rather than leave
-    // ones the validator would reject: the picture truth (not SECAM), the
-    // LaserDisc block (none for SECAM; pilot burst, FM beat and the nominal
-    // group delay PAL-only, VBI burst NTSC-only, EFM per
-    // StandardHasLaserdiscDigitalAudio) and the chroma error (not SECAM).
-    document_->SetOutputTargets(NormalizeOutputTargetsForStandard(
-        document_->project().output, new_standard));
+    // ones the validator would reject: the LaserDisc block (none for SECAM;
+    // pilot burst, FM beat and the nominal group delay PAL-only, VBI burst
+    // NTSC-only, EFM per StandardHasLaserdiscDigitalAudio) and the chroma
+    // error (not SECAM).
     document_->SetLaserdisc(NormalizeLaserdiscForStandard(
         document_->project().laserdisc, new_standard));
     if (!document_->project().laserdisc.enabled) {
@@ -1555,9 +1554,6 @@ void ProjectSettingsEditor::CommitOutputTargets() {
   // derived from it rather than set independently.
   output.metadata_path = DeriveMetadataPath(output.video_path);
   output.truth = truth_check_->isChecked();
-  output = NormalizeOutputTargetsForStandard(
-      std::move(output),
-      document_->project().cvbs_presets.video_standard_preset);
 
   committing_ = true;
   document_->SetOutputTargets(output);

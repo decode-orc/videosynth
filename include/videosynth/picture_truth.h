@@ -2,7 +2,8 @@
  * File:        picture_truth.h
  * Module:      picture_truth
  * Purpose:     Geometry and per-frame buffers of the picture truth: the
- *              component Y, U and V that went into the composite modulator.
+ *              component Y and colour difference that went into the chroma
+ *              modulator (U/V, or SECAM D'R/D'B).
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -60,6 +61,9 @@ struct PictureTruthLayout {
 // The truth of one frame: three planes, row-major, each PlaneSamples() long.
 //
 //   y_mv: luma in mV above blanking (NTSC and PAL-M include the setup).
+//
+// PAL, NTSC and PAL-M fill u_mv and v_mv (dr and db stay empty):
+//
 //   u_mv: the sin-axis colour difference (PAL/PAL-M U, NTSC B-Y), in peak mV
 //         of subcarrier.
 //   v_mv: the cos-axis colour difference (PAL/PAL-M V, NTSC R-Y), in peak mV
@@ -70,19 +74,33 @@ struct PictureTruthLayout {
 // C = u_mv * sin(phi) + s * v_mv * cos(phi), where phi is the subcarrier
 // phase and s the line's V-switch sign (always +1 on NTSC).
 //
+// SECAM fills dr and db (u_mv and v_mv stay empty), on every row:
+//
+//   dr, db: D'R and D'B (ITU-R BT.1700 Annex 1 Part C Table 4 item 9) after
+//           the colour-difference low-pass (item 10c) and before the video
+//           precorrection (item 10f), so unclipped by the deviation limits.
+//           Dimensionless: 1.0 is the nominal deviation of item 10e
+//           (280 kHz for D'R, 230 kHz for D'B) at low frequency.
+//
+// A SECAM line transmits only one of the two; dr_line_parity says which.
+//
 // Thread-safety: plain data; one writer at a time.
 struct PictureTruthFrame {
   std::vector<float> y_mv;
   std::vector<float> u_mv;
   std::vector<float> v_mv;
+  std::vector<float> dr;
+  std::vector<float> db;
+  // SECAM only: the parity (1 odd, 0 even) of the frame line numbers that
+  // transmit D'R in this frame; the other lines transmit D'B. -1 otherwise.
+  int dr_line_parity = -1;
 
-  // Sizes all three planes for the layout, zero-filled.
+  // Sizes the layout's three planes, zero-filled, and empties the others.
   void Reset(const PictureTruthLayout& layout);
 };
 
 // The truth layout for a project's standard and signal levels. Returns a
-// layout with rows == 0 for SECAM or an unknown standard, which carry no
-// quadrature truth.
+// layout with rows == 0 for an unknown standard. SECAM shares the PAL raster.
 //
 // Thread-safety: pure function.
 PictureTruthLayout BuildPictureTruthLayout(const CvbsPresets& presets);

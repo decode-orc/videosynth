@@ -1,0 +1,31 @@
+project:
+  name: SECAMPictureTruthFixture
+  version: "1.0"
+  description: >-
+    625-line SECAM colour bars, chroma zone plate and chroma ramp written with
+    their Y/D'R/D'B picture truth, for scoring SECAM decoders
+
+cvbs_presets:
+  video_standard_preset: SECAM
+  sample_encoding_preset: CVBS_TPG21_4FSC
+  signal_state_preset: STANDARD_STABLE_UNLOCKED
+
+output:
+  video_path: "{output}/videosynth_secam_picture_truth.cvbs"
+  truth: true
+
+sections:
+  - name: SecamBars
+    type: progressive
+    source: "{bundled}/exr/720x576/75_BARS.exr"
+    duration_frames: 2
+    horizontal_resample: bandlimited
+  - name: SecamChromaZonePlate
+    type: progressive
+    source: "{bundled}/exr/720x576/CHROMA_ZONE_PLATE.exr"
+    duration_frames: 2
+    horizontal_resample: bandlimited
+  - name: SecamChromaRamp
+    type: progressive
+    source: "{bundled}/exr/720x576/CHROMA_RAMP.exr"
+    duration_frames: 2

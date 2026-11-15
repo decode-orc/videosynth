@@ -1,9 +1,10 @@
 /*
  * File:        test_picture_truth_output.cpp
  * Module:      picture_truth_tests
- * Purpose:     Runs the decoder-stress fixtures through the full pipeline and
- *              checks the picture truth files: size, sidecar, thread-count
- *              independence, and the line-alternating stress bars.
+ * Purpose:     Runs the decoder-stress and SECAM truth fixtures through the
+ *              full pipeline and checks the picture truth files: size,
+ *              sidecar, thread-count independence, and the line-alternating
+ *              stress bars.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -113,14 +114,19 @@ void ExpectSidecarDescribes(const std::string& sidecar_path,
                 "first_line_field2, upper_field, half_picture_line, "
                 "half_picture_end_sample, plane_order, sample_format, units, "
                 "y_reference, black_mv, white_mv, u_axis, v_axis, v_switch, "
-                "(SELECT COUNT(*) FROM truth_file) FROM truth_file;",
+                "(SELECT COUNT(*) FROM truth_file), colour_difference_units, "
+                "colour_difference_clip, dr_deviation_hz, db_deviation_hz, "
+                "dr_per_r_minus_y, db_per_b_minus_y, "
+                "(SELECT COUNT(*) FROM secam_frame) FROM truth_file;",
                 -1, &row, nullptr),
             SQLITE_OK);
   ASSERT_EQ(sqlite3_step(row), SQLITE_ROW);
   auto text = [&](int column) {
-    return std::string(
-        reinterpret_cast<const char*>(sqlite3_column_text(row, column)));
+    const unsigned char* value = sqlite3_column_text(row, column);
+    return value == nullptr ? std::string("NULL")
+                            : std::string(reinterpret_cast<const char*>(value));
   };
+  const bool secam = layout.standard == Standard::kSecam;
   EXPECT_EQ(text(0), StandardToString(layout.standard));
   EXPECT_DOUBLE_EQ(sqlite3_column_double(row, 1), layout.sample_rate_hz);
   EXPECT_EQ(sqlite3_column_int(row, 2), frames);
@@ -132,17 +138,50 @@ void ExpectSidecarDescribes(const std::string& sidecar_path,
   EXPECT_EQ(sqlite3_column_int(row, 8), layout.upper_field);
   EXPECT_EQ(sqlite3_column_int(row, 9), layout.half_picture_line);
   EXPECT_EQ(sqlite3_column_int(row, 10), layout.half_picture_end_sample);
-  EXPECT_EQ(text(11), "YUV");
+  EXPECT_EQ(text(11), secam ? "YDRDB" : "YUV");
   EXPECT_EQ(text(12), "float32le");
   EXPECT_EQ(text(13), "mV");
   EXPECT_EQ(text(14), "blanking");
   EXPECT_DOUBLE_EQ(sqlite3_column_double(row, 15), layout.black_mv);
   EXPECT_DOUBLE_EQ(sqlite3_column_double(row, 16), layout.white_mv);
-  EXPECT_EQ(text(17), "sin");
-  EXPECT_EQ(text(18), "cos");
-  EXPECT_EQ(text(19), "removed");
+  EXPECT_EQ(text(17), secam ? "NULL" : "sin");
+  EXPECT_EQ(text(18), secam ? "NULL" : "cos");
+  EXPECT_EQ(text(19), secam ? "NULL" : "removed");
   EXPECT_EQ(sqlite3_column_int(row, 20), 1);
+  EXPECT_EQ(text(21), secam ? "nominal_deviation" : "NULL");
+  EXPECT_EQ(text(22), secam ? "unclipped" : "NULL");
+  if (secam) {
+    EXPECT_DOUBLE_EQ(sqlite3_column_double(row, 23), 280.0e3);
+    EXPECT_DOUBLE_EQ(sqlite3_column_double(row, 24), 230.0e3);
+    EXPECT_DOUBLE_EQ(sqlite3_column_double(row, 25), -1.902);
+    EXPECT_DOUBLE_EQ(sqlite3_column_double(row, 26), 1.505);
+  } else {
+    for (int column = 23; column <= 26; ++column) {
+      EXPECT_EQ(sqlite3_column_type(row, column), SQLITE_NULL) << column;
+    }
+  }
+  EXPECT_EQ(sqlite3_column_int(row, 27), secam ? frames : 0);
   sqlite3_finalize(row);
+
+  if (secam) {
+    // BT.1700 Part C Figure 16: the D'R lines swap parity every frame, odd
+    // first, since the fixture starts on the first frame of the sequence.
+    sqlite3_stmt* frame_rows = nullptr;
+    ASSERT_EQ(sqlite3_prepare_v2(db,
+                                 "SELECT frame_index, dr_line_parity FROM "
+                                 "secam_frame ORDER BY frame_index;",
+                                 -1, &frame_rows, nullptr),
+              SQLITE_OK);
+    int expected_frame = 0;
+    while (sqlite3_step(frame_rows) == SQLITE_ROW) {
+      EXPECT_EQ(sqlite3_column_int(frame_rows, 0), expected_frame);
+      EXPECT_EQ(sqlite3_column_int(frame_rows, 1),
+                (expected_frame % 2) == 0 ? 1 : 0);
+      ++expected_frame;
+    }
+    EXPECT_EQ(expected_frame, frames);
+    sqlite3_finalize(frame_rows);
+  }
   sqlite3_close(db);
 }
 
@@ -168,7 +207,8 @@ float ReadFloat(const std::vector<char>& bytes, std::size_t index) {
 
 TEST(PictureTruthOutputTest, WritesTruthAndSidecarForEveryFrame) {
   for (const char* fixture :
-       {"general/pal_decoder_stress.yaml", "general/ntsc_zone_plates.yaml"}) {
+       {"general/pal_decoder_stress.yaml", "general/ntsc_zone_plates.yaml",
+        "general/secam_picture_truth.yaml"}) {
     std::string tag = fixture;
     std::replace(tag.begin(), tag.end(), '/', '_');
     const std::filesystem::path output_dir =
@@ -192,16 +232,22 @@ TEST(PictureTruthOutputTest, WritesTruthAndSidecarForEveryFrame) {
 }
 
 TEST(PictureTruthOutputTest, TruthIsIndependentOfTheThreadCount) {
-  const std::filesystem::path root =
-      std::filesystem::temp_directory_path() / "videosynth_picture_truth";
-  const Project sequential =
-      RunFixture("general/pal_decoder_stress.yaml", root / "threads_1", 1);
-  const Project pooled =
-      RunFixture("general/pal_decoder_stress.yaml", root / "threads_4", 4);
-  EXPECT_EQ(ReadFileBytes(DerivePictureTruthPath(sequential.output.video_path)),
-            ReadFileBytes(DerivePictureTruthPath(pooled.output.video_path)));
-  EXPECT_EQ(ReadFileBytes(sequential.output.video_path),
-            ReadFileBytes(pooled.output.video_path));
+  for (const char* fixture : {"general/pal_decoder_stress.yaml",
+                              "general/secam_picture_truth.yaml"}) {
+    std::string tag = fixture;
+    std::replace(tag.begin(), tag.end(), '/', '_');
+    const std::filesystem::path root = std::filesystem::temp_directory_path() /
+                                       "videosynth_picture_truth" / tag;
+    const Project sequential = RunFixture(fixture, root / "threads_1", 1);
+    const Project pooled = RunFixture(fixture, root / "threads_4", 4);
+    EXPECT_EQ(
+        ReadFileBytes(DerivePictureTruthPath(sequential.output.video_path)),
+        ReadFileBytes(DerivePictureTruthPath(pooled.output.video_path)))
+        << fixture;
+    EXPECT_EQ(ReadFileBytes(sequential.output.video_path),
+              ReadFileBytes(pooled.output.video_path))
+        << fixture;
+  }
 }
 
 TEST(PictureTruthOutputTest, StressBarsAlternateWithTheVSwitch) {

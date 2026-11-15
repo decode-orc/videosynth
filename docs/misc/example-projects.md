@@ -6,7 +6,7 @@ The repository ships a set of hand-authored projects under `projects/`, covering
 
 | Directory | Contents |
 |-----------|----------|
-| `projects/general/` | Feature examples — audio, EFM audio, VITS, progressive EXR and MKV sources (including a SECAM still), the PAL pilot burst, the NTSC VBI burst, the PAL LaserVision channel, NTSC film with 2:3 pulldown, the PAL decoder-stress card and zone plates with their picture truth |
+| `projects/general/` | Feature examples — audio, EFM audio, VITS, progressive EXR and MKV sources (including a SECAM still), the PAL pilot burst, the NTSC VBI burst, the PAL LaserVision channel, NTSC film with 2:3 pulldown, the PAL decoder-stress card and zone plates with their picture truth, SECAM bars and chroma patterns with their D′R/D′B truth |
 | `projects/general-yc/` | PAL and NTSC audio examples with Y/C output |
 | `projects/stacking/` | Laserdisc disc simulation and multi-source stacking sets for PAL, PAL-M and NTSC |
 | `projects/long-form/` | Three-hour capture-sized PAL and NTSC examples, for testing against realistic file sizes |
@@ -72,6 +72,8 @@ The `<standard>_discsim_A`–`_D` projects are four captures of one 40-frame CAV
 ### Decoder stress and zone plates
 
 `pal_decoder_stress.yaml` plays the [`PAL_STRESS.exr`](../user-manual/sources.md#stills-exr) card for 8 frames (two full PAL colour sequences) with its three [`chroma_line_sign`](../reference/sections.md#chroma_line_sign) regions — line-alternating V on the left outer strip and the burst-gate check, anti-PAL U on the right outer strip — then the static luma and chroma zone plates for 4 frames each. `ntsc_zone_plates.yaml` plays the two zone plates on NTSC. `pal_decoder_stills.yaml` plays the Domesday-like stills — the two OpenStreetMap maps, the coloured text card, the green/magenta edges and the two photographs — one frame each. `pal_programme_stills.yaml` plays Test Card F sharp and then with the [`domesday` picture response](../reference/sections.md#picture_response), followed by the two maps and the text card with the same response, so they are as soft as real Domesday programme pictures. Every section uses the [band-limited mapping](../reference/sections.md#horizontal_resample), and all four projects write the [picture truth](../reference/output.md#truth), so a decoder's output can be scored against the component picture that was encoded.
+
+`secam_picture_truth.yaml` plays 75% colour bars and the chroma zone plate (band-limited) and the chroma ramp on SECAM, two frames each (one full D′R/D′B line sequence), with the [SECAM picture truth](../reference/output.md#secam-planes): Y plus D′R and D′B on every row, for scoring a SECAM decoder on both its transmitted and its reconstructed lines.
 
 ## Running a suite
 

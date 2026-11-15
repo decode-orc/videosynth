@@ -14,7 +14,7 @@ Every artefact a run produces is colocated with `output.video_path`. The project
 | `<name>_audio_<pair>.wav` | Any section declares that pair | 48 kHz/24-bit stereo audio |
 | `<name>.efm` | [`laserdisc.efm_audio`](../reference/laserdisc.md#efm_audio) or [`laserdisc.efm_data`](../reference/laserdisc.md#efm_data) is present | Laserdisc EFM channel stream |
 | `<name>.efm.meta` | With the above | SQLite frame index for the EFM stream |
-| `<name>.truth` | `output.truth: true` | Picture truth: planar `float32` Y/U/V at 4fsc |
+| `<name>.truth` | `output.truth: true` | Picture truth: planar `float32` Y/U/V (SECAM Y/D′R/D′B) at 4fsc |
 | `<name>.truth.meta` | With the above | SQLite sidecar: layout and conventions of the truth file |
 
 `<name>` for the audio, EFM and truth files is `output.video_path` with its trailing `.cvbs` or `.cvbsy` removed. The `.meta` path is derived from the video path by replacing that suffix — it is never specified in the project.
@@ -67,7 +67,7 @@ Audio tracks are stereo, 24-bit signed little-endian PCM (RIFF/WAVE) at 48 000 H
 
 ## Picture truth
 
-With [`output.truth: true`](../reference/output.md#truth), `<name>.truth` holds the component picture that went into the modulator: for every frame, a Y, a U and a V plane, each one row per active line (in progressive order) by one sample per 4fsc sample of the active window, as little-endian `float32` millivolts. U and V are the filtered colour-difference components exactly as modulated, with the PAL V-switch removed. The SQLite sidecar `<name>.truth.meta` gives the dimensions, the first sample and line of each field, the levels and the conventions. The truth is taken before every impairment, so a capture variant with channel effects, noise or dropouts shares its truth with the clean run.
+With [`output.truth: true`](../reference/output.md#truth), `<name>.truth` holds the component picture that went into the modulator: for every frame, a Y, a U and a V plane, each one row per active line (in progressive order) by one sample per 4fsc sample of the active window, as little-endian `float32` millivolts. U and V are the filtered colour-difference components exactly as modulated, with the PAL V-switch removed. SECAM replaces U and V with D′R and D′B on every row, before the frequency modulator, on the nominal-deviation scale (1.0 is 280 kHz on D′R, 230 kHz on D′B), and the sidecar records which lines transmit D′R in each frame. The SQLite sidecar `<name>.truth.meta` gives the dimensions, the first sample and line of each field, the levels and the conventions. The truth is taken before every impairment, so a capture variant with channel effects, noise or dropouts shares its truth with the clean run.
 
 ## Determinism
 

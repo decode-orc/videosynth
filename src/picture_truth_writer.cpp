@@ -1,8 +1,9 @@
 /*
  * File:        picture_truth_writer.cpp
  * Module:      picture_truth
- * Purpose:     Writes the picture truth (planar float32 Y/U/V at 4fsc) and its
- *              SQLite sidecar beside the generated video output.
+ * Purpose:     Writes the picture truth (planar float32 Y/U/V, or SECAM
+ *              Y/D'R/D'B, at 4fsc) and its SQLite sidecar beside the
+ *              generated video output.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -21,6 +22,7 @@
 #include <system_error>
 
 #include "videosynth/frame_line_layout.h"
+#include "videosynth/secam_chroma_encoder.h"
 #include "videosynth/timing_constants.h"
 
 namespace videosynth {
@@ -88,16 +90,20 @@ int PictureTruthLayout::RowForLine(int line_1based) const {
 
 void PictureTruthFrame::Reset(const PictureTruthLayout& layout) {
   const std::size_t samples = layout.PlaneSamples();
+  const bool secam = layout.standard == Standard::kSecam;
   y_mv.assign(samples, 0.0F);
-  u_mv.assign(samples, 0.0F);
-  v_mv.assign(samples, 0.0F);
+  u_mv.assign(secam ? 0U : samples, 0.0F);
+  v_mv.assign(secam ? 0U : samples, 0.0F);
+  dr.assign(secam ? samples : 0U, 0.0F);
+  db.assign(secam ? samples : 0U, 0.0F);
+  dr_line_parity = -1;
 }
 
 PictureTruthLayout BuildPictureTruthLayout(const CvbsPresets& presets) {
   PictureTruthLayout layout;
   const Standard standard = presets.video_standard_preset;
   if (standard != Standard::kPal && standard != Standard::kNtsc &&
-      standard != Standard::kPalM) {
+      standard != Standard::kPalM && standard != Standard::kSecam) {
     return layout;
   }
   const TimingConstants timing = GetTimingConstants(standard);
@@ -146,8 +152,7 @@ bool PictureTruthWriter::Begin(const Project& project,
   Abort();
   layout_ = BuildPictureTruthLayout(project.cvbs_presets);
   if (layout_.rows <= 0) {
-    errors->push_back(
-        "Truth output is only available for PAL, NTSC and PAL-M projects.");
+    errors->push_back("Truth output is not available for this video standard.");
     return false;
   }
   truth_path_ = DerivePictureTruthPath(project.output.video_path);
@@ -158,6 +163,7 @@ bool PictureTruthWriter::Begin(const Project& project,
     return false;
   }
   frames_written_ = 0;
+  dr_line_parities_.clear();
   open_ = true;
   if (logger_ != nullptr) {
     logger_->Debug("Writing picture truth to " + truth_path_ + " (" +
@@ -174,21 +180,28 @@ bool PictureTruthWriter::AppendFrame(const PictureTruthFrame& frame,
     return false;
   }
   const std::size_t plane_samples = layout_.PlaneSamples();
-  if (frame.y_mv.size() != plane_samples ||
-      frame.u_mv.size() != plane_samples ||
-      frame.v_mv.size() != plane_samples) {
+  const bool secam = layout_.standard == Standard::kSecam;
+  // Planes in file order: Y, then U and V, or SECAM's D'R and D'B.
+  const std::vector<float>& second = secam ? frame.dr : frame.u_mv;
+  const std::vector<float>& third = secam ? frame.db : frame.v_mv;
+  if (frame.y_mv.size() != plane_samples || second.size() != plane_samples ||
+      third.size() != plane_samples ||
+      (secam && frame.dr_line_parity != 0 && frame.dr_line_parity != 1)) {
     errors->push_back("Truth frame does not match the truth layout.");
     return false;
   }
   std::vector<char> bytes;
   bytes.reserve(plane_samples * 3U * 4U);
   AppendPlaneLittleEndian(frame.y_mv, &bytes);
-  AppendPlaneLittleEndian(frame.u_mv, &bytes);
-  AppendPlaneLittleEndian(frame.v_mv, &bytes);
+  AppendPlaneLittleEndian(second, &bytes);
+  AppendPlaneLittleEndian(third, &bytes);
   stream_.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
   if (!stream_) {
     errors->push_back("Failed writing truth output file: " + truth_path_);
     return false;
+  }
+  if (secam) {
+    dr_line_parities_.push_back(frame.dr_line_parity);
   }
   ++frames_written_;
   return true;
@@ -228,9 +241,13 @@ bool PictureTruthWriter::WriteSidecar(std::vector<std::string>* errors) const {
   }
 
   // One row per truth file. The fixed-text columns state the value
-  // conventions so a reader need not infer them: planes Y, U, V in that order;
-  // little-endian float32 millivolts; Y above blanking; U on the sin and V on
-  // the cos carrier axis, with the PAL V-switch removed from V.
+  // conventions so a reader need not infer them: the plane order;
+  // little-endian float32; Y in millivolts above blanking. Quadrature
+  // standards give U on the sin and V on the cos carrier axis, in peak mV of
+  // subcarrier, with the PAL V-switch removed from V; their SECAM columns are
+  // NULL. SECAM gives D'R and D'B on the nominal-deviation scale with the
+  // item 9 and item 10e factors that convert it; its U/V columns are NULL,
+  // and secam_frame records which lines transmit D'R in each frame.
   const std::string schema =
       "PRAGMA user_version = " +
       std::to_string(kPictureTruthSidecarSchemaVersion) +
@@ -238,7 +255,7 @@ bool PictureTruthWriter::WriteSidecar(std::vector<std::string>* errors) const {
       "CREATE TABLE truth_file ("
       "    truth_file_id            INTEGER PRIMARY KEY,"
       "    video_standard           TEXT NOT NULL"
-      "        CHECK (video_standard IN ('PAL', 'NTSC', 'PAL_M')),"
+      "        CHECK (video_standard IN ('PAL', 'NTSC', 'PAL_M', 'SECAM')),"
       "    sample_rate_hz           REAL NOT NULL CHECK (sample_rate_hz > 0),"
       "    frame_count              INTEGER NOT NULL CHECK (frame_count >= 0),"
       "    samples_per_line         INTEGER NOT NULL"
@@ -251,15 +268,30 @@ bool PictureTruthWriter::WriteSidecar(std::vector<std::string>* errors) const {
       "        CHECK (upper_field IN (1, 2)),"
       "    half_picture_line        INTEGER NOT NULL,"
       "    half_picture_end_sample  INTEGER NOT NULL,"
-      "    plane_order              TEXT NOT NULL,"
+      "    plane_order              TEXT NOT NULL"
+      "        CHECK (plane_order IN ('YUV', 'YDRDB')),"
       "    sample_format            TEXT NOT NULL,"
       "    units                    TEXT NOT NULL,"
       "    y_reference              TEXT NOT NULL,"
       "    black_mv                 REAL NOT NULL,"
       "    white_mv                 REAL NOT NULL,"
-      "    u_axis                   TEXT NOT NULL,"
-      "    v_axis                   TEXT NOT NULL,"
-      "    v_switch                 TEXT NOT NULL"
+      "    u_axis                   TEXT,"
+      "    v_axis                   TEXT,"
+      "    v_switch                 TEXT,"
+      "    colour_difference_units  TEXT,"
+      "    colour_difference_clip   TEXT,"
+      "    dr_deviation_hz          REAL,"
+      "    db_deviation_hz          REAL,"
+      "    dr_per_r_minus_y         REAL,"
+      "    db_per_b_minus_y         REAL"
+      ");"
+      "CREATE TABLE secam_frame ("
+      "    frame_index              INTEGER PRIMARY KEY"
+      "        CHECK (frame_index >= 0),"
+      "    truth_file_id            INTEGER NOT NULL"
+      "        REFERENCES truth_file (truth_file_id),"
+      "    dr_line_parity           INTEGER NOT NULL"
+      "        CHECK (dr_line_parity IN (0, 1))"
       ");"
       "BEGIN;";
 
@@ -274,6 +306,7 @@ bool PictureTruthWriter::WriteSidecar(std::vector<std::string>* errors) const {
     return false;
   }
 
+  const bool secam = layout_.standard == Standard::kSecam;
   sqlite3_stmt* insert_stmt = nullptr;
   const char* insert_sql =
       "INSERT INTO truth_file ("
@@ -281,9 +314,11 @@ bool PictureTruthWriter::WriteSidecar(std::vector<std::string>* errors) const {
       "samples_per_line, rows, first_sample, first_line_field1, "
       "first_line_field2, upper_field, half_picture_line, "
       "half_picture_end_sample, plane_order, sample_format, units, "
-      "y_reference, black_mv, white_mv, u_axis, v_axis, v_switch) "
-      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'YUV', 'float32le', 'mV', "
-      "'blanking', ?, ?, 'sin', 'cos', 'removed');";
+      "y_reference, black_mv, white_mv, u_axis, v_axis, v_switch, "
+      "colour_difference_units, colour_difference_clip, dr_deviation_hz, "
+      "db_deviation_hz, dr_per_r_minus_y, db_per_b_minus_y) "
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'float32le', 'mV', "
+      "'blanking', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
   if (sqlite3_prepare_v2(db, insert_sql, -1, &insert_stmt, nullptr) !=
       SQLITE_OK) {
     errors->push_back("Failed to prepare truth sidecar insert for: " +
@@ -291,6 +326,23 @@ bool PictureTruthWriter::WriteSidecar(std::vector<std::string>* errors) const {
     sqlite3_close(db);
     return false;
   }
+
+  // Binds a text column that only one family of standards uses.
+  const auto bind_text_or_null = [&](int index, bool present,
+                                     const char* value) {
+    if (present) {
+      sqlite3_bind_text(insert_stmt, index, value, -1, SQLITE_STATIC);
+    } else {
+      sqlite3_bind_null(insert_stmt, index);
+    }
+  };
+  const auto bind_double_or_null = [&](int index, bool present, double value) {
+    if (present) {
+      sqlite3_bind_double(insert_stmt, index, value);
+    } else {
+      sqlite3_bind_null(insert_stmt, index);
+    }
+  };
 
   const std::string standard = StandardToString(layout_.standard);
   sqlite3_bind_int(insert_stmt, 1, kTruthFileId);
@@ -306,8 +358,21 @@ bool PictureTruthWriter::WriteSidecar(std::vector<std::string>* errors) const {
   sqlite3_bind_int(insert_stmt, 10, layout_.upper_field);
   sqlite3_bind_int(insert_stmt, 11, layout_.half_picture_line);
   sqlite3_bind_int(insert_stmt, 12, layout_.half_picture_end_sample);
-  sqlite3_bind_double(insert_stmt, 13, layout_.black_mv);
-  sqlite3_bind_double(insert_stmt, 14, layout_.white_mv);
+  sqlite3_bind_text(insert_stmt, 13, secam ? "YDRDB" : "YUV", -1,
+                    SQLITE_STATIC);
+  sqlite3_bind_double(insert_stmt, 14, layout_.black_mv);
+  sqlite3_bind_double(insert_stmt, 15, layout_.white_mv);
+  bind_text_or_null(16, !secam, "sin");
+  bind_text_or_null(17, !secam, "cos");
+  bind_text_or_null(18, !secam, "removed");
+  // D'R/D'B are taken before the precorrection and FM, so the deviation
+  // limits of item 10e never clip them.
+  bind_text_or_null(19, secam, "nominal_deviation");
+  bind_text_or_null(20, secam, "unclipped");
+  bind_double_or_null(21, secam, kSecamNominalDrDeviationHz);
+  bind_double_or_null(22, secam, kSecamNominalDbDeviationHz);
+  bind_double_or_null(23, secam, kSecamDrPerRMinusY);
+  bind_double_or_null(24, secam, kSecamDbPerBMinusY);
   if (sqlite3_step(insert_stmt) != SQLITE_DONE) {
     errors->push_back("Failed to insert truth sidecar row into: " +
                       sidecar_path_);
@@ -316,6 +381,33 @@ bool PictureTruthWriter::WriteSidecar(std::vector<std::string>* errors) const {
     return false;
   }
   sqlite3_finalize(insert_stmt);
+
+  if (secam) {
+    sqlite3_stmt* frame_stmt = nullptr;
+    if (sqlite3_prepare_v2(db,
+                           "INSERT INTO secam_frame (frame_index, "
+                           "truth_file_id, dr_line_parity) VALUES (?, ?, ?);",
+                           -1, &frame_stmt, nullptr) != SQLITE_OK) {
+      errors->push_back("Failed to prepare truth sidecar frame insert for: " +
+                        sidecar_path_);
+      sqlite3_close(db);
+      return false;
+    }
+    for (std::size_t frame = 0; frame < dr_line_parities_.size(); ++frame) {
+      sqlite3_bind_int64(frame_stmt, 1, static_cast<sqlite3_int64>(frame));
+      sqlite3_bind_int(frame_stmt, 2, kTruthFileId);
+      sqlite3_bind_int(frame_stmt, 3, dr_line_parities_[frame]);
+      if (sqlite3_step(frame_stmt) != SQLITE_DONE) {
+        errors->push_back("Failed to insert truth sidecar frame row into: " +
+                          sidecar_path_);
+        sqlite3_finalize(frame_stmt);
+        sqlite3_close(db);
+        return false;
+      }
+      sqlite3_reset(frame_stmt);
+    }
+    sqlite3_finalize(frame_stmt);
+  }
 
   if (sqlite3_exec(db, "COMMIT;", nullptr, nullptr, &error_msg) != SQLITE_OK) {
     const std::string msg = error_msg != nullptr ? error_msg : "unknown error";

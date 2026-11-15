@@ -28,6 +28,9 @@ constexpr int kActiveStart = 177;
 constexpr int kActiveSamples = 922;
 
 constexpr double kForHz = 4406250.0;
+
+// Subcarrier phase at 0H of an inverted line (Table 4 Note 1).
+constexpr double kInvertedPhaseRad = 3.14159265358979323846;
 constexpr double kFobHz = 4250000.0;
 
 int SecondsToSample(double seconds) {
@@ -265,6 +268,69 @@ TEST(SecamChromaEncoderTest, RejectsNullOutput) {
                                   UniformActiveLine(512, 512), kActiveStart,
                                   kLineSamples, nullptr),
                std::invalid_argument);
+  EXPECT_THROW(encoder.ColourDifferenceLine(
+                   SecamLineComponent::kDr, UniformActiveLine(512, 512),
+                   kActiveStart, kLineSamples, nullptr),
+               std::invalid_argument);
+  EXPECT_THROW(encoder.EncodeColourDifferenceLine(SecamLineComponent::kDr, 0.0,
+                                                  {}, kLineSamples, nullptr),
+               std::invalid_argument);
+}
+
+TEST(SecamChromaEncoderTest, EncodeLineIsColourDifferenceThenModulation) {
+  // The picture truth records ColourDifferenceLine; re-encoding it must give
+  // exactly the line EncodeLine transmits.
+  const SecamChromaEncoder encoder(kSampleRateHz);
+  std::vector<YCbCr444Pixel> pixels = UniformActiveLine(512, 512);
+  for (std::size_t i = 0; i < pixels.size(); ++i) {
+    pixels[i].cb = static_cast<std::int16_t>(200 + ((i * 7U) % 600U));
+    pixels[i].cr = static_cast<std::int16_t>(800 - ((i * 5U) % 500U));
+  }
+  for (const SecamLineComponent component :
+       {SecamLineComponent::kDr, SecamLineComponent::kDb}) {
+    std::vector<SampleFixed> direct;
+    encoder.EncodeLine(component, kInvertedPhaseRad, pixels, kActiveStart,
+                       kLineSamples, &direct);
+    std::vector<double> colour_difference;
+    encoder.ColourDifferenceLine(component, pixels, kActiveStart, kLineSamples,
+                                 &colour_difference);
+    ASSERT_EQ(colour_difference.size(), static_cast<std::size_t>(kLineSamples));
+    std::vector<SampleFixed> staged;
+    encoder.EncodeColourDifferenceLine(
+        component, kInvertedPhaseRad, colour_difference, kLineSamples, &staged);
+    EXPECT_EQ(direct, staged);
+  }
+}
+
+TEST(SecamChromaEncoderTest, ColourDifferenceFollowsItem9Scale) {
+  // Item 9 / item 10e: a settled Cr = 960 gives D'R = −1.902 × 0.701 and
+  // Cb = 960 gives D'B = 1.505 × 0.886; zero outside the low-pass tails.
+  const SecamChromaEncoder encoder(kSampleRateHz);
+  std::vector<double> dr;
+  std::vector<double> db;
+  const std::vector<YCbCr444Pixel> pixels = UniformActiveLine(960, 960);
+  encoder.ColourDifferenceLine(SecamLineComponent::kDr, pixels, kActiveStart,
+                               kLineSamples, &dr);
+  encoder.ColourDifferenceLine(SecamLineComponent::kDb, pixels, kActiveStart,
+                               kLineSamples, &db);
+  const std::size_t middle = kActiveStart + (kActiveSamples / 2);
+  EXPECT_NEAR(dr[middle], kSecamDrPerRMinusY * 0.701, 1.0e-3);
+  EXPECT_NEAR(db[middle], kSecamDbPerBMinusY * 0.886, 1.0e-3);
+  EXPECT_DOUBLE_EQ(dr[kActiveStart - 40], 0.0);
+  EXPECT_DOUBLE_EQ(db[kActiveStart - 40], 0.0);
+}
+
+TEST(SecamChromaEncoderTest, ShortColourDifferenceIsZeroPadded) {
+  // Samples past the end of the given colour difference are the zero
+  // reference: an empty input encodes the colourless line.
+  const SecamChromaEncoder encoder(kSampleRateHz);
+  std::vector<SampleFixed> neutral;
+  encoder.EncodeLine(SecamLineComponent::kDb, 0.0, {}, 0, kLineSamples,
+                     &neutral);
+  std::vector<SampleFixed> padded;
+  encoder.EncodeColourDifferenceLine(SecamLineComponent::kDb, 0.0, {},
+                                     kLineSamples, &padded);
+  EXPECT_EQ(neutral, padded);
 }
 
 }  // namespace

@@ -1,8 +1,9 @@
 /*
  * File:        picture_truth_writer.h
  * Module:      picture_truth
- * Purpose:     Writes the picture truth (planar float32 Y/U/V at 4fsc) and its
- *              SQLite sidecar beside the generated video output.
+ * Purpose:     Writes the picture truth (planar float32 Y/U/V, or SECAM
+ *              Y/D'R/D'B, at 4fsc) and its SQLite sidecar beside the
+ *              generated video output.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  * SPDX-FileCopyrightText: 2026 Simon Inns
@@ -21,7 +22,7 @@
 namespace videosynth {
 
 // Schema version of the truth sidecar (PRAGMA user_version).
-constexpr int kPictureTruthSidecarSchemaVersion = 1;
+constexpr int kPictureTruthSidecarSchemaVersion = 2;
 
 // The truth sample file and sidecar for a video output path, named like the
 // EFM stream and its sidecar: a trailing ".cvbs" or ".cvbsy" is stripped and
@@ -34,9 +35,11 @@ std::string DerivePictureTruthSidecarPath(const std::string& video_path);
 // Streams truth frames to disk in output order.
 //
 // The sample file holds, per frame, the Y plane then the U plane then the V
-// plane, each layout.rows × layout.samples_per_line little-endian float32
-// values in row-major order. Finalize writes the SQLite sidecar: one
-// truth_file row giving the layout, frame count, levels and conventions.
+// plane (SECAM: Y, D'R, D'B), each layout.rows × layout.samples_per_line
+// little-endian float32 values in row-major order. Finalize writes the SQLite
+// sidecar: one truth_file row giving the layout, frame count, levels and
+// conventions, and for SECAM one secam_frame row per frame giving the line
+// parity that transmits D'R.
 //
 // Thread-safety: NOT thread-safe; one session owner calls every method.
 class PictureTruthWriter {
@@ -69,6 +72,8 @@ class PictureTruthWriter {
   std::string sidecar_path_;
   std::ofstream stream_;
   std::size_t frames_written_ = 0;
+  // SECAM: each written frame's PictureTruthFrame::dr_line_parity.
+  std::vector<int> dr_line_parities_;
   bool open_ = false;
 };
 
