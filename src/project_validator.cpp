@@ -1993,6 +1993,20 @@ void ValidateTruthOutput(const videosynth::Project& project,
   }
 }
 
+// Checks `output.audio_container:`. The key selects the container of the
+// channel pair WAV files, so on a project without audio it changes nothing.
+void ValidateAudioContainerOutput(const videosynth::Project& project,
+                                  videosynth::ValidationResult* result) {
+  if (result == nullptr ||
+      project.output.audio_container != videosynth::AudioContainerMode::kRf64 ||
+      videosynth::ProjectEnablesAudio(project)) {
+    return;
+  }
+  result->warnings.push_back(
+      "output.audio_container is rf64 but no section declares an audio "
+      "channel pair; no audio files are written.");
+}
+
 // Valid scale range for both random and scratch dropout.
 constexpr int kDropoutScaleMin = 0;
 constexpr int kDropoutScaleMax = 20;
@@ -3065,6 +3079,7 @@ ValidationResult ProjectValidator::Validate(const Project& project) {
   ValidateEfmAudioOutput(project, &result);
   ValidateEfmDataOutput(project, &result);
   ValidateTruthOutput(project, &result);
+  ValidateAudioContainerOutput(project, &result);
 
   if (project.sections.empty()) {
     result.is_valid = false;

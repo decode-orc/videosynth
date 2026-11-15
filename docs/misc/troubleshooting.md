@@ -454,6 +454,14 @@ decode-orc skips lead-in sections until its timeline settles, so it reports the 
 
 OSD text is drawn after the truth is taken, so the truth shows the picture under the text. Remove the overlays from projects whose decoded picture will be scored against the truth.
 
+### `output.audio_container is rf64 but no section declares an audio channel pair`
+
+The key selects the container of the audio channel pair files, so on a project without audio it does nothing. Remove it, or add an `audio:` block to a section.
+
+### `Audio: output.audio_container is rf64; writing RF64 channel pair files that RIFF could describe`
+
+[`audio_container: rf64`](../reference/output.md#audio_container) forces RF64 on audio short enough for RIFF, which the CVBS specification does not allow for interchange. That is expected when testing an RF64 reader. Otherwise remove the key, or set it to `auto`.
+
 ### EFM track warnings
 
 Tracks shorter than 4 s (6 s for the first, whose leading 2 s are the mandatory pause) and a project with no `lead_in` section both produce warnings. The file is still written; it just is not what a real disc would look like.

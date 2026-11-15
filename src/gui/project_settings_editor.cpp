@@ -249,10 +249,27 @@ void ProjectSettingsEditor::BuildUi() {
          "any channel, chroma error, line timing, noise or dropout "
          "impairment."));
 
+  // Container of the audio channel pair files. RF64 on a short project is
+  // outside the letter of the specification, so it is offered as a test
+  // option for RF64 readers.
+  audio_container_combo_ = new QComboBox(output_group);
+  audio_container_combo_->addItem(tr("auto"),
+                                  static_cast<int>(AudioContainerMode::kAuto));
+  audio_container_combo_->addItem(tr("rf64 (test RF64 readers)"),
+                                  static_cast<int>(AudioContainerMode::kRf64));
+  audio_container_combo_->setToolTip(
+      tr("auto writes each “_audio_<pair>.wav” as RIFF while it fits in the "
+         "RIFF size limit (about 4 hours 8 minutes) and as RF64 beyond it, "
+         "as the CVBS specification requires. rf64 writes every channel "
+         "pair file as RF64 whatever its length, so RF64 readers can be "
+         "tested on short projects; such files are for testing, not for "
+         "interchange. Has no effect on a project without audio."));
+
   output_form->addRow(tr("Signal type:"), signal_type_combo_);
   output_form->addRow(tr("Video path:"), video_row);
   output_form->addRow(QString(), video_path_hint_);
   output_form->addRow(tr("Picture truth:"), truth_check_);
+  output_form->addRow(tr("Audio container:"), audio_container_combo_);
   output_form->addRow(QString(), outputs_note_);
   layout->addWidget(output_group);
 
@@ -279,6 +296,8 @@ void ProjectSettingsEditor::BuildUi() {
       CommitOutputTargets();
     }
   });
+  connect(audio_container_combo_, &QComboBox::activated, this,
+          &ProjectSettingsEditor::CommitOutputTargets);
 }
 
 QWidget* ProjectSettingsEditor::BuildChannelGroup() {
@@ -1134,6 +1153,9 @@ void ProjectSettingsEditor::LoadFromDocument() {
   video_path_edit_->setText(QString::fromStdString(project.output.video_path));
 
   truth_check_->setChecked(project.output.truth);
+  audio_container_combo_->setCurrentIndex(
+      std::max(0, audio_container_combo_->findData(
+                      static_cast<int>(project.output.audio_container))));
 
   LoadChannelAndChromaError(project);
   LoadLineTiming(project);
@@ -1554,6 +1576,8 @@ void ProjectSettingsEditor::CommitOutputTargets() {
   // derived from it rather than set independently.
   output.metadata_path = DeriveMetadataPath(output.video_path);
   output.truth = truth_check_->isChecked();
+  output.audio_container = static_cast<AudioContainerMode>(
+      audio_container_combo_->currentData().toInt());
 
   committing_ = true;
   document_->SetOutputTargets(output);

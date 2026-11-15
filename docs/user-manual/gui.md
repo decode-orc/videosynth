@@ -67,7 +67,7 @@ Every dock can be hidden, floated or rearranged; **View → Panels** toggles the
 
 - **Project** — name, version, description.
 - **CVBS Presets** — video standard, sample encoding, signal state, and the standard-specific options (NTSC black setup override, SECAM field identification). The signal state follows the standard: `STANDARD_STABLE_UNLOCKED` for [SECAM](video-signal.md#secam-chroma), `STANDARD_STABLE_LOCKED` otherwise. Options that do not apply to the selected standard are disabled rather than hidden.
-- **Output** — video path and signal type, and **Picture truth**, which writes the [component picture](../reference/output.md#truth) beside the video.
+- **Output** — video path and signal type; **Picture truth**, which writes the [component picture](../reference/output.md#truth) beside the video; and **Audio container**, *auto* or *rf64 (test RF64 readers)*, which [forces RF64 channel pair files](../reference/output.md#audio_container) on a short project.
 - **VITS** — the VITS **Placement** policy (*Standard (broadcast lines)*, *Laserdisc (IEC 60856/60857)* or *Custom (choose lines)*) and the VITS checklist. SECAM has no laserdisc placement. See [VITS](vits.md).
 - **LaserDisc** — the [LaserDisc settings](#laserdisc), for disc projects only.
 - **Channel (pressing)** — the [`channel:` block](../reference/channel.md): a sub-sample **timing offset**, plus optional **Edge smear** (fraction and time constant). These describe the pressing, so every project of one pressing should use the same values.

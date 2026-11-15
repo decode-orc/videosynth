@@ -98,6 +98,68 @@ std::filesystem::path TempPath(const std::string& name) {
   return std::filesystem::temp_directory_path() / name;
 }
 
+std::uint64_t ReadLe(const std::vector<char>& bytes, std::size_t offset,
+                     int width) {
+  std::uint64_t value = 0;
+  for (int i = 0; i < width; ++i) {
+    value |= static_cast<std::uint64_t>(static_cast<unsigned char>(
+                 bytes[offset + static_cast<std::size_t>(i)]))
+             << (8 * i);
+  }
+  return value;
+}
+
+class RecordingLogger final : public ILogger {
+ public:
+  std::vector<std::string> warnings;
+  void Info(const std::string&) override {}
+  void Warning(const std::string& message) override {
+    warnings.push_back(message);
+  }
+  void Error(const std::string&) override {}
+  void Debug(const std::string&) override {}
+  void Trace(const std::string&) override {}
+};
+
+// Runs the generator over `frame_count` frames of one section declaring pairs
+// 0 and 1, and returns the bytes of both WAV files (removed afterwards).
+std::vector<std::vector<char>> RenderTwoPairs(AudioContainerMode container,
+                                              const std::string& stem,
+                                              std::size_t frame_count,
+                                              ILogger* logger) {
+  const std::filesystem::path video_path = TempPath(stem + ".cvbs");
+  const std::vector<std::filesystem::path> audio_paths = {
+      TempPath(stem + "_audio_0.wav"), TempPath(stem + "_audio_1.wav")};
+  for (const std::filesystem::path& path : audio_paths) {
+    std::filesystem::remove(path);
+  }
+
+  Project project = MakeProject(video_path);
+  project.output.audio_container = container;
+  Section section;
+  section.name = "A";
+  section.audio_channel_pairs = {MakePair(0, true, true),
+                                 MakePair(1, true, false)};
+  project.sections = {section};
+  const std::vector<const Section*> frames(frame_count, &project.sections[0]);
+
+  AudioTrackGenerator generator(logger);
+  std::vector<std::string> errors;
+  EXPECT_TRUE(generator.Begin(project, frames, &errors))
+      << (errors.empty() ? "" : errors.front());
+  for (std::size_t k = 0; k < frames.size(); ++k) {
+    EXPECT_TRUE(generator.EmitFrame(k, &errors));
+  }
+  EXPECT_TRUE(generator.Finalize(&errors));
+
+  std::vector<std::vector<char>> files;
+  for (const std::filesystem::path& path : audio_paths) {
+    files.push_back(ReadFileBytes(path));
+    std::filesystem::remove(path);
+  }
+  return files;
+}
+
 TEST(AudioTrackGeneratorTest, InactiveWhenNoPairsDeclared) {
   const std::filesystem::path video_path = TempPath("videosynth_atg_none.cvbs");
   const Project project = MakeProject(video_path);
@@ -179,6 +241,50 @@ TEST(AudioTrackGeneratorTest, EmitsOneFilePerDeclaredPairWithSilence) {
 
   std::filesystem::remove(audio0);
   std::filesystem::remove(audio1);
+}
+
+TEST(AudioTrackGeneratorTest, ForcedRf64WritesEveryPairWithTheRf64Header) {
+  constexpr std::size_t kFrames = 3;
+  RecordingLogger auto_logger;
+  const std::vector<std::vector<char>> riff = RenderTwoPairs(
+      AudioContainerMode::kAuto, "videosynth_atg_auto", kFrames, &auto_logger);
+  RecordingLogger rf64_logger;
+  const std::vector<std::vector<char>> rf64 = RenderTwoPairs(
+      AudioContainerMode::kRf64, "videosynth_atg_rf64", kFrames, &rf64_logger);
+  ASSERT_EQ(riff.size(), 2U);
+  ASSERT_EQ(rf64.size(), 2U);
+
+  const std::uint64_t data_bytes = kFrames * kFrameBytes;
+  for (std::size_t pair = 0; pair < 2; ++pair) {
+    const std::vector<char>& r = riff[pair];
+    const std::vector<char>& f = rf64[pair];
+    ASSERT_EQ(r.size(), 44U + data_bytes);
+    ASSERT_EQ(f.size(), 80U + data_bytes);
+    EXPECT_EQ(std::string(r.begin(), r.begin() + 4), "RIFF");
+
+    // EBU Tech 3306: RF64, ds64 straight after WAVE, then fmt and data, with
+    // the 32-bit sizes set to 0xFFFFFFFF.
+    EXPECT_EQ(std::string(f.begin(), f.begin() + 4), "RF64");
+    EXPECT_EQ(ReadLe(f, 4, 4), 0xFFFFFFFFU);
+    EXPECT_EQ(std::string(f.begin() + 8, f.begin() + 12), "WAVE");
+    EXPECT_EQ(std::string(f.begin() + 12, f.begin() + 16), "ds64");
+    EXPECT_EQ(ReadLe(f, 20, 8), f.size() - 8U);
+    EXPECT_EQ(ReadLe(f, 28, 8), data_bytes);
+    EXPECT_EQ(ReadLe(f, 36, 8), kFrames * kPalSamplesPerFrame);
+    EXPECT_EQ(ReadLe(f, 44, 4), 0U);
+    EXPECT_EQ(std::string(f.begin() + 48, f.begin() + 52), "fmt ");
+    EXPECT_EQ(std::string(f.begin() + 72, f.begin() + 76), "data");
+    EXPECT_EQ(ReadLe(f, 76, 4), 0xFFFFFFFFU);
+
+    // The same samples follow either header.
+    EXPECT_TRUE(std::equal(r.begin() + 44, r.end(), f.begin() + 80, f.end()));
+  }
+
+  // One warning per output, not per pair; none under auto.
+  EXPECT_TRUE(auto_logger.warnings.empty());
+  ASSERT_EQ(rf64_logger.warnings.size(), 1U);
+  EXPECT_NE(rf64_logger.warnings.front().find("audio_container"),
+            std::string::npos);
 }
 
 TEST(AudioTrackGeneratorTest, SilentChannelWithinDeclaredPairIsZero) {

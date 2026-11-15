@@ -674,6 +674,28 @@ bool ParseHorizontalResample(const YAML::Node& section_node,
   return true;
 }
 
+// Parses `output.audio_container:`.
+bool ParseAudioContainer(const YAML::Node& output_node,
+                         AudioContainerMode* container,
+                         std::vector<std::string>* errors) {
+  const std::string context = "output";
+  std::string text;
+  if (!ParseScalarString(output_node, "audio_container", context, &text,
+                         errors)) {
+    return false;
+  }
+  if (text == "auto") {
+    *container = AudioContainerMode::kAuto;
+  } else if (text == "rf64") {
+    *container = AudioContainerMode::kRf64;
+  } else {
+    errors->push_back(context + ".audio_container has unrecognised value '" +
+                      text + "'. Expected one of: auto, rf64.");
+    return false;
+  }
+  return true;
+}
+
 // Reads one integer key into *value. Returns false, with an error naming the
 // key, when the value is not an integer.
 bool ParseInteger(const YAML::Node& node, const std::string& key,
@@ -1918,7 +1940,7 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
       return result;
     }
     const std::set<std::string> output_keys = {"video_path", "signal_type",
-                                               "truth"};
+                                               "truth", "audio_container"};
     ValidateAllowedKeys(output, output_keys, "output", &result.errors);
     if (!result.errors.empty()) {
       return result;
@@ -1938,6 +1960,11 @@ ParseResult ParseYamlNode(const YAML::Node& root, ILogger* logger) {
         result.errors.push_back("output.truth must be true or false.");
         return result;
       }
+    }
+    if (output["audio_container"] &&
+        !ParseAudioContainer(output, &result.project.output.audio_container,
+                             &result.errors)) {
+      return result;
     }
 
     if (!ParseProjectLineInjections(root, &result.project, &result.errors)) {

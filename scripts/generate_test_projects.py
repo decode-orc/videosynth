@@ -14,6 +14,8 @@ authored comments survive into the derived project:
                           entry of the top-level `sections:` list
   signal_type             set output.signal_type and switch the video_path
                           suffix between .cvbs and .cvbsy accordingly
+  audio_container         set output.audio_container (auto or rf64), adding
+                          the key after video_path when absent
   video_standard          set cvbs_presets.video_standard_preset (a standard
                           sharing the source's raster, such as NTSC -> PAL_M)
   disc_type               set laserdisc.disc_type
@@ -68,6 +70,10 @@ SIGNAL_TYPE_SUFFIX = {"composite": ".cvbs", "yc": ".cvbsy"}
 
 VIDEO_PATH_RE = re.compile(r'^(?P<indent>\s*)video_path:\s*(?P<value>.+?)\s*$')
 SIGNAL_TYPE_RE = re.compile(r'^(?P<indent>\s*)signal_type:\s*(?P<value>.+?)\s*$')
+AUDIO_CONTAINER_RE = re.compile(
+    r'^(?P<indent>\s*)audio_container:\s*(?P<value>.+?)\s*$')
+# Values of output.audio_container.
+AUDIO_CONTAINERS = ("auto", "rf64")
 
 
 def indent_of(line: str) -> int:
@@ -314,22 +320,36 @@ def retarget_video_path(text: str, suffix: str, name_suffix: str) -> str:
     raise ValueError('project declares no output.video_path')
 
 
-def set_signal_type(text: str, signal_type: str) -> str:
-    """Set output.signal_type, inserting the key after video_path when absent."""
+def set_output_key(text: str, key_re: re.Pattern, key: str,
+                   value: str) -> str:
+    """Set an output key, inserting it after video_path when absent."""
     lines = text.split('\n')
     for index, line in enumerate(lines):
-        match = SIGNAL_TYPE_RE.match(line)
+        match = key_re.match(line)
         if match is not None:
-            lines[index] = f"{match.group('indent')}signal_type: {signal_type}"
+            lines[index] = f"{match.group('indent')}{key}: {value}"
             return '\n'.join(lines)
 
     for index, line in enumerate(lines):
         match = VIDEO_PATH_RE.match(line)
         if match is not None:
-            lines.insert(index + 1,
-                         f"{match.group('indent')}signal_type: {signal_type}")
+            lines.insert(index + 1, f"{match.group('indent')}{key}: {value}")
             return '\n'.join(lines)
-    raise ValueError('project declares no output block to set signal_type in')
+    raise ValueError(f'project declares no output block to set {key} in')
+
+
+def set_signal_type(text: str, signal_type: str) -> str:
+    """Set output.signal_type, inserting the key after video_path when absent."""
+    return set_output_key(text, SIGNAL_TYPE_RE, 'signal_type', signal_type)
+
+
+def set_audio_container(text: str, container: str) -> str:
+    """Set output.audio_container, inserting the key after video_path when
+    absent."""
+    if container not in AUDIO_CONTAINERS:
+        raise ValueError(f"unknown audio_container '{container}'")
+    return set_output_key(text, AUDIO_CONTAINER_RE, 'audio_container',
+                          container)
 
 
 def set_nested_scalar(text: str, block: str, key: str, value: str) -> str:
@@ -519,6 +539,9 @@ def derive(text: str, variant: dict) -> str:
 
     if 'signal_type' in variant:
         text = set_signal_type(text, signal_type)
+
+    if 'audio_container' in variant:
+        text = set_audio_container(text, str(variant['audio_container']))
 
     return text
 

@@ -810,6 +810,14 @@ struct EfmAudioOutput {
   int pair = 0;
 };
 
+// Container selection for the audio channel pair WAV files (YAML
+// `output.audio_container:`). kAuto writes RIFF while the RIFF chunk size fits
+// in 0xFFFFFFFE and RF64 beyond it, as the CVBS File Format Specification
+// v1.8.0 (Audio Data / RF64 for Long Recordings) requires. kRf64 writes every
+// pair as RF64 whatever its length; a test option for exercising RF64 readers
+// on short projects, outside the letter of the specification when RIFF fits.
+enum class AudioContainerMode { kAuto, kRf64 };
+
 struct OutputTargets {
   std::string video_path;
   std::string metadata_path;
@@ -819,6 +827,8 @@ struct OutputTargets {
   // that went into the modulator is written beside the video output, before
   // any impairment. See picture_truth_writer.h.
   bool truth = false;
+  // Container for the `_audio_<pair>.wav` files; see AudioContainerMode.
+  AudioContainerMode audio_container = AudioContainerMode::kAuto;
 };
 
 // One project-wide VITS (vertical interval test signal) injection: a single
@@ -1306,7 +1316,8 @@ inline bool operator==(const EfmDataOutput& a, const EfmDataOutput& b) {
 
 inline bool operator==(const OutputTargets& a, const OutputTargets& b) {
   return a.video_path == b.video_path && a.metadata_path == b.metadata_path &&
-         a.signal_type == b.signal_type && a.truth == b.truth;
+         a.signal_type == b.signal_type && a.truth == b.truth &&
+         a.audio_container == b.audio_container;
 }
 
 inline bool operator==(const EdgeSmearParameters& a,

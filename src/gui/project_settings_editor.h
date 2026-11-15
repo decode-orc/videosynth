@@ -196,6 +196,8 @@ class ProjectSettingsEditor : public QWidget {
   LineTimingLayerWidgets line_timing_shared_;
 
   QCheckBox* truth_check_ = nullptr;
+  // output.audio_container: item data is int(AudioContainerMode).
+  QComboBox* audio_container_combo_ = nullptr;
 
   // laserdisc: the whole LaserDisc block, unavailable for SECAM
   // (laserdisc_hint_ says why).

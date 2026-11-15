@@ -41,11 +41,13 @@ enum class WavContainer {
 // per stored output frame so the emitted track stays sample-accurately
 // frame-locked. Left and right buffers must be the same length.
 //
-// The container is chosen up front from the declared total sample count, so
-// every channel pair of one output (all carry the same sample count) uses the
-// same container, as the specification requires. Files within the RIFF limit
-// keep the canonical 44-byte header; larger files get the 80-byte RF64 header
-// (RF64 + ds64 + fmt + data).
+// The container is chosen up front from output.audio_container and the
+// declared total sample count, so every channel pair of one output (all carry
+// the same sample count) uses the same container, as the specification
+// requires. Under AudioContainerMode::kAuto, files within the RIFF limit keep
+// the canonical 44-byte header and larger files get the 80-byte RF64 header
+// (RF64 + ds64 + fmt + data); AudioContainerMode::kRf64 writes the RF64 header
+// whatever the length.
 //
 // Streaming contract: BeginWrite (declares the total sample count and reserves
 // the header) -> repeated AppendFrameAudio -> FinalizeWrite (verifies the
@@ -61,8 +63,9 @@ class AudioWavWriter {
   explicit AudioWavWriter(ILogger* logger = nullptr);
 
   // Opens the derived WAV path for channel pair `channel_pair` (0–7), selects
-  // the container for `total_sample_frames` stereo sample positions (the sum
-  // of AudioSamplesForFrame over every output frame), reserves the header, and
+  // the container (SelectContainer) from project.output.audio_container and
+  // `total_sample_frames` stereo sample positions (the sum of
+  // AudioSamplesForFrame over every output frame), reserves the header, and
   // records the 48000 Hz rate for the fmt chunk. Creates parent directories as
   // needed. Returns false and appends a message to errors on any failure.
   bool BeginWrite(const Project& project, int channel_pair,
@@ -97,6 +100,11 @@ class AudioWavWriter {
   // minus 8) of a canonical RIFF file would exceed 0xFFFFFFFE, RIFF otherwise.
   static WavContainer ContainerForSampleFrames(
       std::uint64_t total_sample_frames);
+
+  // Returns the container written for `total_sample_frames` under `mode`:
+  // ContainerForSampleFrames for kAuto, RF64 for kRf64.
+  static WavContainer SelectContainer(AudioContainerMode mode,
+                                      std::uint64_t total_sample_frames);
 
   // Serialises the complete header for `container` describing
   // `total_sample_frames` stereo 24-bit sample positions at `sample_rate_hz`.

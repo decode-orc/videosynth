@@ -73,6 +73,16 @@
         "stacking-clean/*.yaml"
       ],
       "signal_type": "yc"
+    },
+    {
+      "name": "audio-rf64",
+      "description": "The PAL and NTSC audio examples with every channel pair file forced to RF64 (output.audio_container: rf64), for testing RF64 readers without a four-hour project. Outside the letter of the CVBS specification, which writes audio that fits as RIFF; not for interchange.",
+      "sources": [
+        "general/pal_audio.yaml",
+        "general/ntsc_audio.yaml"
+      ],
+      "name_suffix": "_rf64",
+      "audio_container": "rf64"
     }
   ]
 }

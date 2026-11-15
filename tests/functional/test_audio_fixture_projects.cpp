@@ -77,8 +77,13 @@ std::string FourCc(const std::vector<char>& bytes, std::size_t offset) {
 }
 
 struct AudioFixture {
-  std::string fixture_name;  // Relative to the committed project fixture tree.
+  // Relative to the committed project fixture tree, or to the generated
+  // variant tree when `generated` is set.
+  std::string fixture_name;
   Standard standard;
+  bool generated = false;
+  // The fixture sets output.audio_container: rf64.
+  bool rf64 = false;
 };
 
 // Asset roots that send the fixtures' "{output}/..." targets to a scratch
@@ -104,8 +109,12 @@ std::uint64_t ExpectedSamplePositions(Standard standard, int total_frames) {
 // frame-locked WAV track per declared channel pair is written with the expected
 // name, 24-bit stereo format at 48 kHz, and data length.
 void RunAudioFixtureProject(const AudioFixture& fixture) {
-  const std::string fixture_path =
-      test_support::FixturePath(fixture.fixture_name);
+  const std::filesystem::path fixture_file =
+      fixture.generated
+          ? test_support::GeneratedProjectRoot() / fixture.fixture_name
+          : std::filesystem::path(
+                test_support::FixturePath(fixture.fixture_name));
+  const std::string fixture_path = fixture_file.string();
   // One output directory per fixture: the composite and Y/C variants of the
   // same project derive identical WAV track names from their video basename,
   // so a shared directory would let concurrently running tests delete and
@@ -124,8 +133,7 @@ void RunAudioFixtureProject(const AudioFixture& fixture) {
 
   // Resolve output paths exactly as VideoSynthPipeline does, so the expected
   // artefact locations match what the pipeline writes.
-  const std::string project_dir =
-      test_support::FixtureProjectDir(fixture.fixture_name);
+  const std::string project_dir = fixture_file.parent_path().string();
   const Project project =
       ResolveProjectPaths(parsed.project, roots, project_dir,
                           /*anchor_unset=*/false);
@@ -188,6 +196,24 @@ void RunAudioFixtureProject(const AudioFixture& fixture) {
         << fixture_path;
 
     const std::vector<char> bytes = ReadFileBytes(audio_path);
+    if (fixture.rf64) {
+      // EBU Tech 3306 RF64: the 32-bit sizes are 0xFFFFFFFF and the ds64
+      // chunk carries the true data size and sample count.
+      ASSERT_GE(bytes.size(), 80U) << fixture_path;
+      EXPECT_EQ(FourCc(bytes, 0), "RF64") << fixture_path;
+      EXPECT_EQ(ReadLe32(bytes, 4), 0xFFFFFFFFU) << fixture_path;
+      EXPECT_EQ(FourCc(bytes, 8), "WAVE") << fixture_path;
+      EXPECT_EQ(FourCc(bytes, 12), "ds64") << fixture_path;
+      EXPECT_EQ(ReadLe32(bytes, 28), expected_data_bytes) << fixture_path;
+      EXPECT_EQ(ReadLe32(bytes, 32), 0U) << fixture_path;  // High word.
+      EXPECT_EQ(ReadLe32(bytes, 36), positions) << fixture_path;
+      EXPECT_EQ(FourCc(bytes, 48), "fmt ") << fixture_path;
+      EXPECT_EQ(FourCc(bytes, 72), "data") << fixture_path;
+      EXPECT_EQ(ReadLe32(bytes, 76), 0xFFFFFFFFU) << fixture_path;
+      EXPECT_EQ(bytes.size(), 80U + expected_data_bytes) << fixture_path;
+      std::filesystem::remove(audio_path);
+      continue;
+    }
     ASSERT_GE(bytes.size(), 44U) << fixture_path;
 
     // Valid RIFF/WAVE, 2-channel 24-bit PCM at 48 kHz.
@@ -222,6 +248,20 @@ TEST(AudioFixtureProjectsTest, PalYcFixtureEmitsFrameLockedWav) {
 
 TEST(AudioFixtureProjectsTest, NtscYcFixtureEmitsFrameLockedWav) {
   RunAudioFixtureProject({"general-yc/ntsc_audio.yaml", Standard::kNtsc});
+}
+
+TEST(AudioFixtureProjectsTest, ForcedRf64FixturesEmitRf64ChannelPairs) {
+  if (test_support::GeneratedProjectRoot().empty()) {
+    GTEST_SKIP() << "generated projects unavailable (no Python at build time)";
+  }
+  RunAudioFixtureProject({.fixture_name = "audio-rf64/pal_audio_rf64.yaml",
+                          .standard = Standard::kPal,
+                          .generated = true,
+                          .rf64 = true});
+  RunAudioFixtureProject({.fixture_name = "audio-rf64/ntsc_audio_rf64.yaml",
+                          .standard = Standard::kNtsc,
+                          .generated = true,
+                          .rf64 = true});
 }
 
 }  // namespace

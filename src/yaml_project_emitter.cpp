@@ -111,6 +111,9 @@ void EmitOutputTargets(YAML::Emitter& out, const OutputTargets& output) {
   if (output.truth) {
     out << YAML::Key << "truth" << YAML::Value << true;
   }
+  if (output.audio_container == AudioContainerMode::kRf64) {
+    out << YAML::Key << "audio_container" << YAML::Value << "rf64";
+  }
   out << YAML::EndMap;
 }
 

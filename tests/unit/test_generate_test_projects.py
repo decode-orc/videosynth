@@ -3,7 +3,7 @@
 # Module:      project_fixture_tests
 # Purpose:     Self-test of scripts/generate_test_projects.py over in-memory
 #              YAML: capture seeds, section removal and replay, standard,
-#              disc type and laserdisc code rewrites.
+#              disc type, laserdisc code and output audio container rewrites.
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileCopyrightText: 2026 Simon Inns
@@ -311,6 +311,24 @@ class DiscRewriteTest(unittest.TestCase):
             gen.replace_codes(FILM_DISC, {'picture_stop': []})
         with self.assertRaises(ValueError):
             gen.replace_codes(FILM_DISC, {'picture_number': 'clv_code'})
+
+
+class AudioContainerRewriteTest(unittest.TestCase):
+
+    def test_audio_container_is_inserted_after_video_path(self):
+        derived = gen.derive(PRESSING, {'audio_container': 'rf64',
+                                        'name_suffix': '_rf64'})
+        self.assertIn('  video_path: "{output}/pressing_A_rf64.cvbs"\n'
+                      '  audio_container: rf64\n', derived)
+
+    def test_existing_audio_container_is_replaced(self):
+        source = PRESSING.replace('.cvbs"\n', '.cvbs"\n  audio_container: auto\n')
+        derived = gen.derive(source, {'audio_container': 'rf64'})
+        self.assertEqual(values_of(derived, 'audio_container'), ['rf64'])
+
+    def test_unknown_audio_container_is_an_error(self):
+        with self.assertRaises(ValueError):
+            gen.derive(PRESSING, {'audio_container': 'riff'})
 
 
 if __name__ == '__main__':

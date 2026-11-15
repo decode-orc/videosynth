@@ -105,6 +105,14 @@ WavContainer AudioWavWriter::ContainerForSampleFrames(
                                              : WavContainer::kRiff;
 }
 
+WavContainer AudioWavWriter::SelectContainer(
+    AudioContainerMode mode, std::uint64_t total_sample_frames) {
+  if (mode == AudioContainerMode::kRf64) {
+    return WavContainer::kRf64;
+  }
+  return ContainerForSampleFrames(total_sample_frames);
+}
+
 std::vector<char> AudioWavWriter::BuildHeader(
     WavContainer container, int sample_rate_hz,
     std::uint64_t total_sample_frames) {
@@ -191,7 +199,8 @@ bool AudioWavWriter::BeginWrite(const Project& project, int channel_pair,
 
   // Reserve the header with zero sizes; it is rewritten on finalize. The
   // container fixes the header length, so it is chosen here.
-  const WavContainer container = ContainerForSampleFrames(total_sample_frames);
+  const WavContainer container =
+      SelectContainer(project.output.audio_container, total_sample_frames);
   const std::vector<char> header =
       BuildHeader(container, header_sample_rate_hz, 0);
   stream_.write(header.data(), static_cast<std::streamsize>(header.size()));
@@ -211,8 +220,7 @@ bool AudioWavWriter::BeginWrite(const Project& project, int channel_pair,
   if (logger_ != nullptr) {
     logger_->Trace("Opened audio output file for writing: " + audio_path);
     if (container == WavContainer::kRf64) {
-      logger_->Debug("Audio track exceeds the RIFF size limit; writing RF64: " +
-                     audio_path);
+      logger_->Debug("Writing audio track as RF64: " + audio_path);
     }
   }
   return true;

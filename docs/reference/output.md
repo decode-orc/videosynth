@@ -16,6 +16,7 @@ output:
 | `video_path` | string | Yes | A path, optionally with an [asset root token](asset-roots.md) | — |
 | `signal_type` | string | No | `composite`, `yc` | `composite` |
 | `truth` | bool | No | `true`, `false` | `false` |
+| `audio_container` | string | No | `auto`, `rf64` | `auto` |
 
 No other key is accepted. In particular the metadata sidecar path is **not** configurable — it is derived from `video_path` and always sits beside it. LaserDisc EFM digital audio is selected in the [`laserdisc`](laserdisc.md#efm_audio) block; its files are written here, beside the video.
 
@@ -133,3 +134,34 @@ A SQLite database, like the other sidecars, with `PRAGMA user_version = 2`, one 
 | `dr_line_parity` | INTEGER | `1` when the frame's odd-numbered lines transmit D′R, `0` when its even-numbered lines do |
 
 Validation: on a project with OSD overlays `truth: true` is a warning, as the truth does not carry the text. A value other than `true` or `false` is a parse error. The emitter writes the key only when it is `true`.
+
+## `audio_container`
+
+The container of the [`_audio_<pair>.wav` channel pair files](section-audio.md#frame-lock). It has no effect on a project without audio.
+
+- **`auto`** — RIFF while the RIFF chunk size fits in `0xFFFFFFFE`, and RF64 above it, which takes about 4 hours 8 minutes of audio. This is what the CVBS file format requires (*Audio Data*, *RF64 for Long Recordings*).
+- **`rf64`** — every channel pair file is RF64, whatever its length.
+
+An RF64 file has the 80-byte header of EBU Tech 3306:
+
+| Offset | Bytes | Contents |
+|--------|-------|----------|
+| 0 | 4 | `RF64` |
+| 4 | 4 | `0xFFFFFFFF` |
+| 8 | 4 | `WAVE` |
+| 12 | 8 | `ds64` chunk header, body size 28 |
+| 20 | 8 | RIFF size: file size minus 8 |
+| 28 | 8 | Data size in bytes |
+| 36 | 8 | Sample count: stereo sample positions |
+| 44 | 4 | Table length, `0` |
+| 48 | 24 | `fmt ` chunk, as in a RIFF file |
+| 72 | 8 | `data` chunk header, size `0xFFFFFFFF` |
+
+The samples that follow are the same as those `auto` writes after its 44-byte RIFF header. All the pair files of one output use the same container.
+
+!!! warning "`rf64` is for testing RF64 readers"
+    The specification says that a file that fits in RIFF must be written as RIFF, so `rf64` on a shorter project gives files outside the letter of the specification. Use it to test an RF64 reader without generating a four-hour project, not for interchange. Generation logs a warning when it writes RF64 that RIFF could describe.
+
+There is no `riff` value, because RIFF cannot describe audio past its size limit.
+
+Validation: `rf64` on a project whose sections declare no audio channel pair is a warning. A value other than `auto` or `rf64` is a parse error. The emitter writes the key only when it is `rf64`.

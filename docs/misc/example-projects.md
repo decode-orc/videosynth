@@ -16,7 +16,7 @@ The repository ships a set of hand-authored projects under `projects/`, covering
 !!! warning "The long-form projects are very large"
     They write hundreds of gigabytes each — roughly 383 GB for PAL and 309 GB for NTSC of composite samples, plus about 3.1 GB of audio. They are deliberately excluded from the automated suites; run them by hand with `--output-root` pointing at storage that can hold the result.
 
-Derived variants — the `stacking-captures` set, the impairment-free `stacking-clean` set, the Y/C `stacking-yc` set and the `film-clv` and `film-pal-m` film sets — are generated into `build/generated-projects/` at build time and are not committed. Add a variant by editing `variants.json`, not by copying YAML.
+Derived variants — the `stacking-captures` set, the impairment-free `stacking-clean` set, the Y/C `stacking-yc` set, the `film-clv` and `film-pal-m` film sets, and the `audio-rf64` set (the PAL and NTSC audio examples with [`audio_container: rf64`](../reference/output.md#audio_container)) — are generated into `build/generated-projects/` at build time and are not committed. Add a variant by editing `variants.json`, not by copying YAML.
 
 ### Pressings and captures
 

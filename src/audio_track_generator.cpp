@@ -196,6 +196,18 @@ bool AudioTrackGenerator::Begin(
     total_sample_frames += static_cast<std::uint64_t>(count);
   }
 
+  // output.audio_container: rf64 on audio RIFF could describe yields files
+  // outside the letter of the specification; say so once per output.
+  if (logger_ != nullptr &&
+      project.output.audio_container == AudioContainerMode::kRf64 &&
+      AudioWavWriter::ContainerForSampleFrames(total_sample_frames) ==
+          WavContainer::kRiff) {
+    logger_->Warning(
+        "Audio: output.audio_container is rf64; writing RF64 channel pair "
+        "files that RIFF could describe. Use them to test RF64 readers, not "
+        "for interchange.");
+  }
+
   // Open one writer and two channel synthesisers per declared pair.
   const double sample_rate_hz = AudioSampleRateHz(standard_);
   pairs_.reserve(pair_numbers_.size());

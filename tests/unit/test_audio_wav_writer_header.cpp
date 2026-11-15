@@ -54,6 +54,36 @@ TEST(AudioWavWriterHeaderTest, ContainerIsRf64BeyondTheRiffChunkLimit) {
             WavContainer::kRf64);
 }
 
+TEST(AudioWavWriterHeaderTest, AutoModeFollowsTheRiffChunkLimit) {
+  EXPECT_EQ(AudioWavWriter::SelectContainer(AudioContainerMode::kAuto, 0),
+            WavContainer::kRiff);
+  EXPECT_EQ(AudioWavWriter::SelectContainer(AudioContainerMode::kAuto,
+                                            kMaxRiffSampleFrames),
+            WavContainer::kRiff);
+  EXPECT_EQ(AudioWavWriter::SelectContainer(AudioContainerMode::kAuto,
+                                            kMaxRiffSampleFrames + 1),
+            WavContainer::kRf64);
+}
+
+TEST(AudioWavWriterHeaderTest, Rf64ModeSelectsRf64WhateverTheLength) {
+  EXPECT_EQ(AudioWavWriter::SelectContainer(AudioContainerMode::kRf64, 0),
+            WavContainer::kRf64);
+  EXPECT_EQ(AudioWavWriter::SelectContainer(AudioContainerMode::kRf64, 1920),
+            WavContainer::kRf64);
+  EXPECT_EQ(AudioWavWriter::SelectContainer(AudioContainerMode::kRf64,
+                                            kMaxRiffSampleFrames + 1),
+            WavContainer::kRf64);
+}
+
+TEST(AudioWavWriterHeaderTest, ShortRf64HeaderMatchesThePayload) {
+  const std::vector<char> header =
+      AudioWavWriter::BuildHeader(WavContainer::kRf64, 48000, 1920);
+  ASSERT_EQ(header.size(), 80U);
+  EXPECT_EQ(ReadLe(header, 20, 8), 72U + 1920U * kBytesPerSampleFrame);
+  EXPECT_EQ(ReadLe(header, 28, 8), 1920U * kBytesPerSampleFrame);
+  EXPECT_EQ(ReadLe(header, 36, 8), 1920U);
+}
+
 TEST(AudioWavWriterHeaderTest, SixHourNtscTrackRequiresRf64) {
   // 650,000 NTSC frames (the specification's testing limit) at 8008/5
   // samples per frame.
